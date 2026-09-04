@@ -19,7 +19,7 @@ These are deliberately **not** decided by this scaffolding commit:
 
 - **License.** Code-OSS itself is MIT. Whatever boxcode-specific code lands in this repo (the extension, any modified `product.json`, build tooling) needs its own explicit license decision — this is a business call, not a default to inherit silently.
 - **Trademark handling.** "Visual Studio Code" and the official product name/icon are Microsoft trademarks. A clean Code-OSS fork (see [VSCodium](https://github.com/VSCodium/vscodium) for precedent) has to strip Microsoft's `product.json` branding, telemetry endpoints, and default-marketplace wiring before any public build ships. Not done yet — do not ship a build with Microsoft's branding/telemetry intact.
-- **Repo visibility.** Currently private. Flipping to public is a one-way door (forks/clones persist even if re-privated) — confirm deliberately when that decision is actually made.
+- **Repo visibility.** Made public 2026-09-04 (deliberate decision — nothing confidential was found in the tree, confirmed by a secret-pattern scan before flipping). This was a one-way door: forks/clones from before this point persist even if the repo is re-privated later, so treat "private again" as "newly private," not "back to before."
 
 ## Contributing
 
