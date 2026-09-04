@@ -1,0 +1,13 @@
+diff --git a/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts b/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts
+index b7933f99..0bc3c575 100644
+--- a/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts
++++ b/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts
+@@ -916,7 +916,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
+ 		},
+ 		'workbench.browser.openLocalhostLinks': {
+ 			type: 'boolean',
+-			default: false,
++			default: true,
+ 			experiment: { mode: 'startup' },
+ 			markdownDescription: localize(
+ 				{ comment: ['This is the description for a setting.'], key: 'browser.openLocalhostLinks' },
