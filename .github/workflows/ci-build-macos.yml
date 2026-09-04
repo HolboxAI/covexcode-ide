@@ -31,10 +31,12 @@ on:
 # affordable: `generate_assets` (the expensive packaging/installer step) is
 # a workflow_dispatch-only input, so github.event.inputs.generate_assets is
 # empty/falsy on every pull_request-triggered run - packaging stays skipped
-# automatically, only the real compile+typecheck runs. That job is this
-# check ("build (<runner>, <arch>)" per matrix leg) and is what should be
-# made a required status check in branch protection, once its exact name is
-# confirmed reporting on a real run - see docs/BACKLOG.md.
+# automatically (the `package` job below is gated on it directly), only the
+# real compile+typecheck runs. That job is `compile` (reports as "compile
+# (<runner>, <arch>)" per matrix leg - renamed from "build" when packaging
+# was split into its own job, see the `package` job's comment) and is what
+# should be made a required status check in branch protection, once its
+# exact name is confirmed reporting on a real run - see docs/BACKLOG.md.
 
 # P1: boxcode-ide only builds the "stable" quality for now — no insider
 # channel yet. ASSETS_REPOSITORY is set explicitly (rather than relying on
@@ -103,12 +105,33 @@ jobs:
             echo "nothing build-relevant changed - skipping the real build"
           fi
 
-  build:
+  # Split from a single "build" job that always did compile-then-package in
+  # one shot. Every packaging-only bug (create-dmg's default codesign
+  # lookup, the SHOULD_BUILD gate, whatever's next) used to cost a full
+  # ~50min recompile just to test a one-line script fix, because nothing
+  # from a finished compile ever survived past that job's ephemeral runner -
+  # generate_assets was off on every automatic run, so upload-artifact never
+  # fired, and even when it did it only kept the final zip/dmg, not the raw
+  # VSCode-darwin-*/ build output prepare_assets.sh actually needs. Now
+  # compile always uploads its raw output (short retention - this is a
+  # same-run relay, not long-term storage), so a packaging-only failure can
+  # be fixed and re-verified via GitHub's "re-run failed jobs" without
+  # recompiling: that reuses this job's artifact instead of re-running it.
+  compile:
     needs: changes
     if: needs.changes.outputs.build-relevant == 'true'
     runs-on: ${{ matrix.runner }}
     env:
       VSCODE_ARCH: ${{ matrix.vscode_arch }}
+    # A matrixed job's outputs are only well-defined when exactly one leg
+    # sets them - with multiple legs, whichever leg finishes last wins,
+    # silently. Safe today because there's a single arm64 leg (matches the
+    # single-leg assumption already documented elsewhere in this file, e.g.
+    # the release-publish step below); revisit this whole outputs/package
+    # split if a second arch leg ever comes back into scope.
+    outputs:
+      release_version: ${{ steps.release-info.outputs.release_version }}
+      vscode_arch: ${{ matrix.vscode_arch }}
     strategy:
       fail-fast: false
       matrix:
@@ -196,33 +219,84 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./build.sh
 
+      # version.sh (sourced by build.sh) writes RELEASE_VERSION to
+      # $GITHUB_ENV, which makes it available to this and later steps in
+      # THIS job as a real shell env var - but that's job-scoped, it doesn't
+      # cross into the separate `package` job below. Re-exporting it as a
+      # step output is the actual mechanism that does cross jobs (via
+      # needs.compile.outputs), same idea as the SHOULD_BUILD fix above:
+      # know which GitHub Actions context you're relying on, don't assume
+      # env just carries over.
+      - id: release-info
+        run: echo "release_version=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Always uploaded (not gated on generate_assets) - this is the actual
+      # fix for "why redo compile just to test a packaging fix". Minimal set
+      # of paths prepare_assets.sh needs, confirmed by grep, not guessed:
+      # the app bundle + REH/REH-web bundles build.sh produces, plus
+      # vscode/product.json (the only vscode/ file prepare_assets.sh reads,
+      # for applicationName/nameLong/tunnelApplicationName - not the whole
+      # vscode/ tree, which would drag along node_modules and be enormous).
+      # Short retention: this is a same-run relay to the package job, not
+      # meant as long-term storage.
+      - name: Upload compiled build output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compiled-${{ matrix.vscode_arch }}
+          path: |
+            VSCode-darwin-${{ matrix.vscode_arch }}/
+            vscode-reh-darwin-${{ matrix.vscode_arch }}/
+            vscode-reh-web-darwin-${{ matrix.vscode_arch }}/
+            vscode/product.json
+          retention-days: 1
+
+  # Split out so a packaging-only bug (create-dmg, prepare_assets.sh, the
+  # release-publish step) can be fixed and re-verified via "re-run failed
+  # jobs" in the Actions UI without paying for another ~50min compile -
+  # that reuses compile's artifact instead of re-running compile. Only
+  # meaningful on workflow_dispatch (generate_assets doesn't exist as an
+  # input on pull_request/push-triggered runs, so this is skipped there by
+  # construction, same as the old single-job gate was).
+  package:
+    needs: [changes, compile]
+    if: needs.changes.outputs.build-relevant == 'true' && github.event.inputs.generate_assets == 'true'
+    runs-on: macos-latest
+    env:
+      VSCODE_ARCH: ${{ needs.compile.outputs.vscode_arch }}
+      RELEASE_VERSION: ${{ needs.compile.outputs.release_version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.GITHUB_BRANCH }}
+          persist-credentials: false
+
+      - name: Download compiled build output
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: compiled-${{ needs.compile.outputs.vscode_arch }}
+
       - name: Prepare assets
         run: ./prepare_assets.sh
-        if: github.event.inputs.generate_assets == 'true'
 
       - name: Upload assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bin-${{ matrix.vscode_arch }}
+          name: bin-${{ needs.compile.outputs.vscode_arch }}
           path: assets/
           retention-days: 3
-        if: github.event.inputs.generate_assets == 'true'
 
       # Testers shouldn't have to dig through an Actions run page to find a
-      # zip - one stable, bookmarkable link instead. Same gate as the two
-      # steps above (only real when someone deliberately runs this with
-      # generate_assets=true). The `gh release create ... || true` pattern
-      # is a leftover safety net from when this ran on two parallel matrix
-      # legs racing to create the same release - harmless now with a single
-      # arm64 leg, left as-is since it's still correct (idempotent create),
-      # just no longer load-bearing. Re-add a second leg's worth of care
-      # here if x64 ever comes back into scope.
+      # zip - one stable, bookmarkable link instead. The `gh release create
+      # ... || true` pattern is a leftover safety net from when this ran on
+      # two parallel matrix legs racing to create the same release -
+      # harmless now with a single arm64 leg, left as-is since it's still
+      # correct (idempotent create), just no longer load-bearing. Re-add a
+      # second leg's worth of care here if x64 ever comes back into scope.
       # No code-signing/notarization exists yet (open decision, see
       # README.md), so this is explicitly labeled an unsigned dev build -
       # macOS Gatekeeper will warn on first launch, which is expected until
       # that's set up for real.
       - name: Publish to the rolling macOS dev-build release
-        if: github.event.inputs.generate_assets == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
