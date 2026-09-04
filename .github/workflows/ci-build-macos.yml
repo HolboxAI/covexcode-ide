@@ -14,16 +14,27 @@ on:
       - main
     paths-ignore:
       - "**/*.md"
+  pull_request:
+    branches:
+      - "**"
+    paths-ignore:
+      - "**/*.md"
 
-# P1 is still under active, fast-iterating debugging — this workflow used to
-# also trigger on every PR push (`pull_request: branches: ["**"]`). Each run
-# takes 1.5-2.5+ hours and, while a real build bug is being fixed, fails
-# every time: that's a lot of paid macOS-runner minutes and a lot of GitHub
-# notification noise for a signal everyone already knows ("still broken,
-# still iterating"). Trigger manually (workflow_dispatch, including its
-# existing checkout_pr input for testing a specific PR's HEAD) until P1
-# reaches a stable baseline, then restore the pull_request trigger so it
-# goes back to running automatically as a real merge gate.
+# Correction to an earlier version of this comment: this workflow was made
+# manual-only to cut CI noise/cost during P1 debugging, but that also meant
+# NO automatic signal at all on whether the app actually builds - a PR could
+# show "all checks passed" (hygiene only) while the real build was known
+# broken. That's a worse failure mode than the noise it was avoiding. A red
+# check that takes an hour beats a false green one.
+#
+# Restored automatic pull_request triggering. What actually keeps this
+# affordable: `generate_assets` (the expensive packaging/installer step) is
+# a workflow_dispatch-only input, so github.event.inputs.generate_assets is
+# empty/falsy on every pull_request-triggered run - packaging stays skipped
+# automatically, only the real compile+typecheck runs. That job is this
+# check ("build (<runner>, <arch>)" per matrix leg) and is what should be
+# made a required status check in branch protection, once its exact name is
+# confirmed reporting on a real run - see docs/BACKLOG.md.
 
 # P1: boxcode-ide only builds the "stable" quality for now — no insider
 # channel yet. ASSETS_REPOSITORY is set explicitly (rather than relying on
