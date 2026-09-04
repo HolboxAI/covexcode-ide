@@ -230,24 +230,43 @@ jobs:
       - id: release-info
         run: echo "release_version=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
 
-      # Always uploaded (not gated on generate_assets) - this is the actual
-      # fix for "why redo compile just to test a packaging fix". Minimal set
-      # of paths prepare_assets.sh needs, confirmed by grep, not guessed:
-      # the app bundle + REH/REH-web bundles build.sh produces, plus
-      # vscode/product.json (the only vscode/ file prepare_assets.sh reads,
-      # for applicationName/nameLong/tunnelApplicationName - not the whole
-      # vscode/ tree, which would drag along node_modules and be enormous).
+      # Real bug, found by a user hitting it, not a guess: actions/upload-
+      # artifact does not reliably preserve Unix executable permissions when
+      # it walks and re-zips a whole directory tree. Confirmed directly on a
+      # real download - every single file in the .app bundle (5,352 of them)
+      # came out with the execute bit stripped, which is exactly why macOS
+      # showed a bare "Boxcode IDE can't be opened" with no further detail:
+      # LaunchServices can't even attempt to run a non-executable file, so it
+      # never gets far enough to show a Gatekeeper dialog. Standard fix for
+      # this class of GitHub Actions gotcha: tar the tree into one opaque
+      # file ourselves first (tar preserves modes/symlinks exactly) and let
+      # upload-artifact carry that single file, rather than letting the
+      # action's own directory-walking repackage (and silently flatten the
+      # permissions on) an Electron .app full of executables.
+      #
+      # Minimal set of paths prepare_assets.sh needs in the tarball,
+      # confirmed by grep, not guessed: the app bundle + REH/REH-web bundles
+      # build.sh produces, plus vscode/product.json (the only vscode/ file
+      # prepare_assets.sh reads, for applicationName/nameLong/
+      # tunnelApplicationName - not the whole vscode/ tree, which would drag
+      # along node_modules and be enormous). Always created (not gated on
+      # generate_assets) - this is the actual fix for "why redo compile just
+      # to test a packaging fix".
+      - name: Archive compiled build output
+        run: |
+          tar -czf compiled.tar.gz \
+            "VSCode-darwin-${VSCODE_ARCH}" \
+            "vscode-reh-darwin-${VSCODE_ARCH}" \
+            "vscode-reh-web-darwin-${VSCODE_ARCH}" \
+            vscode/product.json
+
       # Short retention: this is a same-run relay to the package job, not
       # meant as long-term storage.
       - name: Upload compiled build output
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: compiled-${{ matrix.vscode_arch }}
-          path: |
-            VSCode-darwin-${{ matrix.vscode_arch }}/
-            vscode-reh-darwin-${{ matrix.vscode_arch }}/
-            vscode-reh-web-darwin-${{ matrix.vscode_arch }}/
-            vscode/product.json
+          path: compiled.tar.gz
           retention-days: 1
 
   # Split out so a packaging-only bug (create-dmg, prepare_assets.sh, the
@@ -287,6 +306,14 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: compiled-${{ needs.compile.outputs.vscode_arch }}
+
+      # See "Archive compiled build output" in the compile job above for why
+      # this is a single tarball rather than letting upload/download-artifact
+      # walk the directory tree directly - extracting with tar (not
+      # unzip/download-artifact's own extraction) is what actually restores
+      # the executable bits tar preserved on the way in.
+      - name: Extract compiled build output
+        run: tar -xzf compiled.tar.gz
 
       - name: Prepare assets
         run: ./prepare_assets.sh
