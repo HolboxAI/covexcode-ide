@@ -63,7 +63,18 @@ if [[ "${SHOULD_BUILD_ZIP}" != "no" ]]; then
   cd ..
 fi
 
-if [[ -n "${CERTIFICATE_OSX_P12_DATA}" && "${SHOULD_BUILD_DMG}" != "no" ]]; then
+# Deliberately NOT gated on CERTIFICATE_OSX_P12_DATA (unlike the ZIP-for-
+# notarization and codesign/notarize/staple blocks above, which genuinely
+# need a certificate). create-dmg doesn't require signing to produce a real,
+# double-clickable .dmg - the earlier gate meant NO dmg got built at all
+# without Apple Developer Program enrollment being done first, which isn't
+# actually necessary just to get a testable local build. An unsigned dmg
+# still triggers a one-time Gatekeeper "unidentified developer" warning on
+# first launch (right-click -> Open) - same as the always-built zip already
+# does - and that's the only difference once real signing/notarization gets
+# configured later: this block itself doesn't change, the .app it's zipping
+# is just already signed+stapled by the block above by the time it runs.
+if [[ "${SHOULD_BUILD_DMG}" != "no" ]]; then
   echo "Building and moving DMG"
   pushd "VSCode-darwin-${VSCODE_ARCH}"
   npx create-dmg ./*.app .

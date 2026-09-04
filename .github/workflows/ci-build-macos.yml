@@ -58,7 +58,54 @@ permissions:
   contents: read
 
 jobs:
+  # Skip the ~1.5-2.5h real build for PRs that can't possibly affect it -
+  # e.g. a one-line bash-conditional fix in prepare_assets.sh (never even
+  # exercised by this required check, since generate_assets is off on every
+  # automatic PR run) or a rename in a file confirmed unused by the build.
+  # Path list below was NOT guessed - it's the actual sourcing graph of the
+  # scripts this job runs (grepped: build.sh sources version.sh,
+  # prepare_vscode.sh, build_cli.sh; prepare_vscode.sh sources utils.sh and
+  # reads product.json + patches/**). Deliberately conservative: on a push
+  # to main, a workflow_dispatch, or a diff-computation failure of any kind,
+  # this defaults to "relevant" (run the real build) rather than risk a
+  # false negative letting a real breakage merge unverified.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      build-relevant: ${{ steps.check.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull_request event (push/workflow_dispatch) - always running the real build"
+            exit 0
+          fi
+
+          CHANGED="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "git diff failed - defaulting to relevant, not risking a false negative"
+            exit 0
+          }
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|\.github/workflows/ci-build-macos\.yml)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "a build-relevant path changed"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "nothing build-relevant changed - skipping the real build"
+          fi
+
   build:
+    needs: changes
+    if: needs.changes.outputs.build-relevant == 'true'
     runs-on: ${{ matrix.runner }}
     env:
       VSCODE_ARCH: ${{ matrix.vscode_arch }}
@@ -87,7 +134,11 @@ jobs:
 
       # No longer gated on VSCODE_ARCH == 'x64' - that condition meant this
       # step would never run at all once the x64 matrix leg was removed
-      # (arm64-only now).
+      # (arm64-only now). Was presumably x64-only because VSCodium ran both
+      # arches and one of them had Python 3.11 preinstalled already; running
+      # it unconditionally is the safe choice - redundant setup on an arch
+      # that already has it costs nothing, skipping it on an arch that needs
+      # it breaks the build (Python is used for native module compilation).
       - name: Setup Python 3
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -140,8 +191,14 @@ jobs:
         if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
 
       # Testers shouldn't have to dig through an Actions run page to find a
-      # zip - one stable, bookmarkable link instead. Only real when someone
-      # deliberately runs this with generate_assets=true.
+      # zip - one stable, bookmarkable link instead. Same gate as the two
+      # steps above (only real when someone deliberately runs this with
+      # generate_assets=true). The `gh release create ... || true` pattern
+      # is a leftover safety net from when this ran on two parallel matrix
+      # legs racing to create the same release - harmless now with a single
+      # arm64 leg, left as-is since it's still correct (idempotent create),
+      # just no longer load-bearing. Re-add a second leg's worth of care
+      # here if x64 ever comes back into scope.
       # No code-signing/notarization exists yet (open decision, see
       # README.md), so this is explicitly labeled an unsigned dev build -
       # macOS Gatekeeper will warn on first launch, which is expected until
@@ -157,4 +214,4 @@ jobs:
             --title "macOS dev build (rolling)" \
             --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`)." \
             --prerelease 2>/dev/null || true
-          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip
+          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip assets/*.dmg
