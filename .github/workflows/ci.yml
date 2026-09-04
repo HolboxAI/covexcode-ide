@@ -1,0 +1,30 @@
+name: repo hygiene
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: no node_modules or build output committed
+        run: |
+          if find . -type d \( -name node_modules -o -name dist -o -name out -o -name .build \) -not -path './.git/*' | grep -q .; then
+            echo "::error::committed build artifacts found — check .gitignore"
+            find . -type d \( -name node_modules -o -name dist -o -name out -o -name .build \) -not -path './.git/*'
+            exit 1
+          fi
+
+      - name: no obvious secrets committed
+        run: |
+          if grep -RIlE '(AKIA[0-9A-Z]{16}|sk-[a-zA-Z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
+              --exclude-dir=.git . ; then
+            echo "::error::possible secret found in diff — remove before merging"
+            exit 1
+          fi
+
+  # Placeholder — real build/lint/test jobs get added once P1 fork source lands.
+  # Do not stub these green; leave the job absent until there's something real to check.

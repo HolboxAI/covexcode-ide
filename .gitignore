@@ -1,0 +1,29 @@
+# Node / TypeScript
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# VS Code / Code-OSS build artifacts (once fork source lands)
+.build/
+.vscode-test/
+extensions/**/out/
+extensions/**/dist/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# Logs
+*.log
