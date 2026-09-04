@@ -35,7 +35,11 @@ env:
   OS_NAME: windows
   VSCODE_QUALITY: stable
 
-permissions: {}
+# boxcode-ide is private (unlike VSCodium's public repo, where an empty
+# permissions block still allows read access) — GITHUB_TOKEN needs an
+# explicit contents:read or actions/checkout can't even fetch the repo.
+permissions:
+  contents: read
 
 jobs:
   compile:
