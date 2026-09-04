@@ -41,7 +41,11 @@ if [[ "${SHOULD_BUILD_CLI}" != "no" ]]; then
   echo "Building and moving CLI"
 
   APPLICATION_NAME="$( node -p "require(\"./vscode/product.json\").applicationName" )"
-  NAME_SHORT="$( node -p "require(\"./vscode/product.json\").nameShort" )"
+  # See build_cli.sh: the macOS .app bundle is named after nameLong (per
+  # vscode/build/gulpfile.vscode.ts), not nameShort. boxcode-ide's nameShort
+  # ("Boxcode") and nameLong ("Boxcode IDE") differ, unlike VSCodium's
+  # (which are identical), so this must use nameLong to find the bundle.
+  NAME_LONG="$( node -p "require(\"./vscode/product.json\").nameLong" )"
   TUNNEL_APPLICATION_NAME="$( node -p "require(\"./vscode/product.json\").tunnelApplicationName" )"
 
   mkdir -p "vscode-cli"
@@ -49,7 +53,7 @@ if [[ "${SHOULD_BUILD_CLI}" != "no" ]]; then
   cd "vscode-cli"
 
   if [[ "${OS_NAME}" == "osx" ]]; then
-    cp "../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/${NAME_SHORT}.app/Contents/Resources/app/bin/${TUNNEL_APPLICATION_NAME}" "${APPLICATION_NAME}"
+    cp "../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/${NAME_LONG}.app/Contents/Resources/app/bin/${TUNNEL_APPLICATION_NAME}" "${APPLICATION_NAME}"
   elif [[ "${OS_NAME}" == "windows" ]]; then
     cp "../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/bin/${TUNNEL_APPLICATION_NAME}.exe" "${APPLICATION_NAME}.exe"
   else

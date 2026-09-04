@@ -21,7 +21,14 @@ else
 fi
 
 TUNNEL_APPLICATION_NAME="$( node -p "require(\"../product.json\").tunnelApplicationName" )"
-NAME_SHORT="$( node -p "require(\"../product.json\").nameShort" )"
+# macOS packaging (vscode/build/gulpfile.vscode.ts) names the .app bundle
+# after nameLong, not nameShort -- e.g. real VS Code ships
+# "Visual Studio Code.app", not "Code.app". VSCodium's own nameShort and
+# nameLong happen to be identical, which is why their build_cli.sh got away
+# with nameShort here; boxcode-ide's nameShort ("Boxcode") and nameLong
+# ("Boxcode IDE") differ, so this must reference nameLong to find the
+# bundle that vscode-darwin-*-min-packing actually produced.
+NAME_LONG="$( node -p "require(\"../product.json\").nameLong" )"
 
 npm pack @vscode/openssl-prebuilt@0.0.11
 mkdir openssl
@@ -41,7 +48,7 @@ if [[ "${OS_NAME}" == "osx" ]]; then
 
   cargo build --release --target "${VSCODE_CLI_TARGET}" --bin=code
 
-  cp "target/${VSCODE_CLI_TARGET}/release/code" "../../VSCode-darwin-${VSCODE_ARCH}/${NAME_SHORT}.app/Contents/Resources/app/bin/${TUNNEL_APPLICATION_NAME}"
+  cp "target/${VSCODE_CLI_TARGET}/release/code" "../../VSCode-darwin-${VSCODE_ARCH}/${NAME_LONG}.app/Contents/Resources/app/bin/${TUNNEL_APPLICATION_NAME}"
 elif [[ "${OS_NAME}" == "windows" ]]; then
   if [[ "${VSCODE_ARCH}" == "arm64" ]]; then
     VSCODE_CLI_TARGET="aarch64-pc-windows-msvc"
