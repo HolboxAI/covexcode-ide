@@ -261,6 +261,19 @@ jobs:
     needs: [changes, compile]
     if: needs.changes.outputs.build-relevant == 'true' && github.event.inputs.generate_assets == 'true'
     runs-on: macos-latest
+    # Job-level permissions override the workflow-level `contents: read`
+    # above (which exists for a different reason - private-repo checkout in
+    # the changes/compile jobs). Creating a GitHub release needs
+    # `contents: write`. Real failure, not a guess: the last run's "Publish"
+    # step got "release not found" from `gh release upload`, because `gh
+    # release create` had already failed (403, no write access) one line
+    # earlier - masked by that line's own `2>/dev/null || true`, which was
+    # meant as a race-condition safety net for a different scenario (two
+    # matrix legs both trying to create the same release), not as cover for
+    # a permissions failure. Scoped to just this job, not the whole
+    # workflow, since changes/compile only ever need to read.
+    permissions:
+      contents: write
     env:
       VSCODE_ARCH: ${{ needs.compile.outputs.vscode_arch }}
       RELEASE_VERSION: ${{ needs.compile.outputs.release_version }}
