@@ -2,7 +2,7 @@
 
 A Code-OSS-based editor for boxcode, aimed at frontend engineers. This repo owns the editor surface only — the agent brain stays in [`HolboxAI/boxcode`](https://github.com/HolboxAI/boxcode) and is reused over a protocol, not reimplemented here.
 
-**Status: pre-P1.** No fork source has been imported yet. This repo currently holds planning docs and scaffolding only.
+**Status: P1 in progress.** Build tooling (adapted from [VSCodium](https://github.com/VSCodium/vscodium)'s MIT-licensed scripts — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)) has landed: a pinned `microsoft/vscode` checkout, a patch set for de-branding/Open VSX/telemetry, and boxcode's own product identity (`utils.sh`, `prepare_vscode.sh`). See [`docs/howto-build.md`](docs/howto-build.md) to build locally.
 
 ## Architecture
 

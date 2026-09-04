@@ -13,6 +13,18 @@ yarn-error.log*
 extensions/**/out/
 extensions/**/dist/
 
+# VSCodium-style build: fresh microsoft/vscode checkout + build output.
+# Never committed — get_repo.sh/build.sh regenerate these from patches/.
+/vscode/
+/vscode-*/
+/VSCode-*/
+/assets/
+/dev/build.env
+*.tar.gz
+*.zip
+*.dmg
+*.AppImage
+
 # Env / secrets
 .env
 .env.*
