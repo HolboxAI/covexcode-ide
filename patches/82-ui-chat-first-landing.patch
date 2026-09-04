@@ -1,0 +1,51 @@
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.ts b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.ts
+index 48ecad9a..56ec33e7 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.ts
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.ts
+@@ -23,7 +23,6 @@ import { AgentSessionsWelcomePage, AgentSessionsWelcomeInputSerializer } from '.
+ import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+ import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
+ import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+-import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
+ 
+ // Registration priority
+ const agentSessionsWelcomeInputTypeId = 'workbench.editors.agentSessionsWelcomeInput';
+@@ -124,18 +123,19 @@ class AgentSessionsWelcomeRunnerContribution extends Disposable implements IWork
+ 		@IInstantiationService private readonly instantiationService: IInstantiationService,
+ 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+ 		@IStorageService private readonly storageService: IStorageService,
+-		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+-		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService
++		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService
+ 	) {
+ 		super();
+ 		this.run();
+ 	}
+ 
+ 	private async run(): Promise<void> {
+-		// Check if AI features are enabled
+-		if (this.chatEntitlementService.sentiment.hidden) {
+-			return;
+-		}
++		// boxcode-ide: no longer gated on chatEntitlementService.sentiment.hidden.
++		// That gate exists to respect Microsoft Copilot's own entitlement/consent
++		// flow (declined it, on a managed plan that blocks it, etc) - this fork
++		// has no Copilot at all (its adapter code is deleted by
++		// patches/52-ext-copilot-remove-it.json), so gating our own chat-first
++		// landing behind Copilot's consent state doesn't apply to us.
+ 
+ 		// Get startup editor configuration
+ 		const startupEditor = this.configurationService.getValue<string>('workbench.startupEditor');
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
+index 067580a4..0776d46c 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
+@@ -327,7 +327,7 @@ configurationRegistry.registerConfiguration({
+ 				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.terminal' }, "Open a new terminal in the editor area."),
+ 				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.agentSessionsWelcomePage' }, "Open the Agent Sessions Welcome page. Will override the workbench secondary side bar visibility settings."),
+ 			],
+-			'default': 'welcomePage',
++			'default': 'agentSessionsWelcomePage',
+ 			'description': localize('workbench.startupEditor', "Controls which editor is shown at startup, if none are restored from the previous session."),
+ 			'experiment': { mode: 'auto' },
+ 			agentsWindow: { default: 'none', readOnly: true },
