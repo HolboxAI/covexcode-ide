@@ -172,6 +172,24 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.vscode_arch }}-cargo-
 
+      # SHOULD_BUILD used to be set only inside this step's own `env:` block,
+      # which is invisible to later steps' `if: env.SHOULD_BUILD == ...`
+      # conditions - a step-level `env:` only sets that step's shell
+      # environment, it's never merged into the `env` expression context
+      # later steps evaluate (that only picks up job-level `env:` or actual
+      # $GITHUB_ENV writes, neither of which this workflow does for
+      # SHOULD_BUILD - check_tags.sh/check_cron_or_pr.sh do write it to
+      # $GITHUB_ENV, but neither is called anywhere in this workflow). Real
+      # bug, not a guess: confirmed by grep that SHOULD_BUILD is written to
+      # GITHUB_ENV nowhere this workflow's call graph touches. Net effect:
+      # "Prepare assets"/"Upload assets"/"Publish" below always evaluated
+      # env.SHOULD_BUILD as empty/false and silently no-op'd, regardless of
+      # generate_assets - this is why no dmg/zip/release was ever produced,
+      # not build time. Since this job never has a real "don't build" path
+      # (SHOULD_BUILD is a hardcoded literal here, not conditional), the
+      # check was always dead weight even before being broken - dropped it
+      # rather than plumbing it through GITHUB_ENV, and gate on
+      # generate_assets alone, which is the condition that actually matters.
       - name: Build
         env:
           SHOULD_BUILD: yes
@@ -180,7 +198,7 @@ jobs:
 
       - name: Prepare assets
         run: ./prepare_assets.sh
-        if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
+        if: github.event.inputs.generate_assets == 'true'
 
       - name: Upload assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -188,7 +206,7 @@ jobs:
           name: bin-${{ matrix.vscode_arch }}
           path: assets/
           retention-days: 3
-        if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
+        if: github.event.inputs.generate_assets == 'true'
 
       # Testers shouldn't have to dig through an Actions run page to find a
       # zip - one stable, bookmarkable link instead. Same gate as the two
@@ -204,7 +222,7 @@ jobs:
       # macOS Gatekeeper will warn on first launch, which is expected until
       # that's set up for real.
       - name: Publish to the rolling macOS dev-build release
-        if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
+        if: github.event.inputs.generate_assets == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
