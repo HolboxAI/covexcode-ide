@@ -9,7 +9,17 @@ else
   cp -rp src/stable/* vscode/
 fi
 
-cp -f LICENSE vscode/LICENSE.txt
+# boxcode-ide has not made a repo-wide license decision yet (see README.md
+# "Open decisions" — deliberately not assumed by this build tooling). Only
+# overwrite upstream Code-OSS's own LICENSE.txt if boxcode-ide has since
+# added its own root LICENSE file; otherwise leave Microsoft's original
+# MIT LICENSE.txt from the microsoft/vscode checkout in place rather than
+# fail the build or silently invent licensing text.
+if [[ -f LICENSE ]]; then
+  cp -f LICENSE vscode/LICENSE.txt
+else
+  echo "No root LICENSE file yet (open decision, see README.md) — keeping upstream Code-OSS's own LICENSE.txt"
+fi
 
 cd vscode || { echo "'vscode' dir not found"; exit 1; }
 
