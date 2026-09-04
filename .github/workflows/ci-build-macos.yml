@@ -66,9 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15-intel
-            vscode_arch: x64
-          - runner: macos-14
+          - runner: macos-15
             vscode_arch: arm64
 
     steps:
@@ -87,11 +85,13 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
+      # No longer gated on VSCODE_ARCH == 'x64' - that condition meant this
+      # step would never run at all once the x64 matrix leg was removed
+      # (arm64-only now).
       - name: Setup Python 3
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.11'
-        if: env.VSCODE_ARCH == 'x64'
 
       - name: Clone VSCode repo
         run: . get_repo.sh
@@ -140,14 +140,8 @@ jobs:
         if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
 
       # Testers shouldn't have to dig through an Actions run page to find a
-      # zip - one stable, bookmarkable link instead. Same gate as the two
-      # steps above (only real when someone deliberately runs this with
-      # generate_assets=true). Runs on BOTH matrix legs (arm64 and x64) so
-      # both architectures' zips land in the same rolling release - `gh
-      # release create` is raced between the two parallel jobs on purpose
-      # (whichever gets there first creates it, the other's create fails and
-      # is ignored via `|| true`) rather than restricting this to one arch
-      # and risking silently publishing only one architecture's build.
+      # zip - one stable, bookmarkable link instead. Only real when someone
+      # deliberately runs this with generate_assets=true.
       # No code-signing/notarization exists yet (open decision, see
       # README.md), so this is explicitly labeled an unsigned dev build -
       # macOS Gatekeeper will warn on first launch, which is expected until
