@@ -1,0 +1,12 @@
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
+index 2a2a985f..1c5b9e2c 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
+@@ -335,7 +335,6 @@ configurationRegistry.registerConfiguration({
+ 			],
+ 			'default': 'agentSessionsWelcomePage',
+ 			'description': localize('workbench.startupEditor', "Controls which editor is shown at startup, if none are restored from the previous session."),
+-			'experiment': { mode: 'auto' },
+ 			agentsWindow: { default: 'none', readOnly: true },
+ 		},
+ 		'workbench.welcomePage.preferReducedMotion': {
