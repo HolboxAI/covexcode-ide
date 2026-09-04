@@ -158,7 +158,7 @@ echo "GLOBAL_DIRNAME=\"${GLOBAL_DIRNAME}\""
 echo "ORG_NAME=\"${ORG_NAME}\""
 echo "TUNNEL_APP_NAME=\"${TUNNEL_APP_NAME}\""
 
-if [[ "${DISABLE_UPDATE}" == "yes" ]]; then
+if [[ "${DISABLE_UPDATE}" == "yes" ]] && [[ -f ../patches/00-update-disable.patch.yet ]]; then
   mv ../patches/00-update-disable.patch.yet ../patches/00-update-disable.patch
 fi
 
