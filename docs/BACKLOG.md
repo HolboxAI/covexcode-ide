@@ -11,7 +11,8 @@ These aren't new engineering so much as *verification and enablement* once a bui
 - [ ] Confirm the Open VSX marketplace actually resolves/installs extensions end-to-end in a built instance (not just that the patch is applied) — ESLint, Prettier, Tailwind IntelliSense, a React and a Vue extension, minimum.
 - [ ] Confirm integrated terminal, source control panel, and debugger all function unmodified post-rebrand.
 - [ ] Confirm multi-root workspace support and settings sync aren't broken by any rebrand patch.
-- [ ] First real downloadable build (once macOS passes) — this is also the first moment "can I test this myself" becomes literally true.
+- [x] ~~First real downloadable build~~ — `.dmg` creation was gated behind Apple code-signing being configured (`CERTIFICATE_OSX_P12_DATA`), which meant zero dmg got built at all without Apple Developer Program enrollment first. Un-gated `build/osx/prepare_assets.sh`'s dmg step so `create-dmg` runs unconditionally — signing/notarization stay real optional steps layered on top when a certificate exists later, this block doesn't change either way. Unsigned dmg triggers a one-time Gatekeeper warning (right-click → Open), same as the zip already does.
+- [ ] **Real code-signing/notarization** (Apple Developer Program enrollment, Developer ID cert, GitHub secrets for `CERTIFICATE_OSX_*`) — not needed for your own local testing, becomes required before distributing beyond that. Account/business task, not something scriptable end-to-end — flagged here so it isn't forgotten once distribution scope grows.
 
 ## On deck, not now: Tier 2 (AI-native table stakes)
 
