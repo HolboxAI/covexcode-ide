@@ -71,13 +71,24 @@ fi
 # actually necessary just to get a testable local build. An unsigned dmg
 # still triggers a one-time Gatekeeper "unidentified developer" warning on
 # first launch (right-click -> Open) - same as the always-built zip already
-# does - and that's the only difference once real signing/notarization gets
-# configured later: this block itself doesn't change, the .app it's zipping
-# is just already signed+stapled by the block above by the time it runs.
+# does.
+#
+# Correction to the note above: "doesn't require signing" was true for the
+# .dmg format itself, but create-dmg's CLI still tries to auto-detect a
+# signing identity by default and hard-fails ("No suitable code signing
+# identity found", exit code 2) when none exists in the runner's keychain -
+# confirmed by an actual CI run failing here. --no-code-sign is create-dmg's
+# real opt-out. When a certificate IS configured (the .app is already
+# signed+stapled by the block above by the time this runs), let create-dmg
+# auto-sign the dmg wrapper too rather than forcing --no-code-sign always.
 if [[ "${SHOULD_BUILD_DMG}" != "no" ]]; then
   echo "Building and moving DMG"
   pushd "VSCode-darwin-${VSCODE_ARCH}"
-  npx create-dmg ./*.app .
+  if [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
+    npx create-dmg ./*.app .
+  else
+    npx create-dmg --no-code-sign ./*.app .
+  fi
   mv ./*.dmg "../assets/${APP_NAME}.${VSCODE_ARCH}.${RELEASE_VERSION}.dmg"
   popd
 fi
