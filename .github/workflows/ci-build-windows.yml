@@ -59,6 +59,11 @@ permissions:
 
 jobs:
   compile:
+    # Explicit name: Windows and Linux each have their own job literally
+    # named "compile" - without a display name they'd both report an
+    # identically-named check, which is exactly the kind of ambiguity that
+    # makes required-status-check matching in branch protection unreliable.
+    name: compile (windows)
     runs-on: windows-2022
     defaults:
       run:
