@@ -58,7 +58,54 @@ permissions:
   contents: read
 
 jobs:
+  # Skip the ~1.5-2.5h real build for PRs that can't possibly affect it -
+  # e.g. a one-line bash-conditional fix in prepare_assets.sh (never even
+  # exercised by this required check, since generate_assets is off on every
+  # automatic PR run) or a rename in a file confirmed unused by the build.
+  # Path list below was NOT guessed - it's the actual sourcing graph of the
+  # scripts this job runs (grepped: build.sh sources version.sh,
+  # prepare_vscode.sh, build_cli.sh; prepare_vscode.sh sources utils.sh and
+  # reads product.json + patches/**). Deliberately conservative: on a push
+  # to main, a workflow_dispatch, or a diff-computation failure of any kind,
+  # this defaults to "relevant" (run the real build) rather than risk a
+  # false negative letting a real breakage merge unverified.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      build-relevant: ${{ steps.check.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull_request event (push/workflow_dispatch) - always running the real build"
+            exit 0
+          fi
+
+          CHANGED="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "git diff failed - defaulting to relevant, not risking a false negative"
+            exit 0
+          }
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|\.github/workflows/ci-build-macos\.yml)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "a build-relevant path changed"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "nothing build-relevant changed - skipping the real build"
+          fi
+
   build:
+    needs: changes
+    if: needs.changes.outputs.build-relevant == 'true'
     runs-on: ${{ matrix.runner }}
     env:
       VSCODE_ARCH: ${{ matrix.vscode_arch }}
@@ -138,3 +185,29 @@ jobs:
           path: assets/
           retention-days: 3
         if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
+
+      # Testers shouldn't have to dig through an Actions run page to find a
+      # zip - one stable, bookmarkable link instead. Same gate as the two
+      # steps above (only real when someone deliberately runs this with
+      # generate_assets=true). Runs on BOTH matrix legs (arm64 and x64) so
+      # both architectures' zips land in the same rolling release - `gh
+      # release create` is raced between the two parallel jobs on purpose
+      # (whichever gets there first creates it, the other's create fails and
+      # is ignored via `|| true`) rather than restricting this to one arch
+      # and risking silently publishing only one architecture's build.
+      # No code-signing/notarization exists yet (open decision, see
+      # README.md), so this is explicitly labeled an unsigned dev build -
+      # macOS Gatekeeper will warn on first launch, which is expected until
+      # that's set up for real.
+      - name: Publish to the rolling macOS dev-build release
+        if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="macos-dev-latest"
+          gh release create "$TAG" --repo "${{ github.repository }}" \
+            --title "macOS dev build (rolling)" \
+            --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`)." \
+            --prerelease 2>/dev/null || true
+          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip
