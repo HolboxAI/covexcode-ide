@@ -210,4 +210,4 @@ jobs:
             --title "macOS dev build (rolling)" \
             --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`)." \
             --prerelease 2>/dev/null || true
-          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip
+          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip assets/*.dmg
