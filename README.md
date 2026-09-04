@@ -11,7 +11,7 @@ Two repos, one brain:
 - **`HolboxAI/boxcode`** (existing) — the daemon. Agent loop, tool execution, approval gating, all in Rust. Exposes a JSON-RPC-style protocol once the in-progress `upgrade-plan.md` Phase 3/4 work lands.
 - **`boxcode-ide`** (this repo) — the face. A Code-OSS fork with a thin TypeScript extension that talks to the daemon. No agent logic lives here.
 
-Full plan: [`docs/PLAN.md`](docs/PLAN.md).
+Full plan: [`docs/PLAN.md`](docs/PLAN.md). Current priority (Tier 1 baseline-IDE verification, Tier 2 on deck, small parallel-track items): [`docs/BACKLOG.md`](docs/BACKLOG.md).
 
 ## Open decisions — do not assume, ask before proceeding
 
