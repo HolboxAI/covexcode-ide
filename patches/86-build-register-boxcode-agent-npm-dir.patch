@@ -1,0 +1,12 @@
+diff --git a/build/npm/dirs.ts b/build/npm/dirs.ts
+index 8c6df6f7..a22c4ad8 100644
+--- a/build/npm/dirs.ts
++++ b/build/npm/dirs.ts
+@@ -14,6 +14,7 @@ export const dirs = [
+ 	'build/rspack',
+ 	'build/vite',
+ 	'extensions',
++	'extensions/boxcode-agent',
+ 	'extensions/configuration-editing',
+ 	'extensions/css-language-features',
+ 	'extensions/css-language-features/server',

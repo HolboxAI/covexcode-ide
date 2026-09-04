@@ -1,0 +1,53 @@
+{
+  "name": "boxcode-agent",
+  "displayName": "boxcode",
+  "description": "Chat with boxcode, driven over its ACP stdio interface.",
+  "version": "1.0.0",
+  "publisher": "boxcode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.126.0"
+  },
+  "enabledApiProposals": [
+    "chatParticipantAdditions",
+    "defaultChatParticipant"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension",
+  "scripts": {
+    "compile": "gulp compile-extension:boxcode-agent",
+    "watch": "gulp watch-extension:boxcode-agent"
+  },
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "boxcode.agent",
+        "name": "boxcode",
+        "fullName": "boxcode",
+        "description": "Ask boxcode to read, write, and run things in this workspace.",
+        "isDefault": true,
+        "locations": [
+          "panel"
+        ],
+        "modes": [
+          "ask"
+        ]
+      }
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "24.x"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HolboxAI/boxcode-ide.git"
+  }
+}
