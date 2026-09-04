@@ -14,11 +14,16 @@ on:
       - main
     paths-ignore:
       - "**/*.md"
-  pull_request:
-    branches:
-      - "**"
-    paths-ignore:
-      - "**/*.md"
+
+# P1 is still under active, fast-iterating debugging — this workflow used to
+# also trigger on every PR push (`pull_request: branches: ["**"]`). Each run
+# takes well over an hour and, while a real build bug is being fixed, fails
+# every time: that's a lot of paid runner minutes and a lot of GitHub
+# notification noise for a signal everyone already knows ("still broken,
+# still iterating"). Trigger manually (workflow_dispatch, including its
+# existing checkout_pr input for testing a specific PR's HEAD) until P1
+# reaches a stable baseline, then restore the pull_request trigger so it
+# goes back to running automatically as a real merge gate.
 
 # P1: boxcode-ide only builds the "stable" quality for now — no insider
 # channel yet. ASSETS_REPOSITORY is set explicitly (rather than relying on
