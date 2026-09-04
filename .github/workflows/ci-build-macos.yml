@@ -138,3 +138,29 @@ jobs:
           path: assets/
           retention-days: 3
         if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
+
+      # Testers shouldn't have to dig through an Actions run page to find a
+      # zip - one stable, bookmarkable link instead. Same gate as the two
+      # steps above (only real when someone deliberately runs this with
+      # generate_assets=true). Runs on BOTH matrix legs (arm64 and x64) so
+      # both architectures' zips land in the same rolling release - `gh
+      # release create` is raced between the two parallel jobs on purpose
+      # (whichever gets there first creates it, the other's create fails and
+      # is ignored via `|| true`) rather than restricting this to one arch
+      # and risking silently publishing only one architecture's build.
+      # No code-signing/notarization exists yet (open decision, see
+      # README.md), so this is explicitly labeled an unsigned dev build -
+      # macOS Gatekeeper will warn on first launch, which is expected until
+      # that's set up for real.
+      - name: Publish to the rolling macOS dev-build release
+        if: env.SHOULD_BUILD == 'yes' && github.event.inputs.generate_assets == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="macos-dev-latest"
+          gh release create "$TAG" --repo "${{ github.repository }}" \
+            --title "macOS dev build (rolling)" \
+            --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`)." \
+            --prerelease 2>/dev/null || true
+          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip
