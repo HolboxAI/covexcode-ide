@@ -14,28 +14,23 @@ on:
       - main
     paths-ignore:
       - "**/*.md"
-  pull_request:
-    branches:
-      - "**"
-    paths-ignore:
-      - "**/*.md"
 
-# Correction to an earlier version of this comment: this workflow was made
-# manual-only to cut CI noise/cost during P1 debugging, but that also meant
-# NO automatic signal at all on whether the app actually builds - a PR could
-# show "all checks passed" (hygiene only) while the real build was known
-# broken. That's a worse failure mode than the noise it was avoiding. A red
-# check that takes an hour beats a false green one.
+# Deliberately manual-only again (workflow_dispatch, not pull_request) - not
+# the same mistake as before. This is a real, stated scope decision: Linux
+# is not being tested right now, only macOS is, while Windows/Linux get
+# revisited later. The earlier problem was disabling automatic signal on the
+# platform actually being validated (macOS) while still claiming to gate
+# merges on it. This workflow's code stays in the repo (useful later, not
+# deleted) but isn't a merge gate or an automatic PR check right now - see
+# docs/BACKLOG.md and branch protection's required_status_checks, which no
+# longer lists this workflow's checks. Restore pull_request triggering here
+# whenever Linux actually comes back into active testing scope.
 #
-# Restored automatic pull_request triggering. What actually keeps this
-# affordable: `generate_assets` (the expensive packaging/installer step) is
-# a workflow_dispatch-only input, so github.event.inputs.generate_assets is
-# empty/falsy on every pull_request-triggered run - packaging (the `build`,
-# `reh_linux`, `reh_alpine` jobs, all gated by `needs: compile`) stays
-# skipped automatically, only the real "compile" job (compile+typecheck)
-# runs. That's the check that should be made a required status check in
-# branch protection, once its exact name is confirmed reporting on a real
-# run - see docs/BACKLOG.md.
+# What keeps a manual run affordable when it IS run: `generate_assets` (the
+# expensive packaging/installer step) is a workflow_dispatch-only input, so
+# leaving it unset skips packaging (the `build`, `reh_linux`, `reh_alpine`
+# jobs, all gated by `needs: compile`) automatically - only the real
+# "compile" job (compile+typecheck) runs.
 
 # P1: boxcode-ide only builds the "stable" quality for now — no insider
 # channel yet. ASSETS_REPOSITORY is set explicitly (rather than relying on
