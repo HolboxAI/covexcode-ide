@@ -18,6 +18,7 @@ These aren't new engineering so much as *verification and enablement* once a bui
 
 Scoped, sequenced, deliberately not started yet — P2/P3 territory once P1 and Tier 1 verification are solid.
 
+- [ ] **Predictive multi-line completion ("Tab"-style) — added here, was a real gap.** Ranked the single most-loved, most "wow factor" feature in user sentiment research across competitors ("like having a psychic coding buddy," analyzes existing code and predicts multi-line edits, not just single completions) — was missing from this list entirely until now. Rank this at least alongside inline-edit, not below it.
 - [ ] Inline edit command separate from chat (select code → instruction → inline diff)
 - [ ] Per-hunk diff review UI with explicit accept/reject (the engine already exists via `/diff` in the CLI — this is surfacing it, not building a new diff engine)
 - [ ] Import-from-VS-Code onboarding flow (settings/keybindings/extensions)
