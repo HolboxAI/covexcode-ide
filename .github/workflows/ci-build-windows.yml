@@ -84,6 +84,31 @@ jobs:
       - name: Clone VSCode repo
         run: ./get_repo.sh
 
+      # get_repo.sh has just produced vscode/**/package-lock.json and
+      # vscode/cli/Cargo.lock from the freshly-cloned upstream tree, so this
+      # has to run after it, not alongside actions/setup-node earlier in this
+      # job (those lockfiles don't exist yet at that point). A cache-key miss
+      # here just falls back to a normal full install/compile, never breaks
+      # the build - so an imprecise hashFiles glob is a safe failure mode.
+      - name: Cache npm downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.1.0
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ matrix.vscode_arch }}-npm-${{ hashFiles('vscode/**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.vscode_arch }}-npm-
+
+      - name: Cache cargo registry and CLI build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vscode/cli/target
+          key: ${{ runner.os }}-${{ matrix.vscode_arch }}-cargo-${{ hashFiles('vscode/cli/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.vscode_arch }}-cargo-
+
       - name: Build
         env:
           SHOULD_BUILD: yes
