@@ -1,0 +1,24 @@
+diff --git a/build/lib/optimize.ts b/build/lib/optimize.ts
+index 21a17ee..29b7ba1 100644
+--- a/build/lib/optimize.ts
++++ b/build/lib/optimize.ts
+@@ -144,6 +144,7 @@ function bundleESMTask(opts: IBundleESMTaskOpts): NodeJS.ReadWriteStream {
+ 				target: [target],
+ 				loader: {
+ 					'.ttf': 'file',
++					'.woff2': 'file', // boxcode-ide: geist.css's @font-face references a .woff2 (see src/vs/base/browser/ui/fonts/geist) -- esbuild has no default loader for it and fails the whole bundle without this
+ 					'.svg': 'file',
+ 					'.png': 'file',
+ 					'.sh': 'file',
+diff --git a/build/next/index.ts b/build/next/index.ts
+index 7e0ef88..70c11d3 100644
+--- a/build/next/index.ts
++++ b/build/next/index.ts
+@@ -864,6 +864,7 @@ ${tslib}`,
+ 			banner,
+ 			loader: {
+ 				'.ttf': 'file',
++				'.woff2': 'file', // boxcode-ide: geist.css's @font-face references a .woff2 (see src/vs/base/browser/ui/fonts/geist) -- esbuild has no default loader for it and fails the whole bundle without this
+ 				'.svg': 'file',
+ 				'.png': 'file',
+ 				'.sh': 'file',
