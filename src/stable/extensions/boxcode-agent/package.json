@@ -38,7 +38,9 @@
           "panel"
         ],
         "modes": [
-          "ask"
+          "ask",
+          "edit",
+          "agent"
         ]
       }
     ],
