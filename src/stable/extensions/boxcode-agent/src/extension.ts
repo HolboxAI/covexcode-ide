@@ -15,6 +15,7 @@ import {
 	SessionNotification,
 	SessionUpdate,
 	ToolCallContent,
+	ToolCallStatus,
 } from './acpClient';
 import { CdpClient } from './cdpClient';
 
@@ -166,10 +167,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		const activeClient = client;
 		const activeSessionId = sessionId;
+		// `tool_call_update`'s own `title` is usually absent (headless.rs
+		// only sets it on the initial `tool_call`) -- without remembering
+		// it here, the completion/failure line renderUpdate shows would
+		// have no label at all. Scoped to one turn, not the whole session:
+		// a fresh Map per requestHandler call, same lifetime as `stream`.
+		const toolCallTitles = new Map<string, string>();
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream);
+				renderUpdate(notification.update, stream, toolCallTitles);
 			}
 		};
 		const onPermissionRequest = (
@@ -245,7 +252,30 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 }
 
-function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream): void {
+/**
+ * A codicon per `ToolCallStatus`, matching the pattern VS Code's own
+ * built-in chat participants already use for tool-call rendering (a
+ * spinning icon that becomes a check or an error, not plain text) --
+ * `stream.markdown` renders `$(name)` codicon syntax natively as long as
+ * the `MarkdownString` passed to it has `supportThemeIcons` set, which
+ * `stream.markdown(someString)` alone does not (see the call site below).
+ */
+function toolCallStatusIcon(status: ToolCallStatus | undefined): string {
+	switch (status) {
+		case 'pending':
+			return '$(circle-outline)';
+		case 'in_progress':
+			return '$(loading~spin)';
+		case 'completed':
+			return '$(check)';
+		case 'failed':
+			return '$(error)';
+		default:
+			return '$(circle-outline)';
+	}
+}
+
+function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, toolCallTitles: Map<string, string>): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
 			const content = update.content;
@@ -256,13 +286,18 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream):
 		}
 		case 'tool_call':
 		case 'tool_call_update': {
-			if (update.title) {
-				stream.progress(update.title);
+			if (update.toolCallId && update.title) {
+				toolCallTitles.set(update.toolCallId, update.title);
+			}
+			const title = update.title ?? (update.toolCallId ? toolCallTitles.get(update.toolCallId) : undefined);
+			if (title) {
+				stream.markdown(new vscode.MarkdownString(`${toolCallStatusIcon(update.status)} ${title}\n\n`, true));
 			}
 			// check_in_browser's own result: rendered inline as an image for
-			// the human, never fed to the model as vision input -- see
-			// headless.rs's own doc comment on ToolCallContent::Image for
-			// why that split is deliberate, not an oversight.
+			// the human. Also fed to the model as real vision input when
+			// `config.tools.attach_browser_screenshots` is on -- see
+			// headless.rs's own doc comment on why that's a separate path
+			// from this one, which exists purely for the human.
 			if (update.content?.type === 'image') {
 				stream.markdown(`![screenshot](data:${update.content.mimeType};base64,${update.content.data})`);
 			}
