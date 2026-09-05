@@ -1,0 +1,28 @@
+{
+  "name": "boxcode-theme",
+  "displayName": "Boxcode Theme",
+  "description": "boxcode's own default color theme -- an amber/orange accent on top of Dark Modern's base.",
+  "version": "1.0.0",
+  "publisher": "boxcode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.126.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "id": "Boxcode Dark",
+        "label": "Boxcode Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/boxcode-dark.json"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HolboxAI/boxcode-ide.git"
+  }
+}
