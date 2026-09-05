@@ -1,0 +1,99 @@
+diff --git a/src/vs/platform/theme/common/sizes/baseSizes.ts b/src/vs/platform/theme/common/sizes/baseSizes.ts
+index b783ac1..bf36c2f 100644
+--- a/src/vs/platform/theme/common/sizes/baseSizes.ts
++++ b/src/vs/platform/theme/common/sizes/baseSizes.ts
+@@ -30,8 +30,17 @@ export const codiconFontSizeCompact = registerSize('codiconFontSize.compact',
+ 
+ // ------ Corner Radii
+ 
++// boxcode-ide: bumped a couple of px across the board (upstream's own
++// values noted in comments) for a softer, more "Linear/Cursor-style"
++// geometric feel -- this is a single, systemic lever: 85 CSS files already
++// read these via var(--vscode-cornerRadius-*), including the chat
++// widget/input surfaces that are boxcode's primary UI, so retuning it here
++// reaches all of them at once instead of hand-patching each file.
++// cornerRadius.xSmall and cornerRadius.circle are untouched -- very compact
++// controls and fully round elements (avatars) don't read as more "premium"
++// from this.
+ export const cornerRadiusMedium = registerSize('cornerRadius.medium',
+-	sizeForAllThemes(6, 'px'),
++	sizeForAllThemes(8, 'px'), // upstream: 6
+ 	nls.localize('cornerRadiusMedium', "Base corner radius for UI elements."));
+ 
+ export const cornerRadiusXSmall = registerSize('cornerRadius.xSmall',
+@@ -39,15 +48,15 @@ export const cornerRadiusXSmall = registerSize('cornerRadius.xSmall',
+ 	nls.localize('cornerRadiusXSmall', "Extra small corner radius for very compact UI elements."));
+ 
+ export const cornerRadiusSmall = registerSize('cornerRadius.small',
+-	sizeForAllThemes(4, 'px'),
++	sizeForAllThemes(5, 'px'), // upstream: 4
+ 	nls.localize('cornerRadiusSmall', "Small corner radius for compact UI elements."));
+ 
+ export const cornerRadiusLarge = registerSize('cornerRadius.large',
+-	sizeForAllThemes(8, 'px'),
++	sizeForAllThemes(10, 'px'), // upstream: 8
+ 	nls.localize('cornerRadiusLarge', "Large corner radius for prominent UI elements."));
+ 
+ export const cornerRadiusXLarge = registerSize('cornerRadius.xLarge',
+-	sizeForAllThemes(12, 'px'),
++	sizeForAllThemes(14, 'px'), // upstream: 12
+ 	nls.localize('cornerRadiusXLarge', "Extra large corner radius for very prominent UI elements."));
+ 
+ export const cornerRadiusCircle = registerSize('cornerRadius.circle',
+diff --git a/src/vs/base/browser/ui/button/button.css b/src/vs/base/browser/ui/button/button.css
+index a7c88ff..f7d0477 100644
+--- a/src/vs/base/browser/ui/button/button.css
++++ b/src/vs/base/browser/ui/button/button.css
+@@ -8,7 +8,7 @@
+ 	display: flex;
+ 	width: 100%;
+ 	padding: 4px 8px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-medium); /* boxcode-ide: was a hardcoded 4px, now tracks the same token dropdown/chat surfaces already use */
+ 	text-align: center;
+ 	cursor: pointer;
+ 	justify-content: center;
+@@ -113,7 +113,7 @@
+ .monaco-button-dropdown > .monaco-button.monaco-dropdown-button {
+ 	border: 1px solid var(--vscode-button-border, transparent);
+ 	border-left-width: 0 !important;
+-	border-radius: 0 4px 4px 0;
++	border-radius: 0 var(--vscode-cornerRadius-medium) var(--vscode-cornerRadius-medium) 0; /* boxcode-ide: was 0 4px 4px 0 */
+ 	padding: 0 4px;
+ 	display: flex;
+ 	align-items: center;
+@@ -124,7 +124,7 @@
+ }
+ 
+ .monaco-button-dropdown > .monaco-button.monaco-text-button {
+-	border-radius: 4px 0 0 4px;
++	border-radius: var(--vscode-cornerRadius-medium) 0 0 var(--vscode-cornerRadius-medium); /* boxcode-ide: was 4px 0 0 4px */
+ }
+ 
+ .monaco-description-button {
+diff --git a/src/vs/base/browser/ui/inputbox/inputBox.css b/src/vs/base/browser/ui/inputbox/inputBox.css
+index b580762..28188a9 100644
+--- a/src/vs/base/browser/ui/inputbox/inputBox.css
++++ b/src/vs/base/browser/ui/inputbox/inputBox.css
+@@ -8,7 +8,7 @@
+ 	display: block;
+ 	padding: 0;
+ 	box-sizing:	border-box;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-medium); /* boxcode-ide: was a hardcoded 4px, now tracks the same token dropdown/chat surfaces already use */
+ 
+ 	/* Customizable */
+ 	font-size: inherit;
+diff --git a/src/vs/base/browser/ui/dropdown/dropdown.css b/src/vs/base/browser/ui/dropdown/dropdown.css
+index 7c70f37..64d05dd 100644
+--- a/src/vs/base/browser/ui/dropdown/dropdown.css
++++ b/src/vs/base/browser/ui/dropdown/dropdown.css
+@@ -28,7 +28,7 @@
+ .monaco-dropdown-with-primary {
+ 	display: flex !important;
+ 	flex-direction: row;
+-	border-radius: 5px;
++	border-radius: var(--vscode-cornerRadius-medium); /* boxcode-ide: was a hardcoded 5px, now matches the button/input radius it wraps */
+ }
+ 
+ .monaco-dropdown-with-primary > .action-container > .action-label {
