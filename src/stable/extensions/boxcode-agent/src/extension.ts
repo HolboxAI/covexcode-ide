@@ -6,7 +6,17 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { AcpClient, RequestPermissionOutcome, RequestPermissionRequest, SessionNotification, SessionUpdate, ToolCallContent } from './acpClient';
+import {
+	AcpClient,
+	CheckInBrowserOutcome,
+	CheckInBrowserRequest,
+	RequestPermissionOutcome,
+	RequestPermissionRequest,
+	SessionNotification,
+	SessionUpdate,
+	ToolCallContent,
+} from './acpClient';
+import { CdpClient } from './cdpClient';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
@@ -121,9 +131,18 @@ export function activate(context: vscode.ExtensionContext): void {
 				void askPermission(permissionRequest, diffContentProvider).then(respond);
 			}
 		};
+		const onBrowserCheckRequest = (
+			browserRequest: CheckInBrowserRequest,
+			respond: (outcome: CheckInBrowserOutcome) => void,
+		) => {
+			if (browserRequest.sessionId === activeSessionId) {
+				void checkInBrowser(browserRequest.url).then(respond);
+			}
+		};
 
 		activeClient.on('update', onUpdate);
 		activeClient.on('permissionRequest', onPermissionRequest);
+		activeClient.on('browserCheckRequest', onBrowserCheckRequest);
 		// v1 has no cancellation plumbing into HeadlessSession yet -- see
 		// boxcode's own transport.rs docs on `session/cancel`. A cancelled
 		// request here still waits for the in-flight turn to finish rather
@@ -136,6 +155,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		} finally {
 			activeClient.off('update', onUpdate);
 			activeClient.off('permissionRequest', onPermissionRequest);
+			activeClient.off('browserCheckRequest', onBrowserCheckRequest);
 			onCancel.dispose();
 		}
 	};
@@ -158,6 +178,13 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream):
 		case 'tool_call_update': {
 			if (update.title) {
 				stream.progress(update.title);
+			}
+			// check_in_browser's own result: rendered inline as an image for
+			// the human, never fed to the model as vision input -- see
+			// headless.rs's own doc comment on ToolCallContent::Image for
+			// why that split is deliberate, not an oversight.
+			if (update.content?.type === 'image') {
+				stream.markdown(`![screenshot](data:${update.content.mimeType};base64,${update.content.data})`);
 			}
 			break;
 		}
@@ -347,6 +374,49 @@ async function showDiff(
 		// Never block the actual Allow/Reject decision on the diff viewer
 		// failing to open -- the modal that follows is still the real
 		// approval gate, this is a courtesy on top of it.
+	}
+}
+
+/**
+ * Fulfills `check_in_browser` on the client side: finds or opens the tab at
+ * `url`, forces a fresh navigation (a reused tab could otherwise show
+ * stale content for a page with no hot-reload of its own), and screenshots
+ * it via raw CDP -- `vscode.proposed.browser`'s `BrowserCDPSession` is a
+ * bare bidirectional message channel, not a request/response API, so
+ * `CdpClient` below does the request-id correlation `boxcode`'s own ACP
+ * client (`AcpClient`) already does for a different protocol.
+ *
+ * Never throws: a failure becomes `{ outcome: 'failed', reason }`, which
+ * `HeadlessSession::check_browser` on the other end already knows how to
+ * turn into text the model can react to (see its own doc comment) --
+ * this function's job is only to describe what went wrong, not to decide
+ * what the model does about it.
+ */
+async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
+	let session: vscode.BrowserCDPSession | undefined;
+	let cdp: CdpClient | undefined;
+	try {
+		const tab =
+			vscode.window.browserTabs.find(t => t.url === url) ??
+			(await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true }));
+		session = await tab.startCDPSession();
+		cdp = new CdpClient(session);
+
+		await cdp.send('Page.enable');
+		const loaded = cdp.waitForEvent('Page.loadEventFired', 10_000);
+		await cdp.send('Page.navigate', { url });
+		// A page that never fires the load event (a script error, an
+		// infinite spinner) still gets screenshotted as-is below -- that is
+		// itself useful evidence, not a reason to fail the whole check.
+		await loaded.catch(() => undefined);
+
+		const { data } = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' });
+		return { outcome: 'screenshot', mimeType: 'image/png', data };
+	} catch (error) {
+		return { outcome: 'failed', reason: describeError(error) };
+	} finally {
+		cdp?.dispose();
+		void session?.close();
 	}
 }
 
