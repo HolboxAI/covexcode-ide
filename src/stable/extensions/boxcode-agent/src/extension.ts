@@ -143,6 +143,37 @@ export function activate(context: vscode.ExtensionContext): void {
 	const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, requestHandler);
 	context.subscriptions.push(participant);
 	context.subscriptions.push({ dispose: () => client?.dispose() });
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('boxcode.rollback', async () => {
+			// Reads client/sessionId fresh on each invocation, not a value
+			// captured at registration time -- both are only set once the
+			// first chat message actually establishes a session.
+			if (!client || !sessionId) {
+				void vscode.window.showInformationMessage("boxcode: no session yet -- send a message first.");
+				return;
+			}
+			const activeClient = client;
+			const activeSessionId = sessionId;
+			// Same posture as the TUI's own /rollback: confirm before
+			// touching disk, not after.
+			const choice = await vscode.window.showWarningMessage(
+				'Undo every file boxcode has written this session? Files it only ran commands ' +
+					'against, not wrote, are not covered by this.',
+				{ modal: true },
+				'Undo',
+			);
+			if (choice !== 'Undo') {
+				return;
+			}
+			try {
+				const summary = await activeClient.rollback(activeSessionId);
+				void vscode.window.showInformationMessage(`boxcode: ${summary}`);
+			} catch (error) {
+				void vscode.window.showErrorMessage(`boxcode: couldn't roll back (${describeError(error)})`);
+			}
+		}),
+	);
 }
 
 function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream): void {

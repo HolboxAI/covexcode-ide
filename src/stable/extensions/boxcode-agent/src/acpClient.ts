@@ -268,6 +268,17 @@ export class AcpClient extends EventEmitter {
 		return result.stopReason;
 	}
 
+	/**
+	 * `session/rollback` -- unlike `prompt`, this is answered synchronously
+	 * on boxcode's own side (local disk I/O, never an LLM round trip), so
+	 * there's nothing to stream here; the returned summary is the whole
+	 * answer.
+	 */
+	async rollback(sessionId: string): Promise<string> {
+		const result = (await this.request('session/rollback', { sessionId })) as { summary: string };
+		return result.summary;
+	}
+
 	dispose(): void {
 		if (!this.closed) {
 			this.child.kill();
