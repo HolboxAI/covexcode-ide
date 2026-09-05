@@ -18,6 +18,20 @@ export interface ContentBlockText {
 	text: string;
 }
 
+/**
+ * Mirrors `protocol.rs`'s own `ContentBlock` exactly -- the two variants
+ * boxcode implements on the *inbound* side (what a `session/prompt` call
+ * sends), as opposed to `ContentBlockText`/`ToolCallContent` above, which
+ * are what boxcode sends back. `Image` requires the `image` prompt
+ * capability boxcode's own `initialize` response advertises (see
+ * `transport.rs`'s handler) -- sending one to an agent that didn't
+ * advertise it would be a protocol violation, not something this client
+ * needs to guard against itself since boxcode always advertises it.
+ */
+export type PromptContentBlock =
+	| { type: 'text'; text: string }
+	| { type: 'image'; data: string; mimeType: string };
+
 export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled';
 
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
@@ -288,11 +302,17 @@ export class AcpClient extends EventEmitter {
 	 * Blocks until the whole turn -- including any permission round trip --
 	 * is done, matching ACP v1's own `session/prompt` semantics exactly (it
 	 * is not this client's place to second-guess that and time out early).
+	 *
+	 * Takes a content-block array rather than a plain string so a caller
+	 * can attach images (element-picker screenshots) alongside text --
+	 * `text` stays available as a convenience for the common no-attachment
+	 * case.
 	 */
-	async prompt(sessionId: string, text: string): Promise<StopReason> {
+	async prompt(sessionId: string, content: string | PromptContentBlock[]): Promise<StopReason> {
+		const prompt: PromptContentBlock[] = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
 		const result = (await this.request('session/prompt', {
 			sessionId,
-			prompt: [{ type: 'text', text }],
+			prompt,
 		})) as { stopReason: StopReason };
 		return result.stopReason;
 	}
