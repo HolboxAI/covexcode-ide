@@ -2,12 +2,18 @@
  *  Copyright (c) HolboxAI. Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
+import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { AcpClient, RequestPermissionOutcome, RequestPermissionRequest, SessionNotification, SessionUpdate } from './acpClient';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
+const SECRET_API_KEY = 'boxcode.apiKey';
+
+/** Thrown by `ensureCredentials` when the user cancels the setup prompt -- distinguished from a real launch failure so the chat message shown for each reads correctly. */
+class SetupCancelled extends Error {}
 
 /**
  * The minimal-path wiring recorded in boxcode-ide's own `docs/BACKLOG.md`:
@@ -35,6 +41,18 @@ const BOXCODE_COMMAND = 'boxcode';
  * in this window shares the one ACP session opened on the first message.
  * Scoped narrower on purpose, matching the same "small, honest first
  * version" precedent `headless.rs` itself documents.
+ *
+ * First-run configuration: a fresh install has no `~/.boxcode/config.toml`
+ * and no `boxcode.endpoint`/`boxcode.model` settings, so the very first
+ * message would otherwise fail with a raw connection error (`headless.rs`
+ * now fails fast on a missing API key specifically, but has no equivalent
+ * for a missing endpoint/model, and no way to *collect* any of the three
+ * from inside a headless subprocess either way). `ensureCredentials` below
+ * prompts once, storing the endpoint/model as ordinary settings and the API
+ * key in `SecretStorage` (never plain settings.json), and is skipped
+ * entirely when `~/.boxcode/config.toml` already exists -- someone who's
+ * already configured `boxcode` from the CLI must not be nagged to repeat
+ * that inside the IDE.
  */
 export function activate(context: vscode.ExtensionContext): void {
 	let client: AcpClient | undefined;
@@ -45,7 +63,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (!ready) {
 			ready = (async () => {
 				const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
-				const acp = new AcpClient(BOXCODE_COMMAND, cwd);
+				const envOverrides = await ensureCredentials(context);
+				const acp = new AcpClient(BOXCODE_COMMAND, cwd, envOverrides);
 				client = acp;
 				await acp.initialize();
 				sessionId = await acp.newSession(cwd);
@@ -66,10 +85,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		try {
 			await ensureReady();
 		} catch (error) {
-			stream.markdown(
-				`Couldn't start \`boxcode --acp\` (${describeError(error)}). Make sure \`boxcode\` is ` +
-					'installed and on your PATH.',
-			);
+			if (error instanceof SetupCancelled) {
+				stream.markdown('Configuration needed -- send another message when you\'re ready to set boxcode up.');
+			} else {
+				stream.markdown(
+					`Couldn't start \`boxcode --acp\` (${describeError(error)}). Make sure \`boxcode\` is ` +
+						'installed and on your PATH.',
+				);
+			}
 			return;
 		}
 		if (!client || !sessionId) {
@@ -138,6 +161,94 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream):
 			// render, not an error.
 			break;
 	}
+}
+
+/**
+ * Resolves the env-var overrides to hand `boxcode --acp` (see
+ * `AcpClient`'s own doc comment on why these are additive, never blanking):
+ * whatever this extension already has stored (settings + `SecretStorage`)
+ * is used as-is; if nothing is stored yet AND `~/.boxcode/config.toml`
+ * doesn't exist either (the file-existence check is a deliberately simple
+ * proxy for "has this person configured boxcode from the CLI before" --
+ * no need to actually parse the TOML just to decide whether to prompt),
+ * this runs a one-time setup prompt and persists the result. Throws
+ * `SetupCancelled` if the user backs out of that prompt.
+ */
+async function ensureCredentials(context: vscode.ExtensionContext): Promise<NodeJS.ProcessEnv> {
+	const config = vscode.workspace.getConfiguration('boxcode');
+	let endpoint = config.get<string>('endpoint', '');
+	let model = config.get<string>('model', '');
+	let apiKey = (await context.secrets.get(SECRET_API_KEY)) ?? '';
+
+	if ((!endpoint || !model || !apiKey) && !configTomlExists()) {
+		const entered = await runSetupFlow();
+		if (!entered) {
+			throw new SetupCancelled('boxcode setup was cancelled');
+		}
+		endpoint = entered.endpoint;
+		model = entered.model;
+		apiKey = entered.apiKey;
+		await config.update('endpoint', endpoint, vscode.ConfigurationTarget.Global);
+		await config.update('model', model, vscode.ConfigurationTarget.Global);
+		await context.secrets.store(SECRET_API_KEY, apiKey);
+	}
+
+	const overrides: NodeJS.ProcessEnv = {};
+	if (endpoint) {
+		overrides.BOXCODE_ENDPOINT = endpoint;
+	}
+	if (model) {
+		overrides.BOXCODE_MODEL = model;
+	}
+	if (apiKey) {
+		overrides.BOXCODE_API_KEY = apiKey;
+	}
+	return overrides;
+}
+
+function configTomlExists(): boolean {
+	try {
+		return fs.existsSync(path.join(os.homedir(), '.boxcode', 'config.toml'));
+	} catch {
+		return false;
+	}
+}
+
+async function runSetupFlow(): Promise<{ endpoint: string; model: string; apiKey: string } | undefined> {
+	const endpoint = await vscode.window.showInputBox({
+		title: 'boxcode setup (1/3)',
+		prompt: "boxcode's LLM endpoint -- an OpenAI-compatible base URL",
+		placeHolder: 'https://api.deepseek.com',
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An endpoint is required.'),
+	});
+	if (!endpoint) {
+		return undefined;
+	}
+
+	const model = await vscode.window.showInputBox({
+		title: 'boxcode setup (2/3)',
+		prompt: 'Model name to request from that endpoint',
+		placeHolder: 'deepseek-chat',
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'A model name is required.'),
+	});
+	if (!model) {
+		return undefined;
+	}
+
+	const apiKey = await vscode.window.showInputBox({
+		title: 'boxcode setup (3/3)',
+		prompt: 'API key for that endpoint -- stored securely, never written to settings.json',
+		password: true,
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An API key is required.'),
+	});
+	if (!apiKey) {
+		return undefined;
+	}
+
+	return { endpoint: endpoint.trim(), model: model.trim(), apiKey: apiKey.trim() };
 }
 
 async function askPermission(request: RequestPermissionRequest): Promise<RequestPermissionOutcome> {
