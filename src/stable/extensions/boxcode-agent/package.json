@@ -46,6 +46,12 @@
         ]
       }
     ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "boxcode",
+        "displayName": "boxcode"
+      }
+    ],
     "commands": [
       {
         "command": "boxcode.rollback",
