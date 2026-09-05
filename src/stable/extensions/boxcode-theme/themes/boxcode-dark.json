@@ -1,0 +1,26 @@
+{
+	"$schema": "vscode://schemas/color-theme",
+	"name": "Boxcode Dark",
+	"include": "../../theme-defaults/themes/dark_modern.json",
+	"colors": {
+		"activityBar.activeBorder": "#D97706",
+		"activityBarBadge.background": "#D97706",
+		"button.background": "#D97706",
+		"button.hoverBackground": "#B45309",
+		"focusBorder": "#D97706",
+		"inputOption.activeBackground": "#D9770682",
+		"inputOption.activeBorder": "#D97706",
+		"menu.selectionBackground": "#D97706",
+		"panelTitle.activeBorder": "#D97706",
+		"progressBar.background": "#D97706",
+		"statusBar.focusBorder": "#D97706",
+		"statusBarItem.focusBorder": "#D97706",
+		"statusBarItem.remoteBackground": "#D97706",
+		"tab.activeBorderTop": "#D97706",
+		"tab.selectedBorderTop": "#FBBF24",
+		"terminal.tab.activeBorder": "#D97706",
+		"textLink.activeForeground": "#FBBF24",
+		"textLink.foreground": "#FBBF24",
+		"welcomePage.progress.foreground": "#D97706"
+	}
+}
