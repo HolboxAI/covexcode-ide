@@ -10,6 +10,7 @@ import {
 	AcpClient,
 	CheckInBrowserOutcome,
 	CheckInBrowserRequest,
+	PromptContentBlock,
 	RequestPermissionOutcome,
 	RequestPermissionRequest,
 	SessionNotification,
@@ -202,16 +203,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		// request here still waits for the in-flight turn to finish rather
 		// than abandoning it silently.
 		const onCancel = token.onCancellationRequested(() => {});
-		const { prompt, skippedImageCount } = attachReferencesToPrompt(request);
-		if (skippedImageCount > 0) {
-			stream.markdown(
-				`_${skippedImageCount === 1 ? 'An image attachment' : `${skippedImageCount} image attachments`} ` +
-					`(e.g. an element screenshot) ${skippedImageCount === 1 ? "wasn't" : "weren't"} sent -- ` +
-					'boxcode can\'t take image input yet._\n\n',
-			);
-		}
+		const content = await attachReferencesToPrompt(request);
 		try {
-			await activeClient.prompt(activeSessionId, prompt);
+			await activeClient.prompt(activeSessionId, content);
 		} catch (error) {
 			stream.markdown(`boxcode stopped responding: ${describeError(error)}`);
 		} finally {
@@ -262,7 +256,7 @@ export function activate(context: vscode.ExtensionContext): void {
  * Folds `request.references` -- context attached via the Integrated
  * Browser's own element-picker, console-log-to-chat, and screenshot
  * features (`browserEditorChatFeatures.ts`, upstream and unpatched in this
- * fork) -- into the plain-text prompt `AcpClient.prompt` actually sends.
+ * fork) -- into the content blocks `AcpClient.prompt` actually sends.
  * boxcode never had to build any of the attachment UI itself: clicking an
  * element or attaching console logs already lands here as an ordinary
  * `ChatPromptReference`, the same mechanism any chat participant gets, once
@@ -270,30 +264,47 @@ export function activate(context: vscode.ExtensionContext): void {
  * in VS Code's own `chatAgents.ts` -- it only needs *some* default agent
  * active, not anything browser-specific).
  *
- * Image attachments (element screenshots) are the one thing this can't
- * carry yet: ACP's `session/prompt` only accepts `ContentBlock::Text` today
- * (`protocol.rs`'s own doc comment is explicit that this is a deliberate,
- * not-yet-filled gap, matching the v1 spec's minimum baseline). Silently
- * dropping an attachment the user explicitly chose to send would be worse
- * than saying so -- counted and surfaced as a plain notice in the caller,
- * not swallowed.
+ * Image attachments (element screenshots) are real `ContentBlock::Image`
+ * blocks now, not dropped -- `ChatReferenceBinaryData.data()` is async
+ * (returns the bytes as a `Thenable<Uint8Array>`), which is the whole
+ * reason this function itself is `async`. A `Location` reference (e.g. a
+ * console-log's source position) is stringified by hand rather than via a
+ * bare `String(...)`, which on a `Location` object yields the useless
+ * `"[object Object]"` -- `vscode.d.ts`'s own type for `.value` is
+ * `string | Uri | Location | unknown`, so those are the two known non-string
+ * shapes actually worth special-casing.
  */
-function attachReferencesToPrompt(request: vscode.ChatRequest): { prompt: string; skippedImageCount: number } {
+async function attachReferencesToPrompt(request: vscode.ChatRequest): Promise<PromptContentBlock[]> {
 	const sections: string[] = [];
-	let skippedImageCount = 0;
+	const images: PromptContentBlock[] = [];
 
 	for (const reference of request.references) {
 		if (reference.value instanceof vscode.ChatReferenceBinaryData) {
-			skippedImageCount++;
+			const bytes = await reference.value.data();
+			images.push({
+				type: 'image',
+				data: Buffer.from(bytes).toString('base64'),
+				mimeType: reference.value.mimeType,
+			});
 			continue;
 		}
 		const heading = reference.modelDescription ?? reference.id;
-		const body = typeof reference.value === 'string' ? reference.value : String(reference.value);
+		const body = describeReferenceValue(reference.value);
 		sections.push(`### Attached: ${heading}\n\n${body}`);
 	}
 
-	const prompt = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
-	return { prompt, skippedImageCount };
+	const text = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
+	return [{ type: 'text', text }, ...images];
+}
+
+function describeReferenceValue(value: string | vscode.Uri | vscode.Location | unknown): string {
+	if (typeof value === 'string') {
+		return value;
+	}
+	if (value instanceof vscode.Location) {
+		return `${value.uri.toString()} (line ${value.range.start.line + 1})`;
+	}
+	return String(value);
 }
 
 /**
