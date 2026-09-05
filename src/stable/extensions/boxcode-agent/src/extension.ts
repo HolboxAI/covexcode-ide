@@ -491,12 +491,41 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 		await loaded.catch(() => undefined);
 
 		const { data } = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' });
+		void openBrowserPaneBeside(url);
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
 		return { outcome: 'failed', reason: describeError(error) };
 	} finally {
 		cdp?.dispose();
 		void session?.close();
+	}
+}
+
+/**
+ * The visible half of `check_in_browser`: the CDP tab above is a hidden,
+ * background-only surface for taking a screenshot, so a human watching chat
+ * would otherwise never see the live page the agent just checked -- only a
+ * static image after the fact. `workbench.action.browser.open`'s
+ * `openToSide` opens (or, via `reuseUrlFilter`, reuses) a real Integrated
+ * Browser pane next to whatever's currently active, matching the same
+ * mechanism `LocalhostLinkOpenerContribution` already uses elsewhere in this
+ * tree (`patches/83-ui-auto-open-localhost-browser.patch`) rather than
+ * inventing a second way to open one.
+ *
+ * Deliberately fire-and-forget and swallowed on failure: this is a
+ * convenience on top of an already-successful screenshot, not something
+ * that should turn a working `check_in_browser` result into a failure if
+ * the command is ever unavailable for some reason.
+ */
+async function openBrowserPaneBeside(url: string): Promise<void> {
+	try {
+		await vscode.commands.executeCommand('workbench.action.browser.open', {
+			url,
+			openToSide: true,
+			reuseUrlFilter: url,
+		});
+	} catch {
+		// See doc comment above -- not worth surfacing.
 	}
 }
 
