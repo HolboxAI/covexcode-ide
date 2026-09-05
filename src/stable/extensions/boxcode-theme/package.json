@@ -1,7 +1,7 @@
 {
   "name": "boxcode-theme",
   "displayName": "Boxcode Theme",
-  "description": "boxcode's own default color theme -- an amber/orange accent on top of Dark Modern's base.",
+  "description": "boxcode's own color themes -- an amber/orange accent on top of Dark Modern and Light Modern's bases.",
   "version": "1.0.0",
   "publisher": "boxcode",
   "license": "MIT",
@@ -18,6 +18,12 @@
         "label": "Boxcode Dark",
         "uiTheme": "vs-dark",
         "path": "./themes/boxcode-dark.json"
+      },
+      {
+        "id": "Boxcode Light",
+        "label": "Boxcode Light",
+        "uiTheme": "vs",
+        "path": "./themes/boxcode-light.json"
       }
     ]
   },

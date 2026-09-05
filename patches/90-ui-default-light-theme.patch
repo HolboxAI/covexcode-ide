@@ -1,0 +1,195 @@
+diff --git a/src/vs/workbench/services/themes/common/workbenchThemeService.ts b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+index 59d9b27..ca2d8dd 100644
+--- a/src/vs/workbench/services/themes/common/workbenchThemeService.ts
++++ b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+@@ -44,7 +44,9 @@ export namespace ThemeSettingDefaults {
+ 	// instead, which is an amber accent layered on Dark Modern's base via
+ 	// that theme's own `include`, not a from-scratch palette.
+ 	export const COLOR_THEME_DARK = 'Boxcode Dark';
+-	export const COLOR_THEME_LIGHT = 'Light 2026';
++	// boxcode-ide: same rationale as COLOR_THEME_DARK above -- point new
++	// installs at boxcode's own light theme instead of upstream's 'Light 2026'.
++	export const COLOR_THEME_LIGHT = 'Boxcode Light';
+ 	export const COLOR_THEME_HC_DARK = 'Default High Contrast';
+ 	export const COLOR_THEME_HC_LIGHT = 'Default High Contrast Light';
+ 
+@@ -85,6 +87,11 @@ export function migrateThemeSettingsId(settingsId: string): string {
+ // unchanged below), and reusing it for "modified"/"debugging" state too
+ // would blur a real semantic distinction for a brand color that doesn't
+ // need it there.
++// dropdown.background/editorWidget.background/input.background are also
++// nudged a few points warmer than upstream's flat grays, mirroring the same
++// three keys in boxcode-dark.json -- a slight hue bias toward the accent is
++// what actually reads as "elevated surface" rather than the accent color
++// itself.
+ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'actionBar.toggledBackground': '#383a49',
+ 	'activityBar.activeBorder': '#D97706',
+@@ -110,7 +117,7 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'checkbox.border': '#3C3C3C',
+ 	'debugToolBar.background': '#181818',
+ 	'descriptionForeground': '#9D9D9D',
+-	'dropdown.background': '#313131',
++	'dropdown.background': '#332F29',
+ 	'dropdown.border': '#3C3C3C',
+ 	'dropdown.foreground': '#CCCCCC',
+ 	'dropdown.listBackground': '#1F1F1F',
+@@ -130,12 +137,12 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'editorLineNumber.activeForeground': '#CCCCCC',
+ 	'editorLineNumber.foreground': '#6E7681',
+ 	'editorOverviewRuler.border': '#010409',
+-	'editorWidget.background': '#202020',
++	'editorWidget.background': '#211F1C',
+ 	'errorForeground': '#F85149',
+ 	'focusBorder': '#D97706',
+ 	'foreground': '#CCCCCC',
+ 	'icon.foreground': '#CCCCCC',
+-	'input.background': '#313131',
++	'input.background': '#302C27',
+ 	'input.border': '#3C3C3C',
+ 	'input.foreground': '#CCCCCC',
+ 	'input.placeholderForeground': '#989898',
+@@ -227,21 +234,28 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'widget.border': '#313131'
+ };
+ 
++// boxcode-ide: same treatment as COLOR_THEME_DARK_INITIAL_COLORS above,
++// mirroring extensions/boxcode-theme/themes/boxcode-light.json's own colors
++// block -- textLink.foreground/activeForeground use a darker amber-800
++// (#92400E) rather than the brand's usual #D97706, since link text sits
++// directly on a near-white background and needs the extra contrast; every
++// other key here is either a background/border or paired with white text,
++// where that's not a concern.
+ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'actionBar.toggledBackground': '#dddddd',
+-	'activityBar.activeBorder': '#005FB8',
++	'activityBar.activeBorder': '#D97706',
+ 	'activityBar.background': '#F8F8F8',
+ 	'activityBar.border': '#E5E5E5',
+ 	'activityBar.foreground': '#1F1F1F',
+ 	'activityBar.inactiveForeground': '#616161',
+-	'activityBarBadge.background': '#005FB8',
++	'activityBarBadge.background': '#D97706',
+ 	'activityBarBadge.foreground': '#FFFFFF',
+ 	'badge.background': '#CCCCCC',
+ 	'badge.foreground': '#3B3B3B',
+-	'button.background': '#005FB8',
++	'button.background': '#D97706',
+ 	'button.border': '#0000001a',
+ 	'button.foreground': '#FFFFFF',
+-	'button.hoverBackground': '#0258A8',
++	'button.hoverBackground': '#B45309',
+ 	'button.secondaryBackground': '#E5E5E5',
+ 	'button.secondaryForeground': '#3B3B3B',
+ 	'button.secondaryHoverBackground': '#CCCCCC',
+@@ -252,7 +266,7 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'checkbox.border': '#CECECE',
+ 	'descriptionForeground': '#3B3B3B',
+ 	'diffEditor.unchangedRegionBackground': '#f8f8f8',
+-	'dropdown.background': '#FFFFFF',
++	'dropdown.background': '#FEFCFA',
+ 	'dropdown.border': '#CECECE',
+ 	'dropdown.foreground': '#3B3B3B',
+ 	'dropdown.listBackground': '#FFFFFF',
+@@ -272,26 +286,26 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'editorLineNumber.foreground': '#6E7681',
+ 	'editorOverviewRuler.border': '#E5E5E5',
+ 	'editorSuggestWidget.background': '#F8F8F8',
+-	'editorWidget.background': '#F8F8F8',
++	'editorWidget.background': '#FAF8F6',
+ 	'errorForeground': '#F85149',
+-	'focusBorder': '#005FB8',
++	'focusBorder': '#D97706',
+ 	'foreground': '#3B3B3B',
+ 	'icon.foreground': '#3B3B3B',
+-	'input.background': '#FFFFFF',
++	'input.background': '#FEFCFA',
+ 	'input.border': '#CECECE',
+ 	'input.foreground': '#3B3B3B',
+ 	'input.placeholderForeground': '#767676',
+-	'inputOption.activeBackground': '#BED6ED',
+-	'inputOption.activeBorder': '#005FB8',
++	'inputOption.activeBackground': '#D9770682',
++	'inputOption.activeBorder': '#D97706',
+ 	'inputOption.activeForeground': '#000000',
+ 	'keybindingLabel.foreground': '#3B3B3B',
+ 	'list.activeSelectionBackground': '#E8E8E8',
+ 	'list.activeSelectionForeground': '#000000',
+ 	'list.activeSelectionIconForeground': '#000000',
+-	'list.focusAndSelectionOutline': '#005FB8',
++	'list.focusAndSelectionOutline': '#D97706',
+ 	'list.hoverBackground': '#F2F2F2',
+ 	'menu.border': '#CECECE',
+-	'menu.selectionBackground': '#005FB8',
++	'menu.selectionBackground': '#D97706',
+ 	'menu.selectionForeground': '#ffffff',
+ 	'notebook.cellBorderColor': '#E5E5E5',
+ 	'notebook.selectedCellBackground': '#C8DDF150',
+@@ -303,7 +317,7 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'panel.background': '#F8F8F8',
+ 	'panel.border': '#E5E5E5',
+ 	'panelInput.border': '#E5E5E5',
+-	'panelTitle.activeBorder': '#005FB8',
++	'panelTitle.activeBorder': '#D97706',
+ 	'panelTitle.activeForeground': '#3B3B3B',
+ 	'panelTitle.inactiveForeground': '#3B3B3B',
+ 	'peekViewEditor.matchHighlightBackground': '#BB800966',
+@@ -312,7 +326,7 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'pickerGroup.border': '#E5E5E5',
+ 	'pickerGroup.foreground': '#8B949E',
+ 	'ports.iconRunningProcessForeground': '#369432',
+-	'progressBar.background': '#005FB8',
++	'progressBar.background': '#D97706',
+ 	'quickInput.background': '#F8F8F8',
+ 	'quickInput.foreground': '#3B3B3B',
+ 	'searchEditor.textInputBorder': '#CECECE',
+@@ -333,19 +347,19 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'statusBar.border': '#E5E5E5',
+ 	'statusBar.debuggingBackground': '#FD716C',
+ 	'statusBar.debuggingForeground': '#000000',
+-	'statusBar.focusBorder': '#005FB8',
++	'statusBar.focusBorder': '#D97706',
+ 	'statusBar.foreground': '#3B3B3B',
+ 	'statusBar.noFolderBackground': '#F8F8F8',
+ 	'statusBarItem.compactHoverBackground': '#CCCCCC',
+ 	'statusBarItem.errorBackground': '#C72E0F',
+-	'statusBarItem.focusBorder': '#005FB8',
++	'statusBarItem.focusBorder': '#D97706',
+ 	'statusBarItem.hoverBackground': '#B8B8B850',
+ 	'statusBarItem.prominentBackground': '#6E768166',
+-	'statusBarItem.remoteBackground': '#005FB8',
++	'statusBarItem.remoteBackground': '#D97706',
+ 	'statusBarItem.remoteForeground': '#FFFFFF',
+ 	'tab.activeBackground': '#FFFFFF',
+ 	'tab.activeBorder': '#F8F8F8',
+-	'tab.activeBorderTop': '#005FB8',
++	'tab.activeBorderTop': '#D97706',
+ 	'tab.activeForeground': '#3B3B3B',
+ 	'tab.border': '#E5E5E5',
+ 	'tab.hoverBackground': '#FFFFFF',
+@@ -353,20 +367,20 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'tab.inactiveForeground': '#868686',
+ 	'tab.lastPinnedBorder': '#D4D4D4',
+ 	'tab.selectedBackground': '#ffffffa5',
+-	'tab.selectedBorderTop': '#68a3da',
++	'tab.selectedBorderTop': '#B45309',
+ 	'tab.selectedForeground': '#333333b3',
+ 	'tab.unfocusedActiveBorder': '#F8F8F8',
+ 	'tab.unfocusedActiveBorderTop': '#E5E5E5',
+ 	'tab.unfocusedHoverBackground': '#F8F8F8',
+ 	'terminal.foreground': '#3B3B3B',
+ 	'terminal.inactiveSelectionBackground': '#E5EBF1',
+-	'terminal.tab.activeBorder': '#005FB8',
+-	'terminalCursor.foreground': '#005FB8',
++	'terminal.tab.activeBorder': '#D97706',
++	'terminalCursor.foreground': '#D97706',
+ 	'textBlockQuote.background': '#F8F8F8',
+ 	'textBlockQuote.border': '#E5E5E5',
+ 	'textCodeBlock.background': '#F8F8F8',
+-	'textLink.activeForeground': '#005FB8',
+-	'textLink.foreground': '#005FB8',
++	'textLink.activeForeground': '#92400E',
++	'textLink.foreground': '#92400E',
+ 	'textPreformat.background': '#0000001F',
+ 	'textPreformat.foreground': '#3B3B3B',
+ 	'textSeparator.foreground': '#21262D',
