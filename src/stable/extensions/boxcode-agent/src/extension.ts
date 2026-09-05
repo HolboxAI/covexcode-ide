@@ -6,11 +6,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { AcpClient, RequestPermissionOutcome, RequestPermissionRequest, SessionNotification, SessionUpdate } from './acpClient';
+import { AcpClient, RequestPermissionOutcome, RequestPermissionRequest, SessionNotification, SessionUpdate, ToolCallContent } from './acpClient';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
 const SECRET_API_KEY = 'boxcode.apiKey';
+const DIFF_SCHEME = 'boxcode-diff';
 
 /** Thrown by `ensureCredentials` when the user cancels the setup prompt -- distinguished from a real launch failure so the chat message shown for each reads correctly. */
 class SetupCancelled extends Error {}
@@ -58,6 +59,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	let client: AcpClient | undefined;
 	let sessionId: string | undefined;
 	let ready: Promise<void> | undefined;
+
+	const diffContentProvider = new DiffContentProvider();
+	context.subscriptions.push(
+		vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME, diffContentProvider),
+	);
 
 	function ensureReady(): Promise<void> {
 		if (!ready) {
@@ -112,7 +118,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest).then(respond);
+				void askPermission(permissionRequest, diffContentProvider).then(respond);
 			}
 		};
 
@@ -251,12 +257,31 @@ async function runSetupFlow(): Promise<{ endpoint: string; model: string; apiKey
 	return { endpoint: endpoint.trim(), model: model.trim(), apiKey: apiKey.trim() };
 }
 
-async function askPermission(request: RequestPermissionRequest): Promise<RequestPermissionOutcome> {
+/**
+ * A developer approving a write/edit over ACP was approving blind -- only a
+ * title string, never what would actually change (see `HeadlessSession::
+ * ask_permission`'s own doc comment on `protocol.rs`'s `ToolCallContent::
+ * Diff` for the wire side of this). Scoped deliberately narrow, matching
+ * the research this was built from: `vscode.changes` is a stable *viewer*,
+ * not an approval workflow, so this shows the real diff right before the
+ * existing Allow/Reject modal rather than attempting per-hunk accept/
+ * reject, which would need proposed, unconfirmed-scope multi-diff-editor
+ * menu APIs. Real per-hunk review stays a scoped-out v2.
+ */
+async function askPermission(
+	request: RequestPermissionRequest,
+	diffContentProvider: DiffContentProvider,
+): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
 	const reject = request.options.find(option => option.kind === 'reject_once') ?? request.options.at(-1);
 	const allowLabel = allow?.name ?? 'Allow';
 	const rejectLabel = reject?.name ?? 'Reject';
+
+	const diff = request.toolCall.content;
+	if (diff?.type === 'diff') {
+		await showDiff(diff, diffContentProvider);
+	}
 
 	const choice = await vscode.window.showWarningMessage(
 		`boxcode wants to ${action}`,
@@ -269,6 +294,60 @@ async function askPermission(request: RequestPermissionRequest): Promise<Request
 		return { outcome: 'selected', optionId: allow.optionId };
 	}
 	return { outcome: 'cancelled' };
+}
+
+/**
+ * Backs the virtual `boxcode-diff:` documents `showDiff` hands to
+ * `vscode.changes` -- a document provider is the only stable way to give
+ * VS Code's own diff viewer text that doesn't exist as a real file (the
+ * "before" side of an edit, in particular, is what's on disk *right now*,
+ * not a file `showDiff` is meant to create). One provider instance for the
+ * whole extension host, registered once in `activate()`; each diff gets
+ * its own pair of URIs so two overlapping permission requests (there
+ * should never really be more than one in flight, but nothing enforces
+ * that here) can't clobber each other's content.
+ */
+class DiffContentProvider implements vscode.TextDocumentContentProvider {
+	private readonly documents = new Map<string, string>();
+	private nextId = 1;
+
+	provideTextDocumentContent(uri: vscode.Uri): string {
+		return this.documents.get(uri.toString()) ?? '';
+	}
+
+	/** Registers `content` under a fresh URI and returns it. Never removed -- see the class doc comment; the extension host's lifetime is short enough that this isn't worth the bookkeeping to garbage-collect. */
+	register(content: string): vscode.Uri {
+		const uri = vscode.Uri.from({ scheme: DIFF_SCHEME, path: `/${this.nextId++}` });
+		this.documents.set(uri.toString(), content);
+		return uri;
+	}
+}
+
+/**
+ * Opens boxcode's own diff via VS Code's stable `vscode.changes` command --
+ * the same multi-file diff viewer Source Control's own Changes panel uses
+ * (confirmed against this tree's real `extHostApiCommands.ts`, not a
+ * proposed API). It's a viewer, not an approval workflow -- see
+ * `askPermission`'s own doc comment for why this stops at "show the diff"
+ * rather than attempting per-hunk accept/reject here.
+ */
+async function showDiff(
+	diff: Extract<ToolCallContent, { type: 'diff' }>,
+	diffContentProvider: DiffContentProvider,
+): Promise<void> {
+	const cwd = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(os.homedir());
+	const labelUri = vscode.Uri.joinPath(cwd, diff.path);
+	const leftUri = diffContentProvider.register(diff.oldText ?? '');
+	const rightUri = diffContentProvider.register(diff.newText);
+	try {
+		await vscode.commands.executeCommand('vscode.changes', `boxcode: ${diff.path}`, [
+			[labelUri, leftUri, rightUri],
+		]);
+	} catch {
+		// Never block the actual Allow/Reject decision on the diff viewer
+		// failing to open -- the modal that follows is still the real
+		// approval gate, this is a courtesy on top of it.
+	}
 }
 
 function describeError(error: unknown): string {
