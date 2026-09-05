@@ -1,0 +1,13 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) HolboxAI. Licensed under the MIT License.
+ *  Geist itself is (c) The Geist Project Authors, licensed under the SIL Open Font
+ *  License 1.1 -- see ./OFL.txt in this same directory.
+ *--------------------------------------------------------------------------------------------*/
+
+@font-face {
+	font-family: "Geist";
+	font-display: swap;
+	font-weight: 100 900;
+	font-style: normal;
+	src: url("./Geist-Variable.woff2") format("woff2-variations");
+}
