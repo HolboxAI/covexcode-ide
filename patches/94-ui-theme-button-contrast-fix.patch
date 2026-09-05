@@ -1,0 +1,108 @@
+diff --git a/src/vs/workbench/services/themes/common/workbenchThemeService.ts b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+index ca2d8dd..57ed5ac 100644
+--- a/src/vs/workbench/services/themes/common/workbenchThemeService.ts
++++ b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+@@ -92,6 +92,14 @@ export function migrateThemeSettingsId(settingsId: string): string {
+ // three keys in boxcode-dark.json -- a slight hue bias toward the accent is
+ // what actually reads as "elevated surface" rather than the accent color
+ // itself.
++// activityBarBadge.background/button.background/menu.selectionBackground/
++// statusBarItem.remoteBackground darkened from #D97706 to #B45309 (and
++// button.hoverBackground from #B45309 to #92400E, so hover still darkens
++// further) -- #D97706 against the white text/badge foreground these are
++// always paired with is 3.19:1, below WCAG AA's 4.5:1 for text; #B45309
++// measures 5.02:1. #D97706 itself is untouched everywhere else (borders,
++// underlines, progress fills) -- those aren't text-on-fill pairs, so the
++// same AA text-contrast requirement doesn't apply to them.
+ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'actionBar.toggledBackground': '#383a49',
+ 	'activityBar.activeBorder': '#D97706',
+@@ -99,14 +107,14 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'activityBar.border': '#2B2B2B',
+ 	'activityBar.foreground': '#D7D7D7',
+ 	'activityBar.inactiveForeground': '#868686',
+-	'activityBarBadge.background': '#D97706',
++	'activityBarBadge.background': '#B45309',
+ 	'activityBarBadge.foreground': '#FFFFFF',
+ 	'badge.background': '#616161',
+ 	'badge.foreground': '#F8F8F8',
+-	'button.background': '#D97706',
++	'button.background': '#B45309',
+ 	'button.border': '#FFFFFF12',
+ 	'button.foreground': '#FFFFFF',
+-	'button.hoverBackground': '#B45309',
++	'button.hoverBackground': '#92400E',
+ 	'button.secondaryBackground': '#313131',
+ 	'button.secondaryForeground': '#CCCCCC',
+ 	'button.secondaryHoverBackground': '#3C3C3C',
+@@ -154,7 +162,7 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'menu.background': '#1F1F1F',
+ 	'menu.border': '#454545',
+ 	'menu.foreground': '#CCCCCC',
+-	'menu.selectionBackground': '#D97706',
++	'menu.selectionBackground': '#B45309',
+ 	'menu.separatorBackground': '#454545',
+ 	'notificationCenterHeader.background': '#1F1F1F',
+ 	'notificationCenterHeader.foreground': '#CCCCCC',
+@@ -196,7 +204,7 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'statusBar.noFolderBackground': '#1F1F1F',
+ 	'statusBarItem.focusBorder': '#D97706',
+ 	'statusBarItem.prominentBackground': '#6E768166',
+-	'statusBarItem.remoteBackground': '#D97706',
++	'statusBarItem.remoteBackground': '#B45309',
+ 	'statusBarItem.remoteForeground': '#FFFFFF',
+ 	'tab.activeBackground': '#1F1F1F',
+ 	'tab.activeBorder': '#1F1F1F',
+@@ -238,9 +246,13 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ // mirroring extensions/boxcode-theme/themes/boxcode-light.json's own colors
+ // block -- textLink.foreground/activeForeground use a darker amber-800
+ // (#92400E) rather than the brand's usual #D97706, since link text sits
+-// directly on a near-white background and needs the extra contrast; every
+-// other key here is either a background/border or paired with white text,
+-// where that's not a concern.
++// directly on a near-white background and needs the extra contrast.
++// Correction to this comment's own earlier claim: some of the other keys
++// here ARE paired with white text and DO need the same #D97706->#B45309
++// contrast fix as the dark block above (activityBarBadge.background,
++// button.background/hoverBackground, menu.selectionBackground,
++// statusBarItem.remoteBackground) -- see that block's comment for the
++// actual contrast numbers.
+ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'actionBar.toggledBackground': '#dddddd',
+ 	'activityBar.activeBorder': '#D97706',
+@@ -248,14 +260,14 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'activityBar.border': '#E5E5E5',
+ 	'activityBar.foreground': '#1F1F1F',
+ 	'activityBar.inactiveForeground': '#616161',
+-	'activityBarBadge.background': '#D97706',
++	'activityBarBadge.background': '#B45309',
+ 	'activityBarBadge.foreground': '#FFFFFF',
+ 	'badge.background': '#CCCCCC',
+ 	'badge.foreground': '#3B3B3B',
+-	'button.background': '#D97706',
++	'button.background': '#B45309',
+ 	'button.border': '#0000001a',
+ 	'button.foreground': '#FFFFFF',
+-	'button.hoverBackground': '#B45309',
++	'button.hoverBackground': '#92400E',
+ 	'button.secondaryBackground': '#E5E5E5',
+ 	'button.secondaryForeground': '#3B3B3B',
+ 	'button.secondaryHoverBackground': '#CCCCCC',
+@@ -305,7 +317,7 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'list.focusAndSelectionOutline': '#D97706',
+ 	'list.hoverBackground': '#F2F2F2',
+ 	'menu.border': '#CECECE',
+-	'menu.selectionBackground': '#D97706',
++	'menu.selectionBackground': '#B45309',
+ 	'menu.selectionForeground': '#ffffff',
+ 	'notebook.cellBorderColor': '#E5E5E5',
+ 	'notebook.selectedCellBackground': '#C8DDF150',
+@@ -355,7 +367,7 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'statusBarItem.focusBorder': '#D97706',
+ 	'statusBarItem.hoverBackground': '#B8B8B850',
+ 	'statusBarItem.prominentBackground': '#6E768166',
+-	'statusBarItem.remoteBackground': '#D97706',
++	'statusBarItem.remoteBackground': '#B45309',
+ 	'statusBarItem.remoteForeground': '#FFFFFF',
+ 	'tab.activeBackground': '#FFFFFF',
+ 	'tab.activeBorder': '#F8F8F8',
