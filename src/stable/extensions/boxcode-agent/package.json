@@ -41,7 +41,22 @@
           "ask"
         ]
       }
-    ]
+    ],
+    "configuration": {
+      "title": "boxcode",
+      "properties": {
+        "boxcode.endpoint": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Base URL for boxcode's OpenAI-compatible LLM endpoint (e.g. `https://api.deepseek.com`). Leave empty to be prompted on first use, or if `~/.boxcode/config.toml` already has one set up from using the `boxcode` CLI directly."
+        },
+        "boxcode.model": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Model name to request from the configured endpoint (e.g. `deepseek-chat`)."
+        }
+      }
+    }
   },
   "devDependencies": {
     "@types/node": "24.x"

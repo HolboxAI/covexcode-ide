@@ -111,9 +111,21 @@ export class AcpClient extends EventEmitter {
 	private nextId = 1;
 	private closed = false;
 
-	constructor(boxcodeCommand: string, cwd: string) {
+	/**
+	 * `envOverrides` is deliberately layered on top of `process.env` (this
+	 * extension host's own environment, which VS Code has already resolved
+	 * to match the user's login shell -- see `localProcessExtensionHost.ts`)
+	 * rather than replacing it, and only for the keys actually given: an
+	 * empty override here must never blank out a real `BOXCODE_API_KEY` (or
+	 * an existing `~/.boxcode/config.toml`) the user already has working
+	 * from using the CLI directly.
+	 */
+	constructor(boxcodeCommand: string, cwd: string, envOverrides: NodeJS.ProcessEnv = {}) {
 		super();
-		this.child = cp.spawn(boxcodeCommand, ['--acp'], { cwd });
+		this.child = cp.spawn(boxcodeCommand, ['--acp'], {
+			cwd,
+			env: { ...process.env, ...envOverrides },
+		});
 
 		const rl = readline.createInterface({ input: this.child.stdout });
 		rl.on('line', line => this.handleLine(line));
