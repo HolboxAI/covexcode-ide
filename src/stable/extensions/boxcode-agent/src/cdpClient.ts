@@ -53,12 +53,24 @@ export class CdpClient {
 		}
 	}
 
-	async send<T = unknown>(method: string, params?: unknown): Promise<T> {
+	/**
+	 * `sessionId` matters once a target has been attached via
+	 * `Target.attachToTarget` (see `extension.ts`'s `checkInBrowser`): the
+	 * proxy backing this session (`platform/browserView/common/cdp/proxy.ts`'s
+	 * `CDPBrowserProxy`) routes any command with no `sessionId` to its own
+	 * small `Browser.*`/`Target.*` handler map, never to the actual page --
+	 * `Page.enable` (or any other page-level method) sent without one comes
+	 * back `Method not found`, which looks identical to the method genuinely
+	 * not existing. Omitted (not sent as `undefined`) when absent, so a
+	 * plain `Target.*`/`Browser.*` call's shape stays exactly what the proxy
+	 * already expects for that path.
+	 */
+	async send<T = unknown>(method: string, params?: unknown, sessionId?: string): Promise<T> {
 		const id = this.nextId++;
 		const reply = new Promise<T>((resolve, reject) => {
 			this.pending.set(id, { resolve: resolve as (result: unknown) => void, reject });
 		});
-		await this.session.sendMessage({ id, method, params });
+		await this.session.sendMessage(sessionId ? { id, method, params, sessionId } : { id, method, params });
 		return reply;
 	}
 

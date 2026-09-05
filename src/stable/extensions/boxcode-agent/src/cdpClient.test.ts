@@ -55,6 +55,24 @@ test('send() resolves with the result whose id matches the outgoing command', as
 	assert.deepEqual(await reply, { data: 'aGVsbG8=' });
 });
 
+test('send() includes sessionId on the outgoing message when given one, and omits it otherwise', async () => {
+	// Real regression coverage: `extension.ts`'s checkInBrowser sent every
+	// Page.* command with no sessionId at all for a while, which the CDP
+	// proxy on the other end silently routes to its own browser-level
+	// handlers instead of the actual page -- coming back "Method not
+	// found" for a method (Page.enable) that does exist, just not there.
+	const session = new FakeCdpSession();
+	const cdp = new CdpClient(session);
+
+	void cdp.send('Page.enable', undefined, 'page-session-1');
+	void cdp.send('Target.getTargets');
+
+	const withSession = session.sent[0] as { sessionId?: string };
+	const withoutSession = session.sent[1] as { sessionId?: string };
+	assert.equal(withSession.sessionId, 'page-session-1');
+	assert.equal('sessionId' in withoutSession, false);
+});
+
 test('send() rejects when the reply carries a matching-id error', async () => {
 	const session = new FakeCdpSession();
 	const cdp = new CdpClient(session);
