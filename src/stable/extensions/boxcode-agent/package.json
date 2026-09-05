@@ -25,7 +25,8 @@
   "main": "./out/extension",
   "scripts": {
     "compile": "gulp compile-extension:boxcode-agent",
-    "watch": "gulp watch-extension:boxcode-agent"
+    "watch": "gulp watch-extension:boxcode-agent",
+    "test": "tsc -p . --outDir out-test && node --test out-test/*.test.js"
   },
   "contributes": {
     "chatParticipants": [

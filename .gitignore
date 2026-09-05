@@ -2,6 +2,7 @@
 node_modules/
 dist/
 out/
+out-test/
 *.tsbuildinfo
 npm-debug.log*
 yarn-error.log*
