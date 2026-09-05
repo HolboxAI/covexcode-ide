@@ -1,0 +1,80 @@
+diff --git a/src/vs/base/browser/ui/codicons/codiconStyles.ts b/src/vs/base/browser/ui/codicons/codiconStyles.ts
+index c6dc23c..1a415c4 100644
+--- a/src/vs/base/browser/ui/codicons/codiconStyles.ts
++++ b/src/vs/base/browser/ui/codicons/codiconStyles.ts
+@@ -5,3 +5,9 @@
+ 
+ import './codicon/codicon.css';
+ import './codicon/codicon-modifiers.css';
++// boxcode-ide: piggybacking on this file's own always-loaded wiring (every
++// codiconStyles.ts import site) rather than adding a new one, purely to
++// keep this a one-line change -- see ../fonts/geist/geist.css for the
++// @font-face itself and workbench.contribution.ts for where it's set as
++// the default workbench typeface.
++import '../fonts/geist/geist.css';
+diff --git a/src/vs/workbench/browser/workbench.contribution.ts b/src/vs/workbench/browser/workbench.contribution.ts
+index caa2021..91c36ba 100644
+--- a/src/vs/workbench/browser/workbench.contribution.ts
++++ b/src/vs/workbench/browser/workbench.contribution.ts
+@@ -714,8 +714,16 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
+ 				],
+ 				'included': isMacintosh
+ 			},
++			// boxcode-ide: defaults for the six font-family settings below
++			// point at Geist (bundled -- see src/vs/base/browser/ui/fonts/geist)
++			// with a real system-font fallback stack, instead of upstream's own
++			// empty default (workbench.experimental.fontFamily) or '' (the
++			// other five, which just means "inherit this one"). editor.fontFamily
++			// is deliberately untouched -- code font is a personal preference
++			// developers have strong opinions about, not part of workbench chrome.
+ 			'workbench.experimental.fontFamily': {
+ 				type: 'string',
++				default: 'Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif',
+ 				description: localize('workbench.fontFamily', "Controls the font family in the workbench."),
+ 				'tags': ['experimental']
+ 			},
+@@ -729,7 +737,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
+ 			},
+ 			'workbench.activityBar.experimental.fontFamily': {
+ 				type: 'string',
+-				default: '',
++				default: 'Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif',
+ 				markdownDescription: localize('activityBarFontFamily', "Controls the font family for the activity bar."),
+ 				'tags': ['accessibility', 'experimental']
+ 			},
+@@ -743,7 +751,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
+ 			},
+ 			'workbench.bottomPane.experimental.fontFamily': {
+ 				type: 'string',
+-				default: '',
++				default: 'Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif',
+ 				markdownDescription: localize('bottomPaneFontFamily', "Controls the font family for the bottom panel."),
+ 				'tags': ['accessibility', 'experimental']
+ 			},
+@@ -757,7 +765,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
+ 			},
+ 			'workbench.sideBar.experimental.fontFamily': {
+ 				type: 'string',
+-				default: '',
++				default: 'Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif',
+ 				markdownDescription: localize('sideBarFontFamily', "Controls the font family for the side bars."),
+ 				'tags': ['accessibility', 'experimental']
+ 			},
+@@ -771,7 +779,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
+ 			},
+ 			'workbench.statusBar.experimental.fontFamily': {
+ 				type: 'string',
+-				default: '',
++				default: 'Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif',
+ 				markdownDescription: localize('statusBarFontFamily', "Controls the font family for the status bar."),
+ 				'tags': ['accessibility', 'experimental']
+ 			},
+@@ -785,7 +793,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
+ 			},
+ 			'workbench.tabs.experimental.fontFamily': {
+ 				type: 'string',
+-				default: '',
++				default: 'Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif',
+ 				markdownDescription: localize('tabsFontFamily', "Controls the font family in editor tabs."),
+ 				'tags': ['accessibility', 'experimental']
+ 			},
