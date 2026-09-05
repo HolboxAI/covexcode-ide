@@ -1,0 +1,40 @@
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
+index f2424e3..8e94d53 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
+@@ -986,8 +986,9 @@ export class AgentSessionsWelcomePage extends EditorPane {
+ 
+ 	private async closeEditorAndMaximizeAuxiliaryBar(sessionResource?: URI): Promise<void> {
+ 		const editorToClose = this.input || this._storedInput;
++		const closingWelcomeEditor = !!(editorToClose && this.group.contains(editorToClose));
+ 
+-		if (editorToClose && this.group.contains(editorToClose)) {
++		if (closingWelcomeEditor) {
+ 			// Wait until the active editor changed so that the chat doesn't toggle back
+ 			await new Promise<void>(resolve => {
+ 				const disposable = this.group.onDidActiveEditorChange(e => {
+@@ -1004,9 +1005,21 @@ export class AgentSessionsWelcomePage extends EditorPane {
+ 		} else {
+ 			await this.commandService.executeCommand('workbench.action.chat.open');
+ 		}
+-		const chatViewLocation = this.viewDescriptorService.getViewLocationById(ChatViewId);
+-		if (chatViewLocation === ViewContainerLocation.AuxiliaryBar) {
+-			this.layoutService.setAuxiliaryBarMaximized(true);
++		// boxcode-ide: only maximize on the actual landing-page -> chat
++		// transition (this call is the one that closed the welcome editor).
++		// This function is also the body of openSessionInChat, which is
++		// wired to onDidSubmitRequest and therefore re-runs on *every*
++		// subsequent chat message in an already-open session, not just the
++		// first -- unguarded, it re-maximized every time, which hides the
++		// entire editor part (setAuxiliaryBarMaximized -> the workbench
++		// layout service's own setEditorHidden(true)) and silently closes
++		// any editor opened since, e.g. the Integrated Browser pane
++		// check_in_browser opens beside chat.
++		if (closingWelcomeEditor) {
++			const chatViewLocation = this.viewDescriptorService.getViewLocationById(ChatViewId);
++			if (chatViewLocation === ViewContainerLocation.AuxiliaryBar) {
++				this.layoutService.setAuxiliaryBarMaximized(true);
++			}
+ 		}
+ 	}
+ 
