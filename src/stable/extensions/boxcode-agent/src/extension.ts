@@ -337,7 +337,22 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, 
 			}
 			const title = update.title ?? (update.toolCallId ? toolCallTitles.get(update.toolCallId) : undefined);
 			if (title) {
-				stream.markdown(new vscode.MarkdownString(`${toolCallStatusIcon(update.status)} ${title}\n\n`, true));
+				// appendText(), not raw interpolation: a tool title is
+				// arbitrary text boxcode chose (a shell command, a file
+				// path), never something safe to splice into markdown
+				// source. A command's own title starts with a literal "$ "
+				// (tools.rs's Action::label) -- concatenated after this
+				// icon's own leading "$(...)", two "$"s land close enough
+				// together that the chat renderer's KaTeX math support
+				// reads everything between them as inline math and
+				// silently swallows it, which is genuinely what happened
+				// here before this used the escaping builder API instead
+				// of a template string.
+				const line = new vscode.MarkdownString(undefined, true);
+				line.appendMarkdown(`${toolCallStatusIcon(update.status)} `);
+				line.appendText(title);
+				line.appendMarkdown('\n\n');
+				stream.markdown(line);
 			}
 			// check_in_browser's own result: rendered inline as an image for
 			// the human. Also fed to the model as real vision input when
