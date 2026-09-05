@@ -22,12 +22,22 @@ export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refu
 
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
+/**
+ * Mirrors `protocol.rs`'s own `ToolCallContent` exactly -- the two ACP v1
+ * variants boxcode implements. `Diff.oldText` is absent (not empty) for a
+ * brand-new file, matching `preview_change_text`'s own before-is-`None`
+ * case rather than boxcode sending an empty string for it.
+ */
+export type ToolCallContent =
+	| { type: 'content'; text: string }
+	| { type: 'diff'; path: string; oldText?: string; newText: string };
+
 export interface ToolCallUpdate {
 	toolCallId: string;
 	title?: string;
 	kind?: string;
 	status?: ToolCallStatus;
-	content?: string;
+	content?: ToolCallContent;
 }
 
 export interface AcpToolCall {
@@ -47,10 +57,18 @@ export interface AcpToolCall {
  * plain `string`). Every field here is read defensively in `renderUpdate`
  * (typeof/optional-chaining checks, not a trusted cast), which is the
  * actually-safe way to consume a schema wider than what this reads.
+ *
+ * `content` is widened to both shapes that land in this one wire field:
+ * `agent_message_chunk`'s is a `ContentBlockText`, `tool_call`/
+ * `tool_call_update`'s is a `ToolCallContent` (same field name on the wire
+ * because `protocol.rs`'s tagged enum flattens each variant's own struct
+ * fields onto the notification, per serde's `#[serde(tag = "sessionUpdate")]`
+ * on a newtype variant). `content?.type` still discriminates correctly --
+ * `'text'` is disjoint from `'content'`/`'diff'`.
  */
 export interface SessionUpdate {
 	sessionUpdate: string;
-	content?: ContentBlockText;
+	content?: ContentBlockText | ToolCallContent;
 	title?: string;
 	toolCallId?: string;
 	kind?: string;
