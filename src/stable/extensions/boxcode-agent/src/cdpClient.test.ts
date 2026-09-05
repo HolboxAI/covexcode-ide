@@ -84,6 +84,21 @@ test('send() rejects when the reply carries a matching-id error', async () => {
 	await assert.rejects(reply, /no such target/);
 });
 
+test('send() rejects on its own if no reply ever arrives, instead of hanging forever', async () => {
+	// The real bug this covers: a backgrounded browser tab can fail to
+	// produce a compositor frame for Page.captureScreenshot, so its reply
+	// never comes. Before this timeout existed, that left the returned
+	// promise permanently unsettled -- not rejected, just never resolved --
+	// which is what actually hung a real chat turn end to end.
+	const session = new FakeCdpSession();
+	const cdp = new CdpClient(session);
+
+	const reply = cdp.send('Page.captureScreenshot', { format: 'png' }, undefined, 10);
+	// Deliberately never call session.deliver() -- this is the whole point.
+
+	await assert.rejects(reply, /timed out waiting for a reply to Page\.captureScreenshot/);
+});
+
 test('two outstanding commands are correlated independently, not first-in-first-out', async () => {
 	// The real reason this needs an id at all rather than a plain queue:
 	// CDP replies are not guaranteed to arrive in the order the commands
@@ -136,21 +151,18 @@ test('waitForEvent() rejects if the event never arrives within the timeout', asy
 	await assert.rejects(cdp.waitForEvent('Page.loadEventFired', 10), /timed out/);
 });
 
-test('dispose() stops the client from reacting to further messages', async () => {
+test('dispose() rejects a command still in flight, rather than leaving it to hang', async () => {
 	const session = new FakeCdpSession();
 	const cdp = new CdpClient(session);
 
 	const reply = cdp.send<{ ok: boolean }>('Page.enable');
 	const outgoing = session.sent[0] as { id: number };
 	cdp.dispose();
-	// Delivered after dispose(): must not resolve `reply`, since nothing
-	// should still be listening. Proven by racing it against a short
-	// timeout instead of asserting a negative directly.
-	session.deliver({ id: outgoing.id, result: { ok: true } });
 
-	const outcome = await Promise.race([
-		reply.then(() => 'resolved'),
-		new Promise(resolve => setTimeout(() => resolve('still-pending'), 20)),
-	]);
-	assert.equal(outcome, 'still-pending');
+	await assert.rejects(reply, /disposed/);
+
+	// A message delivered after dispose() must not retroactively resolve
+	// it -- dispose() already rejected and removed it from `pending`, so
+	// this has nothing left to match against.
+	assert.doesNotThrow(() => session.deliver({ id: outgoing.id, result: { ok: true } }));
 });
