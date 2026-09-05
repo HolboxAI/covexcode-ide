@@ -501,6 +501,17 @@ async function showDiff(
  * `CdpClient` below does the request-id correlation `boxcode`'s own ACP
  * client (`AcpClient`) already does for a different protocol.
  *
+ * A `BrowserCDPSession` starts out attached to nothing but the *browser*
+ * level of the CDP proxy (`platform/browserView/common/cdp/proxy.ts`'s
+ * `CDPBrowserProxy`), which only understands a handful of `Browser.*`/
+ * `Target.*` methods -- not `Page.*`. Every `Page.*` call needs a real
+ * page-session `sessionId`, obtained by listing the tab's own CDP targets
+ * and explicitly attaching to the page one (`flatten: true` is required,
+ * the proxy rejects `attachToTarget` without it). Skipping this and
+ * sending `Page.enable` bare is what silently makes it come back
+ * `Method not found` -- indistinguishable from the method genuinely not
+ * existing, which is what made this take a while to actually root-cause.
+ *
  * Never throws: a failure becomes `{ outcome: 'failed', reason }`, which
  * `HeadlessSession::check_browser` on the other end already knows how to
  * turn into text the model can react to (see its own doc comment) --
@@ -512,20 +523,30 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 	let cdp: CdpClient | undefined;
 	try {
 		const tab =
-			vscode.window.browserTabs.find(t => t.url === url) ??
+			vscode.window.browserTabs.find(t => t.url === url || t.url === `${url}/`) ??
 			(await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true }));
 		session = await tab.startCDPSession();
 		cdp = new CdpClient(session);
 
-		await cdp.send('Page.enable');
+		// The tab itself is always the first `type: 'page'` target -- iframes
+		// and workers the page happens to have loaded also show up here, so
+		// this can't just take targetInfos[0].
+		const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>('Target.getTargets');
+		const page = targetInfos.find(t => t.type === 'page');
+		if (!page) {
+			throw new Error('No page target attached to this browser tab.');
+		}
+		const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
+
+		await cdp.send('Page.enable', undefined, sessionId);
 		const loaded = cdp.waitForEvent('Page.loadEventFired', 10_000);
-		await cdp.send('Page.navigate', { url });
+		await cdp.send('Page.navigate', { url }, sessionId);
 		// A page that never fires the load event (a script error, an
 		// infinite spinner) still gets screenshotted as-is below -- that is
 		// itself useful evidence, not a reason to fail the whole check.
 		await loaded.catch(() => undefined);
 
-		const { data } = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' });
+		const { data } = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' }, sessionId);
 		void openBrowserPaneBeside(url);
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
