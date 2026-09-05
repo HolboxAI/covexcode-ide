@@ -27,6 +27,52 @@ const DIFF_SCHEME = 'boxcode-diff';
 class SetupCancelled extends Error {}
 
 /**
+ * A do-nothing `vscode.LanguageModelChat` provider, registered purely to
+ * satisfy a check this extension never otherwise touches: VS Code core's
+ * `$invokeAgent` (`extHostChatAgents2.ts`) resolves a default language model
+ * for *every* chat participant request before calling that participant's
+ * handler at all, regardless of whether the handler reads `request.model` --
+ * this one never does, since it talks to the `boxcode` CLI directly over
+ * ACP. Upstream's own default-resolution only ever picks a model whose
+ * vendor is Copilot's (`languageModels.ts`'s `COPILOT_VENDOR_ID`), and
+ * Copilot's extension is deleted from this fork, so without *some* model
+ * registered under any vendor, every chat request fails before it starts
+ * with "Language model unavailable" -- see this repo's own
+ * `87-ext-language-model-default-fallback.patch`, which is the other half of
+ * this fix: it makes VS Code fall back to the first available model of any
+ * vendor when no Copilot one exists, which is what actually lets a request
+ * carrying *this* stub through.
+ *
+ * `provideLanguageModelChatResponse`/`provideTokenCount` are never expected
+ * to run -- if they do, some other code path started routing a real request
+ * through `request.model` after all, which is worth knowing about loudly
+ * rather than silently returning something plausible-looking.
+ */
+class StubLanguageModelProvider implements vscode.LanguageModelChatProvider {
+	provideLanguageModelChatInformation(): vscode.LanguageModelChatInformation[] {
+		return [
+			{
+				id: 'boxcode',
+				name: 'boxcode',
+				family: 'boxcode',
+				version: '1.0.0',
+				maxInputTokens: 128_000,
+				maxOutputTokens: 8_192,
+				capabilities: {},
+			},
+		];
+	}
+
+	provideLanguageModelChatResponse(): never {
+		throw new Error('StubLanguageModelProvider was invoked for a real request -- boxcode.agent should never route through request.model.');
+	}
+
+	provideTokenCount(): never {
+		throw new Error('StubLanguageModelProvider was invoked for a real request -- boxcode.agent should never route through request.model.');
+	}
+}
+
+/**
  * The minimal-path wiring recorded in boxcode-ide's own `docs/BACKLOG.md`:
  * rather than implementing the full `IAgent` interface the real agentHost
  * backends (`ClaudeAgent`, `CodexAgent`) use -- 1000-2500 lines each,
@@ -73,6 +119,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	const diffContentProvider = new DiffContentProvider();
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME, diffContentProvider),
+	);
+	context.subscriptions.push(
+		vscode.lm.registerLanguageModelChatProvider('boxcode', new StubLanguageModelProvider()),
 	);
 
 	function ensureReady(): Promise<void> {

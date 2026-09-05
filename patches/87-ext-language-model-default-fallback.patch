@@ -1,0 +1,38 @@
+diff --git a/src/vs/workbench/api/common/extHostLanguageModels.ts b/src/vs/workbench/api/common/extHostLanguageModels.ts
+index 016b6bd3..fbf6e3ce 100644
+--- a/src/vs/workbench/api/common/extHostLanguageModels.ts
++++ b/src/vs/workbench/api/common/extHostLanguageModels.ts
+@@ -380,6 +380,33 @@ export class ExtHostLanguageModels implements ExtHostLanguageModelsShape {
+ 				break;
+ 			}
+ 		}
++		// boxcode-ide: Copilot's own extension is removed from this fork, so
++		// no model ever carries COPILOT_VENDOR_ID -- the loop above never
++		// finds anything, which would otherwise make every chat participant
++		// request fail before it reaches the participant's handler at all
++		// (see $invokeAgent's unconditional call to getModelForRequest).
++		// Fall back to any other extension's model registered for this
++		// location, so a non-Copilot participant that never actually reads
++		// `request.model` -- e.g. boxcode.agent, which talks to its own CLI
++		// directly -- isn't blocked by a check whose result it never uses.
++		if (!defaultModelId) {
++			for (const [modelIdentifier, modelData] of this._localModels) {
++				if (modelData.metadata.isDefaultForLocation[ChatAgentLocation.Chat]) {
++					defaultModelId = modelIdentifier;
++					break;
++				}
++			}
++		}
++		// boxcode-ide: still nothing marked default -- fall back to the
++		// first model any extension has registered at all, of any vendor,
++		// rather than leaving every chat participant permanently unusable.
++		// A participant that actually depends on `request.model`'s specific
++		// capabilities would need to select a model explicitly; this only
++		// unblocks the common case of a participant that ignores it.
++		if (!defaultModelId) {
++			const [firstModelId] = this._localModels.keys();
++			defaultModelId = firstModelId;
++		}
+ 		if (!defaultModelId && !forceResolveModels) {
+ 			// Maybe the default wasn't cached so we will try again with resolving the models too
+ 			return this.getDefaultLanguageModel(extension, true);
