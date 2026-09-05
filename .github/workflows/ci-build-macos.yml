@@ -52,6 +52,17 @@ env:
   ORG_NAME: ${{ github.repository_owner }}
   OS_NAME: osx
   VSCODE_QUALITY: stable
+  # build.sh's darwin branch never sets these itself (unlike its windows
+  # branch, which does under its own conditions) -- left unset here, they
+  # default to "build it", so every run was compiling and archiving the
+  # remote-extension-host and REH-web targets alongside the desktop app for
+  # no reason: confirmed by grep that build/osx/prepare_assets.sh (the
+  # actual dmg/zip packaging script) never reads either output directory.
+  # Nothing currently uses a remote/tunnel or browser-based build of this
+  # fork -- testers run the local .app -- so this is real, unused compute on
+  # every single run, not a hedge against a real need.
+  SHOULD_BUILD_REH: 'no'
+  SHOULD_BUILD_REH_WEB: 'no'
 
 # boxcode-ide is private (unlike VSCodium's public repo, where an empty
 # permissions block still allows read access) — GITHUB_TOKEN needs an
@@ -244,20 +255,24 @@ jobs:
       # action's own directory-walking repackage (and silently flatten the
       # permissions on) an Electron .app full of executables.
       #
-      # Minimal set of paths prepare_assets.sh needs in the tarball,
-      # confirmed by grep, not guessed: the app bundle + REH/REH-web bundles
-      # build.sh produces, plus vscode/product.json (the only vscode/ file
+      # Minimal set of paths prepare_assets.sh needs in the tarball: the app
+      # bundle plus vscode/product.json (the only vscode/ file
       # prepare_assets.sh reads, for applicationName/nameLong/
       # tunnelApplicationName - not the whole vscode/ tree, which would drag
       # along node_modules and be enormous). Always created (not gated on
       # generate_assets) - this is the actual fix for "why redo compile just
       # to test a packaging fix".
+      #
+      # Previously also archived the REH/REH-web build outputs on an
+      # unverified claim that prepare_assets.sh needed them - it doesn't
+      # (confirmed by grep: neither "reh" string appears anywhere in that
+      # script), and SHOULD_BUILD_REH/SHOULD_BUILD_REH_WEB above now stop
+      # build.sh from even producing those directories, so archiving them
+      # here would fail outright rather than just waste space.
       - name: Archive compiled build output
         run: |
           tar -czf compiled.tar.gz \
             "VSCode-darwin-${VSCODE_ARCH}" \
-            "vscode-reh-darwin-${VSCODE_ARCH}" \
-            "vscode-reh-web-darwin-${VSCODE_ARCH}" \
             vscode/product.json
 
       # Short retention: this is a same-run relay to the package job, not
