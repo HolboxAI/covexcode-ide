@@ -23,14 +23,18 @@ export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refu
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
 /**
- * Mirrors `protocol.rs`'s own `ToolCallContent` exactly -- the two ACP v1
- * variants boxcode implements. `Diff.oldText` is absent (not empty) for a
- * brand-new file, matching `preview_change_text`'s own before-is-`None`
- * case rather than boxcode sending an empty string for it.
+ * Mirrors `protocol.rs`'s own `ToolCallContent` exactly -- the three
+ * variants boxcode implements (`content`/`diff` are ACP v1's own; `image`
+ * is boxcode's own extension for `check_in_browser`'s result, same
+ * reasoning as `session/checkInBrowser` not being part of ACP's schema
+ * either). `Diff.oldText` is absent (not empty) for a brand-new file,
+ * matching `preview_change_text`'s own before-is-`None` case rather than
+ * boxcode sending an empty string for it.
  */
 export type ToolCallContent =
 	| { type: 'content'; text: string }
-	| { type: 'diff'; path: string; oldText?: string; newText: string };
+	| { type: 'diff'; path: string; oldText?: string; newText: string }
+	| { type: 'image'; mimeType: string; data: string };
 
 export interface ToolCallUpdate {
 	toolCallId: string;
@@ -97,12 +101,29 @@ export type RequestPermissionOutcome =
 	| { outcome: 'cancelled' }
 	| { outcome: 'selected'; optionId: string };
 
+/**
+ * `session/checkInBrowser` -- not part of ACP's own schema (the spec has no
+ * concept of a browser tab), but the same shape and the same deferred-
+ * response mechanism as `session/request_permission`, mirroring
+ * `boxcode`'s own `protocol.rs::CheckInBrowserRequest`/`CheckInBrowserOutcome`
+ * exactly.
+ */
+export interface CheckInBrowserRequest {
+	sessionId: string;
+	url: string;
+}
+
+export type CheckInBrowserOutcome =
+	| { outcome: 'screenshot'; mimeType: string; data: string }
+	| { outcome: 'failed'; reason: string };
+
 interface PendingRequest {
 	resolve: (result: unknown) => void;
 	reject: (error: Error) => void;
 }
 
 type RespondToPermission = (outcome: RequestPermissionOutcome) => void;
+type RespondToBrowserCheck = (outcome: CheckInBrowserOutcome) => void;
 
 /**
  * A minimal ACP v1 client for a `boxcode --acp` subprocess -- JSON-RPC 2.0
@@ -116,12 +137,13 @@ type RespondToPermission = (outcome: RequestPermissionOutcome) => void;
  * Deliberately not a general-purpose JSON-RPC library: boxcode only ever
  * speaks this one small, fixed vocabulary (`initialize` / `session/new` /
  * `session/prompt` sent out; `session/update` / `session/request_permission`
- * read in), so a hand-rolled dispatcher is clearer here than a generic
- * layer neither side needs.
+ * / `session/checkInBrowser` read in), so a hand-rolled dispatcher is
+ * clearer here than a generic layer neither side needs.
  *
  * Emits: `update` (`SessionNotification`), `permissionRequest`
- * (`RequestPermissionRequest`, a callback to answer it), `stderr`
- * (`string`), `exit` (`code`, `signal`), `spawnError` (`Error`).
+ * (`RequestPermissionRequest`, a callback to answer it),
+ * `browserCheckRequest` (`CheckInBrowserRequest`, a callback to answer it),
+ * `stderr` (`string`), `exit` (`code`, `signal`), `spawnError` (`Error`).
  */
 export class AcpClient extends EventEmitter {
 	private readonly child: cp.ChildProcessWithoutNullStreams;
@@ -193,6 +215,13 @@ export class AcpClient extends EventEmitter {
 				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
 			};
 			this.emit('permissionRequest', value.params as RequestPermissionRequest, respond);
+			return;
+		}
+		if (value.method === 'session/checkInBrowser') {
+			const respond: RespondToBrowserCheck = outcome => {
+				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
+			};
+			this.emit('browserCheckRequest', value.params as CheckInBrowserRequest, respond);
 			return;
 		}
 		if (typeof value.id !== 'undefined' && (value.result !== undefined || value.error !== undefined)) {

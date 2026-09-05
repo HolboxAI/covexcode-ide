@@ -10,7 +10,8 @@
   },
   "enabledApiProposals": [
     "chatParticipantAdditions",
-    "defaultChatParticipant"
+    "defaultChatParticipant",
+    "browser"
   ],
   "capabilities": {
     "virtualWorkspaces": false,
