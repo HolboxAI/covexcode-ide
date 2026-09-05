@@ -11,7 +11,8 @@
   "enabledApiProposals": [
     "chatParticipantAdditions",
     "defaultChatParticipant",
-    "browser"
+    "browser",
+    "chatReferenceBinaryData"
   ],
   "capabilities": {
     "virtualWorkspaces": false,

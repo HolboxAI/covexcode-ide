@@ -204,8 +204,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		// request here still waits for the in-flight turn to finish rather
 		// than abandoning it silently.
 		const onCancel = token.onCancellationRequested(() => {});
+		const { prompt, skippedImageCount } = attachReferencesToPrompt(request);
+		if (skippedImageCount > 0) {
+			stream.markdown(
+				`_${skippedImageCount === 1 ? 'An image attachment' : `${skippedImageCount} image attachments`} ` +
+					`(e.g. an element screenshot) ${skippedImageCount === 1 ? "wasn't" : "weren't"} sent -- ` +
+					'boxcode can\'t take image input yet._\n\n',
+			);
+		}
 		try {
-			await activeClient.prompt(activeSessionId, request.prompt);
+			await activeClient.prompt(activeSessionId, prompt);
 		} catch (error) {
 			stream.markdown(`boxcode stopped responding: ${describeError(error)}`);
 		} finally {
@@ -250,6 +258,44 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}),
 	);
+}
+
+/**
+ * Folds `request.references` -- context attached via the Integrated
+ * Browser's own element-picker, console-log-to-chat, and screenshot
+ * features (`browserEditorChatFeatures.ts`, upstream and unpatched in this
+ * fork) -- into the plain-text prompt `AcpClient.prompt` actually sends.
+ * boxcode never had to build any of the attachment UI itself: clicking an
+ * element or attaching console logs already lands here as an ordinary
+ * `ChatPromptReference`, the same mechanism any chat participant gets, once
+ * `boxcode.agent` is the active default agent (see `ChatContextKeys.enabled`
+ * in VS Code's own `chatAgents.ts` -- it only needs *some* default agent
+ * active, not anything browser-specific).
+ *
+ * Image attachments (element screenshots) are the one thing this can't
+ * carry yet: ACP's `session/prompt` only accepts `ContentBlock::Text` today
+ * (`protocol.rs`'s own doc comment is explicit that this is a deliberate,
+ * not-yet-filled gap, matching the v1 spec's minimum baseline). Silently
+ * dropping an attachment the user explicitly chose to send would be worse
+ * than saying so -- counted and surfaced as a plain notice in the caller,
+ * not swallowed.
+ */
+function attachReferencesToPrompt(request: vscode.ChatRequest): { prompt: string; skippedImageCount: number } {
+	const sections: string[] = [];
+	let skippedImageCount = 0;
+
+	for (const reference of request.references) {
+		if (reference.value instanceof vscode.ChatReferenceBinaryData) {
+			skippedImageCount++;
+			continue;
+		}
+		const heading = reference.modelDescription ?? reference.id;
+		const body = typeof reference.value === 'string' ? reference.value : String(reference.value);
+		sections.push(`### Attached: ${heading}\n\n${body}`);
+	}
+
+	const prompt = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
+	return { prompt, skippedImageCount };
 }
 
 /**
