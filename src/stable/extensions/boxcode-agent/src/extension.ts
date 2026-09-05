@@ -18,6 +18,7 @@ import {
 	ToolCallStatus,
 } from './acpClient';
 import { CdpClient } from './cdpClient';
+import { describeError, describeStartupFailure } from './startupFailure';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
@@ -154,10 +155,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (error instanceof SetupCancelled) {
 				stream.markdown('Configuration needed -- send another message when you\'re ready to set boxcode up.');
 			} else {
-				stream.markdown(
-					`Couldn't start \`boxcode --acp\` (${describeError(error)}). Make sure \`boxcode\` is ` +
-						'installed and on your PATH.',
-				);
+				stream.markdown(describeStartupFailure(error, process.platform));
 			}
 			return;
 		}
@@ -644,10 +642,6 @@ async function openBrowserPaneBeside(url: string): Promise<void> {
 	} catch {
 		// See doc comment above -- not worth surfacing.
 	}
-}
-
-function describeError(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
 }
 
 export function deactivate(): void {
