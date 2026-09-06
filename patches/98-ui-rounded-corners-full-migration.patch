@@ -1,0 +1,1802 @@
+diff --git a/src/vs/platform/actionWidget/browser/tabbedActionListWidget.css b/src/vs/platform/actionWidget/browser/tabbedActionListWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/platform/actionWidget/browser/tabbedActionListWidget.css
++++ b/src/vs/platform/actionWidget/browser/tabbedActionListWidget.css
+@@ -20,7 +20,7 @@
+ 
+ .action-widget .tabbed-action-list-tabbar .monaco-custom-radio > .monaco-button {
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .action-widget .tabbed-action-list-tabbar .monaco-custom-radio > .monaco-button:not(.active) {
+
+diff --git a/src/vs/platform/actionWidget/browser/actionWidget.css b/src/vs/platform/actionWidget/browser/actionWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/platform/actionWidget/browser/actionWidget.css
++++ b/src/vs/platform/actionWidget/browser/actionWidget.css
+@@ -457,7 +457,7 @@
+ 	width: 20px;
+ 	height: 20px;
+ 	flex-shrink: 0;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .action-widget .action-list-submenu-indicator.has-submenu {
+
+diff --git a/src/vs/workbench/contrib/preferences/browser/media/keybindingsEditor.css b/src/vs/workbench/contrib/preferences/browser/media/keybindingsEditor.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/preferences/browser/media/keybindingsEditor.css
++++ b/src/vs/workbench/contrib/preferences/browser/media/keybindingsEditor.css
+@@ -209,7 +209,7 @@
+ .keybindings-editor > .keybindings-body > .keybindings-table-container .monaco-table-tr .monaco-table-td .code.strong {
+ 	padding: 1px 4px;
+ 	background-color: rgba(128, 128, 128, 0.17);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .keybindings-editor > .keybindings-body > .keybindings-table-container .monaco-table-tr .monaco-table-td .highlight {
+
+diff --git a/src/vs/workbench/contrib/preferences/browser/media/settingsEditor2.css b/src/vs/workbench/contrib/preferences/browser/media/settingsEditor2.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/preferences/browser/media/settingsEditor2.css
++++ b/src/vs/workbench/contrib/preferences/browser/media/settingsEditor2.css
+@@ -89,7 +89,7 @@
+ 	cursor: pointer;
+ 	margin-right: 4px;
+ 	padding: 0px 4px 2px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .settings-editor > .settings-header > .settings-header-controls .settings-target-container {
+@@ -453,7 +453,7 @@
+ 	font-style: italic;
+ 	margin-right: 4px;
+ 	padding: 0px 4px 2px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-title .codicon {
+@@ -623,7 +623,7 @@
+ 	color: var(--vscode-textPreformat-foreground);
+ 	background-color: var(--vscode-textPreformat-background);
+ 	padding: 1px 3px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	border: 1px solid var(--vscode-textPreformat-border);
+ }
+ 
+@@ -699,7 +699,7 @@
+ 	color: var(--vscode-textPreformat-foreground);
+ 	background-color: var(--vscode-textPreformat-background);
+ 	padding: 2px 5px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .monaco-select-box-dropdown-container > .select-box-details-pane > .select-box-description-markdown a,
+
+diff --git a/src/vs/workbench/contrib/codeEditor/browser/suggestEnabledInput/suggestEnabledInput.css b/src/vs/workbench/contrib/codeEditor/browser/suggestEnabledInput/suggestEnabledInput.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/codeEditor/browser/suggestEnabledInput/suggestEnabledInput.css
++++ b/src/vs/workbench/contrib/codeEditor/browser/suggestEnabledInput/suggestEnabledInput.css
+@@ -5,7 +5,7 @@
+ 
+ .suggest-input-container {
+ 	padding: 2px 6px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .suggest-input-container .monaco-editor-background,
+
+diff --git a/src/vs/workbench/contrib/codeEditor/browser/find/simpleFindWidget.css b/src/vs/workbench/contrib/codeEditor/browser/find/simpleFindWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/codeEditor/browser/find/simpleFindWidget.css
++++ b/src/vs/workbench/contrib/codeEditor/browser/find/simpleFindWidget.css
+@@ -32,8 +32,8 @@
+ 	color: var(--vscode-editorWidget-foreground);
+ 	box-shadow: var(--vscode-shadow-lg);
+ 	border: 1px solid var(--vscode-widget-border);
+-	border-bottom-left-radius: 4px;
+-	border-bottom-right-radius: 4px;
++	border-bottom-left-radius: var(--vscode-cornerRadius-small);
++	border-bottom-right-radius: var(--vscode-cornerRadius-small);
+ 	font-size: 12px;
+ }
+ 
+@@ -104,7 +104,7 @@
+ .monaco-workbench .simple-find-part .monaco-sash {
+ 	left: 0 !important;
+ 	border-left: 1px solid;
+-	border-bottom-left-radius: 4px;
++	border-bottom-left-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .monaco-workbench .simple-find-part .monaco-sash.vertical:before {
+
+diff --git a/src/vs/workbench/contrib/codeEditor/browser/accessibility/accessibility.css b/src/vs/workbench/contrib/codeEditor/browser/accessibility/accessibility.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/codeEditor/browser/accessibility/accessibility.css
++++ b/src/vs/workbench/contrib/codeEditor/browser/accessibility/accessibility.css
+@@ -9,7 +9,7 @@
+ 	color: var(--vscode-editorWidget-foreground);
+ 	box-shadow: var(--vscode-shadow-lg);
+ 	border: 2px solid var(--vscode-focusBorder);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	margin-top: -1px;
+ 	z-index: 2550;
+ }
+
+diff --git a/src/vs/workbench/contrib/browserView/electron-browser/media/browser.css b/src/vs/workbench/contrib/browserView/electron-browser/media/browser.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/browserView/electron-browser/media/browser.css
++++ b/src/vs/workbench/contrib/browserView/electron-browser/media/browser.css
+@@ -536,7 +536,7 @@
+ 
+ 	.browser-overlay-paused-message {
+ 		padding: 20px 40px;
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 		border: 1px solid var(--vscode-editorWidget-border);
+ 		background-color: var(--vscode-editor-background);
+ 		box-shadow: var(--vscode-shadow-lg);
+
+diff --git a/src/vs/workbench/contrib/chat/browser/chatDebug/media/chatDebug.css b/src/vs/workbench/contrib/chat/browser/chatDebug/media/chatDebug.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatDebug/media/chatDebug.css
++++ b/src/vs/workbench/contrib/chat/browser/chatDebug/media/chatDebug.css
+@@ -56,7 +56,7 @@
+ 	border: 1px solid var(--vscode-widget-border, transparent);
+ 	background: transparent;
+ 	color: var(--vscode-foreground);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	font-size: 13px;
+ 	gap: 8px;
+@@ -196,7 +196,7 @@
+ }
+ .chat-debug-overview-metric-card {
+ 	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 12px 16px;
+ 	min-width: 120px;
+ }
+@@ -258,7 +258,7 @@
+ 	border: none;
+ 	background: transparent;
+ 	color: var(--vscode-foreground);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	opacity: 0.7;
+ 	flex-shrink: 0;
+@@ -459,7 +459,7 @@
+ 	font-size: 16px;
+ 	line-height: 1;
+ 	padding: 2px 6px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	opacity: 0.7;
+ }
+ .chat-debug-detail-button.monaco-button:hover {
+@@ -612,7 +612,7 @@
+ .chat-debug-message-section {
+ 	margin-bottom: 4px;
+ 	border: 1px solid var(--vscode-widget-border, transparent);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	overflow: hidden;
+ }
+ .chat-debug-message-section-header {
+@@ -849,7 +849,7 @@
+ 	color: var(--vscode-foreground);
+ 	background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
+ 	border: 1px solid var(--vscode-widget-border, transparent);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ }
+ .chat-debug-cache-filter-button:hover {
+@@ -1055,7 +1055,7 @@
+ .chat-debug-cache-card {
+ 	background: var(--vscode-editorWidget-background);
+ 	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	padding: 10px 12px;
+ 	display: flex;
+ 	flex-direction: column;
+@@ -1095,7 +1095,7 @@
+ }
+ button.chat-debug-cache-finding.is-clickable {
+ 	cursor: pointer;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ button.chat-debug-cache-finding.is-clickable:hover .chat-debug-cache-finding-title {
+ 	text-decoration: underline;
+@@ -1146,7 +1146,7 @@
+ .chat-debug-cache-session-health {
+ 	background: var(--vscode-editorWidget-background);
+ 	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	padding: 10px 12px;
+ 	display: flex;
+ 	flex-direction: column;
+@@ -1254,14 +1254,14 @@
+ 	color: var(--vscode-charts-yellow);
+ 	background: var(--vscode-editorWidget-background);
+ 	border: 1px solid var(--vscode-charts-yellow);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 6px 10px;
+ }
+ .chat-debug-cache-options-table {
+ 	display: flex;
+ 	flex-direction: column;
+ 	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ }
+ .chat-debug-cache-options-row {
+@@ -1366,7 +1366,7 @@
+ 	gap: 6px;
+ 	background: var(--vscode-editorWidget-background);
+ 	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	padding: 12px 14px;
+ }
+ .chat-debug-cache-sig-lane-row {
+@@ -1391,7 +1391,7 @@
+ .chat-debug-cache-sig-bar {
+ 	height: 22px;
+ 	background: var(--vscode-input-background, #2a2a2a);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	overflow: hidden;
+ 	display: flex;
+ 	position: relative;
+@@ -1523,7 +1523,7 @@
+ .chat-debug-cache-sig-breakdown-table {
+ 	margin-top: 8px;
+ 	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ }
+ .chat-debug-cache-sig-breakdown-row {
+@@ -1593,7 +1593,7 @@
+ 	background: var(--vscode-editorWidget-background);
+ 	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+ 	border-left-width: 3px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ }
+ .chat-debug-cache-acc-item.contentDrift,
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/media/chatContextUsageDetails.css b/src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/media/chatContextUsageDetails.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/media/chatContextUsageDetails.css
++++ b/src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/media/chatContextUsageDetails.css
+@@ -69,7 +69,7 @@
+ 	width: 100%;
+ 	height: 4px;
+ 	background-color: var(--vscode-editorWidget-border);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	border: 1px solid var(--vscode-editorWidget-border);
+ 	margin: 4px 0;
+ 	display: flex;
+@@ -78,7 +78,7 @@
+ .chat-context-usage-details .quota-indicator .quota-bar .quota-bit {
+ 	height: 100%;
+ 	background-color: var(--vscode-focusBorder);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	transition: width 0.3s ease;
+ }
+ 
+@@ -90,11 +90,11 @@
+ 		transparent 2px,
+ 		transparent 4px
+ 	);
+-	border-radius: 0 4px 4px 0;
++	border-radius: 0 var(--vscode-cornerRadius-small) var(--vscode-cornerRadius-small) 0;
+ }
+ 
+ .chat-context-usage-details .quota-indicator .quota-bar .quota-bit:not(.output-buffer):has(+ .quota-bit.output-buffer:not([style*="display: none"])) {
+-	border-radius: 4px 0 0 4px;
++	border-radius: var(--vscode-cornerRadius-small) 0 0 var(--vscode-cornerRadius-small);
+ }
+ 
+ /* Output buffer legend */
+
+diff --git a/src/vs/workbench/contrib/chat/browser/chatStatus/media/chatStatus.css b/src/vs/workbench/contrib/chat/browser/chatStatus/media/chatStatus.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatStatus/media/chatStatus.css
++++ b/src/vs/workbench/contrib/chat/browser/chatStatus/media/chatStatus.css
+@@ -265,13 +265,13 @@
+ 	width: 100%;
+ 	height: 4px;
+ 	background-color: var(--vscode-editorWidget-border);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .chat-status-bar-entry-tooltip .quota-indicator .quota-bar .quota-bit {
+ 	height: 100%;
+ 	background-color: var(--vscode-focusBorder);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .chat-status-bar-entry-tooltip .quota-indicator.muted {
+@@ -331,7 +331,7 @@
+ 	align-items: flex-start;
+ 	gap: 6px;
+ 	padding: 8px 10px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	border: 1px solid;
+ 	margin-bottom: 8px;
+ 	font-size: 12px;
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/input/media/chatInputNotificationWidget.css b/src/vs/workbench/contrib/chat/browser/widget/input/media/chatInputNotificationWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/input/media/chatInputNotificationWidget.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/input/media/chatInputNotificationWidget.css
+@@ -175,7 +175,7 @@
+ 	justify-content: center;
+ 	width: 20px;
+ 	height: 20px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	color: var(--vscode-icon-foreground);
+ 	background: transparent;
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/input/media/chatGoalBannerWidget.css b/src/vs/workbench/contrib/chat/browser/widget/input/media/chatGoalBannerWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/input/media/chatGoalBannerWidget.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/input/media/chatGoalBannerWidget.css
+@@ -21,8 +21,8 @@
+ 	box-sizing: border-box;
+ 	border: 1px solid var(--vscode-input-border, transparent);
+ 	border-bottom: none;
+-	border-top-left-radius: 4px;
+-	border-top-right-radius: 4px;
++	border-top-left-radius: var(--vscode-cornerRadius-small);
++	border-top-right-radius: var(--vscode-cornerRadius-small);
+ 	background-color: color-mix(in srgb, var(--vscode-focusBorder) 6%, var(--vscode-editorWidget-background));
+ 	color: var(--vscode-foreground);
+ 	font-size: var(--vscode-agents-fontSize-label1);
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatCodeBlockPill.css b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatCodeBlockPill.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatCodeBlockPill.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatCodeBlockPill.css
+@@ -50,7 +50,7 @@
+ 
+ 	.chat-codeblock-pill-widget {
+ 		border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 		text-wrap: nowrap;
+ 		width: fit-content;
+ 		font-weight: normal;
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatExtensionsContent.css b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatExtensionsContent.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatExtensionsContent.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatExtensionsContent.css
+@@ -6,7 +6,7 @@
+ .chat-extensions-content-part {
+ 	border: 1px solid var(--vscode-chat-requestBorder);
+ 	border-bottom: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .chat-extensions-content-part .extension-list-item {
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatQuestionCarousel.css b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatQuestionCarousel.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatQuestionCarousel.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatQuestionCarousel.css
+@@ -351,7 +351,7 @@
+ 			border: 1px solid var(--vscode-input-border, var(--vscode-chat-requestBorder));
+ 			background-color: var(--vscode-input-background);
+ 			color: var(--vscode-input-foreground);
+-			border-radius: 4px;
++			border-radius: var(--vscode-cornerRadius-small);
+ 			resize: none;
+ 			font-family: var(--vscode-chat-font-family, inherit);
+ 			font-size: var(--vscode-chat-font-size-body-s);
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatThinkingContent.css b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatThinkingContent.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatThinkingContent.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatThinkingContent.css
+@@ -219,7 +219,7 @@
+ 			[data-code] {
+ 				background-color: var(--vscode-textPreformat-background);
+ 				padding: 1px 3px;
+-				border-radius: 4px;
++				border-radius: var(--vscode-cornerRadius-small);
+ 				border: 1px solid var(--vscode-textPreformat-border);
+ 				white-space: pre-wrap;
+ 			}
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatConfirmationWidget.css b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatConfirmationWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatConfirmationWidget.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatConfirmationWidget.css
+@@ -374,7 +374,7 @@
+ 	.chat-editing-session-actions .monaco-button.secondary.monaco-text-button.codicon {
+ 		cursor: pointer;
+ 		padding: 2px;
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 		display: inline-flex;
+ 	}
+ 
+@@ -391,7 +391,7 @@
+ 	}
+ 
+ 	.chat-editing-session-list .monaco-list-row {
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 	}
+ 
+ 	.chat-editing-session-list .monaco-list-row:hover {
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatPullRequestContent.css b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatPullRequestContent.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatPullRequestContent.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatPullRequestContent.css
+@@ -5,7 +5,7 @@
+ 
+ .chat-pull-request-content-part {
+ 	border: 1px solid var(--vscode-chat-requestBorder);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	margin: 4px 0;
+ 	overflow: hidden;
+ }
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatInlineAnchorWidget.css b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatInlineAnchorWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatInlineAnchorWidget.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatInlineAnchorWidget.css
+@@ -5,7 +5,7 @@
+ 
+ .chat-inline-anchor-widget {
+ 	border: 0.5px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	margin: 0 1px;
+ 	padding: 1px 3px;
+ 	text-wrap: nowrap;
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatPlanReview.css b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatPlanReview.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatPlanReview.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatPlanReview.css
+@@ -238,7 +238,7 @@
+ 	border: 1px solid var(--vscode-input-border, var(--vscode-chat-requestBorder));
+ 	background-color: var(--vscode-input-background);
+ 	color: var(--vscode-input-foreground);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	resize: none;
+ 	font-family: var(--vscode-chat-font-family, inherit);
+ 	font-size: var(--vscode-chat-font-size-body-s);
+@@ -273,7 +273,7 @@
+ 	align-items: stretch;
+ 	min-width: 0;
+ 	border: 1px solid transparent;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .interactive-session .chat-plan-review-container .chat-plan-review-comment-row:hover {
+@@ -328,7 +328,7 @@
+ 
+ .interactive-session .chat-plan-review-container .chat-plan-review-comment-remove:hover {
+ 	background: var(--vscode-toolbar-hoverBackground);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .interactive-session .chat-plan-review-container .chat-plan-review-comment-line {
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+@@ -735,7 +735,7 @@
+ 		color: var(--vscode-textPreformat-foreground);
+ 		background-color: var(--vscode-textPreformat-background);
+ 		padding: 1px 3px;
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 		border: 1px solid var(--vscode-textPreformat-border);
+ 		white-space: pre-wrap;
+ 	}
+@@ -1304,7 +1304,7 @@
+ .interactive-session .chat-editing-session .chat-editing-session-actions .monaco-button.secondary.monaco-text-button.codicon {
+ 	cursor: pointer;
+ 	padding: 2px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	display: inline-flex;
+ }
+ 
+@@ -1725,7 +1725,7 @@
+ .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label {
+ 	height: 16px;
+ 	padding: 3px 8px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	display: flex;
+ 	align-items: center;
+ 	color: var(--vscode-icon-foreground);
+@@ -1888,7 +1888,7 @@
+ 	align-items: center;
+ 	height: 16px;
+ 	padding: 3px 5px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	text-decoration: none;
+ 	color: inherit;
+@@ -1947,7 +1947,7 @@
+ .interactive-session .chat-secondary-input-toolbar .chat-sessionPicker-item .action-label {
+ 	height: 16px;
+ 	padding: 3px 8px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	display: flex;
+ 	align-items: center;
+ 	color: var(--vscode-icon-foreground);
+@@ -2263,7 +2263,7 @@
+ 	font-size: 11px;
+ 	padding: 0 4px 0 0;
+ 	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	height: 18px;
+ 	max-width: 100%;
+ 	width: fit-content;
+@@ -2520,8 +2520,8 @@
+ }
+ 
+ .quick-input-widget .interactive-list {
+-	border-bottom-right-radius: 6px;
+-	border-bottom-left-radius: 6px;
++	border-bottom-right-radius: var(--vscode-cornerRadius-medium);
++	border-bottom-left-radius: var(--vscode-cornerRadius-medium);
+ }
+ 
+ .quick-input-widget .interactive-response {
+@@ -2578,7 +2578,7 @@
+ 
+ .chat-used-context-list .monaco-list {
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	width: auto;
+ }
+ 
+@@ -2590,7 +2590,7 @@
+ 
+ .interactive-item-container .chat-resource-widget,
+ .interactive-item-container .chat-agent-widget .monaco-button {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 1px 3px;
+ }
+ 
+@@ -2600,7 +2600,7 @@
+ 	display: inline-flex;
+ 	align-items: center;
+ 	margin-right: 0.5ch;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 0 0 0 3px;
+ }
+ 
+@@ -2611,8 +2611,8 @@
+ 	cursor: pointer;
+ 	padding: 0 2px;
+ 	margin-left: 2px;
+-	border-top-right-radius: 4px;
+-	border-bottom-right-radius: 4px;
++	border-top-right-radius: var(--vscode-cornerRadius-small);
++	border-bottom-right-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .interactive-item-container .chat-agent-command > .monaco-button:hover {
+@@ -2757,7 +2757,7 @@
+ 	flex-direction: column;
+ 	flex-wrap: wrap;
+ 	align-items: center;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	border: 1px solid var(--vscode-chat-requestBorder);
+ 
+ 	.chat-view-changes-icon {
+@@ -2822,7 +2822,7 @@
+ 	}
+ 
+ 	.chat-summary-list .monaco-scrollable-element {
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 	}
+ 
+ 	.insertions {
+@@ -2857,7 +2857,7 @@
+ .chat-quota-error-widget,
+ .chat-rate-limited-widget {
+ 	border: 1px solid var(--vscode-chat-requestBorder);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	margin-bottom: 8px;
+ }
+ 
+@@ -2893,7 +2893,7 @@
+ }
+ 
+ .interactive-session .chat-summary-list .monaco-list .monaco-list-row {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .interactive-session .chat-summary-list .monaco-list .monaco-list-row:hover {
+@@ -2933,7 +2933,7 @@
+ .interactive-session .chat-used-context-label .monaco-button {
+ 	width: fit-content;
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	gap: 0;
+ 	text-align: initial;
+ 	justify-content: initial;
+@@ -3595,7 +3595,7 @@
+ 		justify-content: center;
+ 		background: transparent;
+ 		color: var(--vscode-descriptionForeground);
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 		z-index: 1;
+ 		transition: opacity 80ms ease-out;
+ 	}
+@@ -4026,8 +4026,8 @@
+ 	padding: 0 4px 0 2px;
+ 	gap: 4px;
+ 	cursor: pointer;
+-	border-top-right-radius: 4px;
+-	border-bottom-right-radius: 4px;
++	border-top-right-radius: var(--vscode-cornerRadius-small);
++	border-bottom-right-radius: var(--vscode-cornerRadius-small);
+ 	box-sizing: border-box;
+ }
+ 
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chatViewWelcome.css b/src/vs/workbench/contrib/chat/browser/widget/media/chatViewWelcome.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chatViewWelcome.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chatViewWelcome.css
+@@ -211,7 +211,7 @@
+ 		gap: 6px;
+ 		height: 20px;
+ 		padding: 0 6px;
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 		background-color: var(--vscode-editorWidget-background);
+ 		cursor: pointer;
+ 		border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+
+diff --git a/src/vs/workbench/contrib/chat/browser/aiCustomization/media/aiCustomizationWelcomePromptLaunchers.css b/src/vs/workbench/contrib/chat/browser/aiCustomization/media/aiCustomizationWelcomePromptLaunchers.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/aiCustomization/media/aiCustomizationWelcomePromptLaunchers.css
++++ b/src/vs/workbench/contrib/chat/browser/aiCustomization/media/aiCustomizationWelcomePromptLaunchers.css
+@@ -49,7 +49,7 @@
+ 	padding: 12px 8px 8px;
+ 	margin: 16px 0;
+ 	border: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border) 85%, transparent);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ }
+ 
+ .ai-customization-management-editor .welcome-prompts-section-label {
+@@ -68,7 +68,7 @@
+ 	align-items: center;
+ 	min-height: 36px;
+ 	height: 36px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	background: var(--vscode-agentsChatInput-background);
+ 	border: 1px solid var(--vscode-agentsChatInput-border, var(--vscode-input-border, transparent));
+ 	padding: 0 4px 0 12px;
+@@ -119,7 +119,7 @@
+ 	height: 28px;
+ 	flex-shrink: 0;
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background: transparent;
+ 	color: var(--vscode-descriptionForeground);
+ 	cursor: pointer;
+@@ -182,7 +182,7 @@
+ 	flex-direction: column;
+ 	padding: 10px 12px 12px;
+ 	border: 1px solid var(--vscode-widget-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	background: var(--vscode-sideBar-background);
+ 	cursor: pointer;
+ 	transition: background-color 0.1s ease;
+@@ -238,7 +238,7 @@
+ 	align-items: center;
+ 	gap: 4px;
+ 	padding: 4px 6px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background: var(--vscode-button-secondaryBackground);
+ 	border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-button-border, var(--vscode-contrastBorder, transparent)));
+ }
+
+diff --git a/src/vs/workbench/contrib/chat/browser/aiCustomization/media/aiCustomizationManagement.css b/src/vs/workbench/contrib/chat/browser/aiCustomization/media/aiCustomizationManagement.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/aiCustomization/media/aiCustomizationManagement.css
++++ b/src/vs/workbench/contrib/chat/browser/aiCustomization/media/aiCustomizationManagement.css
+@@ -40,7 +40,7 @@
+ 	gap: 10px;
+ 	padding: 5px 8px;
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background: transparent;
+ 	color: var(--vscode-foreground);
+ 	cursor: pointer;
+@@ -84,7 +84,7 @@
+ 	padding: 4px 8px;
+ 	gap: 10px;
+ 	cursor: pointer;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	transition: background-color 0.1s ease, opacity 0.1s ease;
+ }
+ 
+@@ -154,7 +154,7 @@
+ 	padding: 40px 40px 16px;
+ 	background: var(--vscode-agentsPanel-background);
+ 	border: 1px solid var(--vscode-agentsPanel-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	box-sizing: border-box;
+ }
+ 
+@@ -168,7 +168,7 @@
+ 	height: 26px;
+ 	padding: 0;
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background: transparent;
+ 	color: var(--vscode-foreground);
+ 	cursor: pointer;
+@@ -341,7 +341,7 @@
+ 	cursor: pointer;
+ 	-webkit-user-select: none;
+ 	user-select: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ /* Spacing above non-first group headers */
+@@ -423,7 +423,7 @@
+ 	align-items: center;
+ 	padding: 6px 12px 6px 16px;
+ 	cursor: pointer;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	min-height: 32px;
+ }
+ 
+@@ -695,7 +695,7 @@
+ 	padding: 10px 12px;
+ 	background-color: var(--vscode-sideBar-background);
+ 	border: 1px solid var(--vscode-widget-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	cursor: pointer;
+ 	transition: background-color 0.1s ease;
+ 	flex: 1 1 120px;
+@@ -758,7 +758,7 @@
+ 	padding: 40px 40px 16px;
+ 	background: var(--vscode-agentsPanel-background);
+ 	border: 1px solid var(--vscode-agentsPanel-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ 	box-sizing: border-box;
+ }
+@@ -773,7 +773,7 @@
+ 	padding: 16px;
+ 	background: var(--vscode-agentsPanel-background);
+ 	border: 1px solid var(--vscode-agentsPanel-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ 	box-sizing: border-box;
+ }
+@@ -794,7 +794,7 @@
+ 	padding: 16px;
+ 	background: var(--vscode-agentsPanel-background);
+ 	border: 1px solid var(--vscode-agentsPanel-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ 	box-sizing: border-box;
+ }
+@@ -1054,7 +1054,7 @@
+ 	align-items: center;
+ 	padding: 6px 8px 6px 30px;
+ 	cursor: pointer;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	min-height: 32px;
+ 	gap: 10px;
+ }
+@@ -1105,7 +1105,7 @@
+ 	flex-shrink: 0;
+ 	font-size: var(--vscode-agents-fontSize-label2);
+ 	padding: 2px 8px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	font-weight: var(--vscode-agents-fontWeight-semiBold);
+ }
+ 
+@@ -1209,7 +1209,7 @@
+ 	padding: 0;
+ 	background: var(--vscode-agentsPanel-background);
+ 	border: 1px solid var(--vscode-agentsPanel-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ 	box-sizing: border-box;
+ }
+@@ -1230,7 +1230,7 @@
+ 	justify-content: center;
+ 	width: 26px;
+ 	height: 26px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	background: transparent;
+ 	border: none;
+@@ -1310,7 +1310,7 @@
+ 	flex-shrink: 0;
+ 	height: 26px;
+ 	padding: 0 10px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	border: 1px solid var(--vscode-widget-border);
+ 	background: var(--vscode-button-secondaryBackground);
+ 	color: var(--vscode-button-secondaryForeground);
+@@ -1372,7 +1372,7 @@
+ 	padding: 10px 12px;
+ 	background: var(--vscode-editorWidget-background);
+ 	border: 1px solid var(--vscode-widget-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ }
+ 
+ .ai-customization-management-editor .editor-preview-row-header {
+@@ -1434,7 +1434,7 @@
+ 	padding: 12px 14px;
+ 	background: var(--vscode-editorWidget-background);
+ 	border: 1px solid var(--vscode-widget-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ }
+ 
+ .ai-customization-management-editor .editor-preview-body-content > :first-child {
+@@ -1449,7 +1449,7 @@
+ 	padding: 12px 14px;
+ 	background: var(--vscode-editorWidget-background);
+ 	border: 1px dashed var(--vscode-widget-border);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	color: var(--vscode-descriptionForeground);
+ 	font-size: 12px;
+ }
+@@ -1458,7 +1458,7 @@
+ 	padding: 12px 14px;
+ 	background: var(--vscode-inputValidation-warningBackground);
+ 	border: 1px solid var(--vscode-inputValidation-warningBorder);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	color: var(--vscode-inputValidation-warningForeground);
+ 	display: flex;
+ 	flex-direction: column;
+@@ -1482,7 +1482,7 @@
+ }
+ 
+ .ai-customization-management-editor .embedded-editor-container .monaco-editor {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ /* Initial open transition: a subtle fade + lift plays once when the editor
+
+diff --git a/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditingEditorOverlay.css b/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditingEditorOverlay.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditingEditorOverlay.css
++++ b/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditingEditorOverlay.css
+@@ -7,7 +7,7 @@
+ 	padding: 2px 4px;
+ 	color: var(--vscode-foreground);
+ 	background-color: var(--vscode-editorWidget-background);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	border: 1px solid var(--vscode-editorWidget-border);
+ 	display: flex;
+ 	align-items: center;
+@@ -59,7 +59,7 @@
+ 	padding: 4px 6px;
+ 	font-size: 11px;
+ 	line-height: 14px;
+-	border-radius: 4px; /* same as overlay widget */
++	border-radius: var(--vscode-cornerRadius-small); /* same as overlay widget */
+ }
+ 
+ .chat-editor-overlay-widget .monaco-action-bar .actions-container {
+
+diff --git a/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditingExplanationWidget.css b/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditingExplanationWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditingExplanationWidget.css
++++ b/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditingExplanationWidget.css
+@@ -77,7 +77,7 @@
+ 	justify-content: center;
+ 	width: 18px;
+ 	height: 18px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	color: var(--vscode-foreground);
+ 	opacity: 0.4;
+@@ -131,7 +131,7 @@
+ 	justify-content: center;
+ 	width: 18px;
+ 	height: 18px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	color: var(--vscode-foreground);
+ 	opacity: 0.7;
+@@ -150,7 +150,7 @@
+ 	justify-content: center;
+ 	width: 18px;
+ 	height: 18px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	color: var(--vscode-foreground);
+ 	opacity: 0.7;
+@@ -252,7 +252,7 @@
+ 	justify-content: center;
+ 	width: 20px;
+ 	height: 20px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	color: var(--vscode-foreground);
+ 	opacity: 0;
+
+diff --git a/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditorController.css b/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditorController.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditorController.css
++++ b/src/vs/workbench/contrib/chat/browser/chatEditing/media/chatEditorController.css
+@@ -8,7 +8,7 @@
+ 	transition: opacity 0.2s ease-in-out;
+ 	display: flex;
+ 	box-shadow: var(--vscode-shadow-md);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ }
+ 
+@@ -18,7 +18,7 @@
+ 
+ .chat-diff-change-content-widget .monaco-action-bar {
+ 	padding: 4px 4px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	background-color: var(--vscode-editorWidget-background);
+ 	color: var(--vscode-foreground);
+ 	border: 1px solid var(--vscode-editorWidget-border);
+@@ -30,7 +30,7 @@
+ }
+ 
+ .chat-diff-change-content-widget .monaco-action-bar .action-item .action-label {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	font-size: 11px;
+ 	line-height: 14px;
+ 	padding: 4px 6px;
+
+diff --git a/src/vs/workbench/contrib/chat/browser/planReviewFeedback/media/planReviewFeedback.css b/src/vs/workbench/contrib/chat/browser/planReviewFeedback/media/planReviewFeedback.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/planReviewFeedback/media/planReviewFeedback.css
++++ b/src/vs/workbench/contrib/chat/browser/planReviewFeedback/media/planReviewFeedback.css
+@@ -40,7 +40,7 @@
+ 	border: none;
+ 	color: var(--vscode-input-foreground);
+ 	font: inherit;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 0 0 0 6px;
+ 	outline: none;
+ 	min-width: 150px;
+@@ -90,7 +90,7 @@
+ 	padding: 2px 4px;
+ 	color: var(--vscode-foreground);
+ 	background-color: var(--vscode-editorWidget-background);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	border: 1px solid var(--vscode-editorHoverWidget-border);
+ 	display: flex;
+ 	align-items: center;
+@@ -105,7 +105,7 @@
+ 	padding: 4px 6px;
+ 	font-size: 11px;
+ 	line-height: 14px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .plan-review-feedback-overlay-widget .monaco-action-bar .actions-container {
+
+diff --git a/src/vs/workbench/contrib/chat/browser/agentSessions/experiments/media/agenttitlebarstatuswidget.css b/src/vs/workbench/contrib/chat/browser/agentSessions/experiments/media/agenttitlebarstatuswidget.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/agentSessions/experiments/media/agenttitlebarstatuswidget.css
++++ b/src/vs/workbench/contrib/chat/browser/agentSessions/experiments/media/agenttitlebarstatuswidget.css
+@@ -52,7 +52,7 @@
+ 	gap: 6px;
+ 	padding: 0 10px;
+ 	height: 22px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	flex: 1;
+ 	min-width: 0;
+ 	-webkit-app-region: no-drag;
+@@ -281,7 +281,7 @@
+ 	display: flex;
+ 	align-items: center;
+ 	height: 22px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	background-color: var(--vscode-agentStatusIndicator-background);
+ 	border: 1px solid var(--vscode-commandCenter-border, transparent);
+ 	flex-shrink: 0;
+
+diff --git a/src/vs/workbench/contrib/chat/browser/agentSessions/experiments/media/unifiedQuickAccess.css b/src/vs/workbench/contrib/chat/browser/agentSessions/experiments/media/unifiedQuickAccess.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/agentSessions/experiments/media/unifiedQuickAccess.css
++++ b/src/vs/workbench/contrib/chat/browser/agentSessions/experiments/media/unifiedQuickAccess.css
+@@ -61,7 +61,7 @@
+ 	padding: 4px 12px;
+ 	font-size: 12px;
+ 	font-weight: 500;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background: var(--vscode-button-background);
+ 	color: var(--vscode-button-foreground);
+ 	border: none;
+
+diff --git a/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/media/agentHostChatInputPicker.css b/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/media/agentHostChatInputPicker.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/media/agentHostChatInputPicker.css
++++ b/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/media/agentHostChatInputPicker.css
+@@ -38,7 +38,7 @@
+ 	gap: 4px;
+ 	height: 16px;
+ 	padding: 3px 6px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	color: var(--vscode-icon-foreground);
+ }
+ 
+
+diff --git a/src/vs/workbench/contrib/chat/browser/agentSessions/media/agentsessionsviewer.css b/src/vs/workbench/contrib/chat/browser/agentSessions/media/agentsessionsviewer.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/chat/browser/agentSessions/media/agentsessionsviewer.css
++++ b/src/vs/workbench/contrib/chat/browser/agentSessions/media/agentsessionsviewer.css
+@@ -23,7 +23,7 @@
+ 	}
+ 
+ 	.monaco-list-row {
+-		border-radius: 6px;
++		border-radius: var(--vscode-cornerRadius-medium);
+ 	}
+ 
+ 	.monaco-list-row .force-no-twistie {
+@@ -290,7 +290,7 @@
+ 			padding: 4px 8px;
+ 			box-sizing: border-box;
+ 			border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, transparent));
+-			border-radius: 4px;
++			border-radius: var(--vscode-cornerRadius-small);
+ 			background-color: var(--vscode-editor-background);
+ 			color: var(--vscode-editor-foreground);
+ 
+
+diff --git a/src/vs/workbench/contrib/terminal/browser/media/terminal.css b/src/vs/workbench/contrib/terminal/browser/media/terminal.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/terminal/browser/media/terminal.css
++++ b/src/vs/workbench/contrib/terminal/browser/media/terminal.css
+@@ -271,7 +271,7 @@
+ }
+ 
+ .monaco-workbench.mac .part.sidebar > .title > .title-actions .switch-terminal {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .monaco-workbench .part.sidebar > .title > .title-actions .switch-terminal > .monaco-select-box {
+
+diff --git a/src/vs/workbench/contrib/imageCarousel/browser/media/imageCarousel.css b/src/vs/workbench/contrib/imageCarousel/browser/media/imageCarousel.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/imageCarousel/browser/media/imageCarousel.css
++++ b/src/vs/workbench/contrib/imageCarousel/browser/media/imageCarousel.css
+@@ -80,14 +80,14 @@
+ }
+ 
+ .image-carousel-editor .main-image {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	margin: auto;
+ }
+ 
+ .image-carousel-editor .video-container {
+ 	width: 100%;
+ 	height: 100%;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	overflow: hidden;
+ }
+ 
+@@ -226,7 +226,7 @@
+ 	width: 48px;
+ 	height: 48px;
+ 	border: 2px solid transparent;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	overflow: hidden;
+ 	cursor: pointer;
+ 	transition: border-color 0.15s ease, opacity 0.15s ease;
+
+diff --git a/src/vs/workbench/contrib/terminalContrib/resizeDimensionsOverlay/browser/media/terminalResizeDimensionsOverlay.css b/src/vs/workbench/contrib/terminalContrib/resizeDimensionsOverlay/browser/media/terminalResizeDimensionsOverlay.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/terminalContrib/resizeDimensionsOverlay/browser/media/terminalResizeDimensionsOverlay.css
++++ b/src/vs/workbench/contrib/terminalContrib/resizeDimensionsOverlay/browser/media/terminalResizeDimensionsOverlay.css
+@@ -9,7 +9,7 @@
+ 	top: 50%;
+ 	transform: translate(-50%, -50%);
+ 	padding: 4px 10px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background-color: var(--vscode-editorWidget-background);
+ 	color: var(--vscode-editorWidget-foreground);
+ 	border: 1px solid var(--vscode-editorWidget-border);
+
+diff --git a/src/vs/workbench/contrib/extensions/browser/media/extensionEditor.css b/src/vs/workbench/contrib/extensions/browser/media/extensionEditor.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/extensions/browser/media/extensionEditor.css
++++ b/src/vs/workbench/contrib/extensions/browser/media/extensionEditor.css
+@@ -97,7 +97,7 @@
+ .extension-editor > .header > .details > .title > .pre-release {
+ 	margin-left: 10px;
+ 	padding: 0px 4px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background-color: var(--vscode-extensionIcon-preReleaseForeground);
+ 	color: #ffffff;
+ 	display: flex;
+@@ -124,7 +124,7 @@
+ 	font-style: italic;
+ 	margin-left: 10px;
+ 	padding: 0px 4px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	user-select: none;
+ 	-webkit-user-select: none;
+ }
+@@ -268,17 +268,17 @@
+ /* single install */
+ .extension-editor > .header > .details > .actions-status-container > .monaco-action-bar > .actions-container > .action-item > .extension-action.label,
+ .extension-editor > .header > .details > .actions-status-container > .monaco-action-bar > .actions-container > .action-item.action-dropdown-item.empty > .extension-action.label {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ /* split install */
+ .extension-editor > .header > .details > .actions-status-container > .monaco-action-bar > .actions-container > .action-item.action-dropdown-item:not(.empty) > .extension-action.label {
+-	border-radius: 4px 0 0 4px;
++	border-radius: var(--vscode-cornerRadius-small) 0 0 var(--vscode-cornerRadius-small);
+ }
+ 
+ .extension-editor > .header > .details > .actions-status-container > .monaco-action-bar > .actions-container > .action-item.action-dropdown-item:not(.empty) > .monaco-dropdown .extension-action.label {
+ 	border-left-width: 0;
+-	border-radius: 0 4px 4px 0;
++	border-radius: 0 var(--vscode-cornerRadius-small) var(--vscode-cornerRadius-small) 0;
+ 	padding: 0 2px;
+ }
+ 
+@@ -658,7 +658,7 @@
+ 	font-family: var(--monaco-monospace-font);
+ 	font-size: 90%;
+ 	background-color: rgba(128, 128, 128, 0.17);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 1px 4px;
+ }
+ 
+@@ -736,7 +736,7 @@
+ 	margin-left: 10px;
+ 	background: rgba(173, 173, 173, 0.31);
+ 	padding: 0px 4px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .extension-editor .subcontent .monaco-list-row .extension > .details > .footer {
+
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/media/gettingStarted.css b/src/vs/workbench/contrib/welcomeGettingStarted/browser/media/gettingStarted.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/media/gettingStarted.css
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/media/gettingStarted.css
+@@ -322,7 +322,7 @@
+ 
+ .monaco-workbench .part.editor > .content .gettingStartedContainer .gettingStartedSlideCategories .getting-started-category {
+ 	position: relative;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ }
+ 
+@@ -351,7 +351,7 @@
+ .monaco-workbench .part.editor > .content .gettingStartedContainer .gettingStartedSlide .getting-started-category .new-badge {
+ 	justify-self: flex-end;
+ 	align-self: flex-start;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 2px 4px;
+ 	margin: 4px;
+ 	font-size: 11px;
+@@ -401,7 +401,7 @@
+ 	padding-right: 8px;
+ 	max-width: 24px;
+ 	max-height: 24px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	position: relative;
+ 	top: auto;
+ }
+@@ -449,7 +449,7 @@
+ 	display: flex;
+ 	width: 100%;
+ 	overflow: hidden;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ }
+ 
+ .monaco-workbench .part.editor > .content .gettingStartedContainer .gettingStartedSlideDetails .getting-started-step .button-container:not(:last-of-type) {
+
+diff --git a/src/vs/workbench/contrib/issue/browser/media/issueReporterOverlay.css b/src/vs/workbench/contrib/issue/browser/media/issueReporterOverlay.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/issue/browser/media/issueReporterOverlay.css
++++ b/src/vs/workbench/contrib/issue/browser/media/issueReporterOverlay.css
+@@ -162,7 +162,7 @@
+ 	height: 24px;
+ 	padding: 0 6px;
+ 	border: 1px solid var(--vscode-input-border, #555);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background: var(--vscode-input-background, #3c3c3c);
+ 	color: var(--vscode-input-foreground, #ccc);
+ 	font-size: 12px;
+@@ -174,7 +174,7 @@
+ .issue-reporter-floating-bar .wizard-segmented-btn {
+ 	display: flex;
+ 	align-items: stretch;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	overflow: hidden;
+ }
+ 
+@@ -185,7 +185,7 @@
+ 	padding: 4px 10px;
+ 	cursor: pointer;
+ 	font-size: 12px;
+-	border-radius: 4px 0 0 4px;
++	border-radius: var(--vscode-cornerRadius-small) 0 0 var(--vscode-cornerRadius-small);
+ 	color: var(--vscode-button-foreground, #fff);
+ 	background: var(--vscode-button-background, #0e639c);
+ 	border: 1px solid var(--vscode-button-background, #0e639c);
+@@ -200,7 +200,7 @@
+ 	flex: 0 0 auto;
+ 	padding: 4px 10px;
+ 	height: 26px;
+-	border-radius: 4px 0 0 4px;
++	border-radius: var(--vscode-cornerRadius-small) 0 0 var(--vscode-cornerRadius-small);
+ 	border-right: none !important;
+ 	font-size: 12px;
+ 	line-height: 18px;
+@@ -237,7 +237,7 @@
+ 	align-items: center;
+ 	padding: 4px 4px;
+ 	cursor: pointer;
+-	border-radius: 0 4px 4px 0;
++	border-radius: 0 var(--vscode-cornerRadius-small) var(--vscode-cornerRadius-small) 0;
+ 	color: var(--vscode-button-foreground, #fff);
+ 	background: var(--vscode-button-background, #0e639c);
+ 	border: 1px solid var(--vscode-button-background, #0e639c);
+@@ -252,7 +252,7 @@
+ 	flex: 0 0 auto;
+ 	padding: 4px 6px;
+ 	height: 26px;
+-	border-radius: 0 4px 4px 0;
++	border-radius: 0 var(--vscode-cornerRadius-small) var(--vscode-cornerRadius-small) 0;
+ 	border-left: none !important;
+ 	min-width: 0;
+ }
+@@ -419,7 +419,7 @@
+ 	color: var(--vscode-input-foreground, #ccc);
+ 	background: var(--vscode-input-background, #3c3c3c);
+ 	border: 1px solid var(--vscode-input-border, #555);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 10px 12px;
+ 	outline: none;
+ 	resize: none;
+@@ -464,7 +464,7 @@
+ 	background: transparent !important;
+ 	color: var(--vscode-foreground, #ccc) !important;
+ 	border: 1px solid transparent;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	font-size: 13px;
+ 	line-height: normal;
+ 	transition: border-color 0.15s ease, background 0.15s ease;
+@@ -527,7 +527,7 @@
+ 	padding: 0 4px;
+ 	min-width: 18px;
+ 	height: 18px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	border: 1px solid var(--vscode-input-border, #555);
+ 	font-size: 11px;
+ 	font-family: monospace;
+@@ -628,7 +628,7 @@
+ 	position: relative;
+ 	width: 120px;
+ 	height: 75px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	overflow: hidden;
+ 	border: 1px solid var(--vscode-input-border, #555);
+ 	cursor: pointer;
+@@ -917,7 +917,7 @@
+ 	overflow: visible;
+ 	padding: 8px 12px;
+ 	border: 1px solid var(--vscode-input-border, #444);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .issue-reporter-wizard .review-description .rendered-markdown {
+@@ -1035,7 +1035,7 @@
+ .issue-reporter-wizard .wizard-submit-btn {
+ 	padding: 8px 16px;
+ 	border: 1px solid var(--vscode-button-border, transparent);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	font-size: 13px;
+ 	cursor: pointer;
+ 	font-family: inherit;
+@@ -1139,13 +1139,13 @@
+ 
+ .issue-reporter-wizard .review-diag-group {
+ 	border: 1px solid var(--vscode-input-border, #444);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 6px 12px;
+ }
+ 
+ .issue-reporter-wizard .review-performance-data {
+ 	border: 1px solid var(--vscode-input-border, #444);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	padding: 8px 12px;
+ 	display: flex;
+ 	flex-direction: column;
+@@ -1157,7 +1157,7 @@
+ 	content: '';
+ 	position: absolute;
+ 	inset: 0;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background: var(--vscode-editor-background, #1e1e1e);
+ 	opacity: 0.6;
+ 	pointer-events: none;
+@@ -1348,7 +1348,7 @@
+ 	align-items: center;
+ 	gap: 6px;
+ 	padding: 6px 16px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	font-size: 13px;
+ 	user-select: none;
+@@ -1387,7 +1387,7 @@
+ 
+ /* Annotation Editor Buttons */
+ .issue-reporter-annotation-overlay .monaco-button {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	height: 28px;
+ 	font-size: 13px;
+ 	min-width: 80px;
+@@ -1437,7 +1437,7 @@
+ 	height: 28px;
+ 	min-width: 28px;
+ 	padding: 0;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	cursor: pointer;
+ 	display: flex;
+ 	align-items: center;
+@@ -1516,7 +1516,7 @@
+ 	padding: 10px;
+ 	background: var(--vscode-editorWidget-background, #2d2d2d);
+ 	border: 1px solid var(--vscode-editorWidget-border, #555);
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+ 	z-index: 4;
+ 	min-width: 220px;
+@@ -1616,7 +1616,7 @@
+ .issue-reporter-annotation-overlay .annotation-size-button {
+ 	min-width: 28px;
+ 	height: 24px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	border: 1px solid transparent;
+ 	background: var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.08));
+ 	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground, #ccc));
+
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css b/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
+@@ -59,7 +59,7 @@
+ 	padding: 4px 8px;
+ 	padding-left: 0;
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background-color: transparent;
+ 	color: var(--vscode-descriptionForeground);
+ 	font-size: 13px;
+@@ -228,7 +228,7 @@
+ 
+ /* Style individual session items in the welcome page */
+ .agentSessionsWelcome-sessionsGrid .agent-session-item {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .agentSessionsWelcome-sessionsGrid .agent-session-item:hover {
+@@ -255,7 +255,7 @@
+ 	align-items: center;
+ 	padding: 6px 10px;
+ 	border: none;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	background-color: var(--vscode-toolbar-hoverBackground);
+ 	color: var(--vscode-foreground);
+ 	font-size: 13px;
+@@ -353,7 +353,7 @@
+ 	align-items: center;
+ 	justify-content: center;
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background-color: transparent;
+ 	color: var(--vscode-descriptionForeground);
+ 	cursor: pointer;
+@@ -385,7 +385,7 @@
+ 	gap: 8px;
+ 	padding: 8px 16px;
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background-color: transparent;
+ 	color: var(--vscode-foreground);
+ 	font-size: 13px;
+@@ -496,7 +496,7 @@
+ 	width: 22px;
+ 	height: 22px;
+ 	border: none;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background-color: transparent;
+ 	color: var(--vscode-descriptionForeground);
+ 	cursor: pointer;
+@@ -536,7 +536,7 @@
+ 	align-items: center;
+ 	gap: 12px;
+ 	padding: 8px 12px 8px 8px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	height: 44px;
+ 	box-sizing: border-box;
+ }
+@@ -544,7 +544,7 @@
+ .agentSessionsWelcome-sessionSkeleton-icon {
+ 	width: 20px;
+ 	height: 20px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	background: var(--vscode-welcomePage-tileBorder, var(--vscode-contrastBorder, rgba(128, 128, 128, 0.2)));
+ 	animation: agentSessionsWelcome-shimmer 1.5s ease-in-out infinite;
+ }
+
+diff --git a/src/vs/workbench/contrib/inlineChat/browser/media/inlineChat.css b/src/vs/workbench/contrib/inlineChat/browser/media/inlineChat.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/inlineChat/browser/media/inlineChat.css
++++ b/src/vs/workbench/contrib/inlineChat/browser/media/inlineChat.css
+@@ -377,7 +377,7 @@
+ 	color: var(--vscode-textPreformat-foreground);
+ 	background-color: var(--vscode-textPreformat-background);
+ 	padding: 1px 3px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	border: 1px solid var(--vscode-textPreformat-border);
+ 	white-space: pre-wrap;
+ }
+
+diff --git a/src/vs/workbench/contrib/notebook/browser/contrib/find/notebookFindReplaceWidget.css b/src/vs/workbench/contrib/notebook/browser/contrib/find/notebookFindReplaceWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/notebook/browser/contrib/find/notebookFindReplaceWidget.css
++++ b/src/vs/workbench/contrib/notebook/browser/contrib/find/notebookFindReplaceWidget.css
+@@ -17,8 +17,8 @@
+ 	background-color: var(--vscode-editorWidget-background) !important;
+ 	color: var(--vscode-editorWidget-foreground);
+ 	box-shadow: var(--vscode-shadow-lg);
+-	border-bottom-left-radius: 4px;
+-	border-bottom-right-radius: 4px;
++	border-bottom-left-radius: var(--vscode-cornerRadius-small);
++	border-bottom-right-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .monaco-workbench.monaco-reduce-motion .simple-fr-find-part-wrapper {
+
+diff --git a/src/vs/workbench/contrib/notebook/browser/media/notebookCellChat.css b/src/vs/workbench/contrib/notebook/browser/media/notebookCellChat.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/notebook/browser/media/notebookCellChat.css
++++ b/src/vs/workbench/contrib/notebook/browser/media/notebookCellChat.css
+@@ -7,7 +7,7 @@
+ 	display: none;
+ 	color: inherit;
+ 	padding: 6px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	border: 1px solid var(--vscode-inlineChat-border);
+ 	background: var(--vscode-inlineChat-background);
+ }
+@@ -172,7 +172,7 @@
+ 	color: var(--vscode-textPreformat-foreground);
+ 	background-color: var(--vscode-textPreformat-background);
+ 	padding: 1px 3px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	border: 1px solid var(--vscode-textPreformat-border);
+ }
+ 
+
+diff --git a/src/vs/workbench/contrib/scm/browser/media/scm.css b/src/vs/workbench/contrib/scm/browser/media/scm.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/scm/browser/media/scm.css
++++ b/src/vs/workbench/contrib/scm/browser/media/scm.css
+@@ -379,11 +379,11 @@
+ }
+ 
+ .scm-view .scm-editor-container .monaco-editor {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .scm-view .scm-editor-container .monaco-editor .overflow-guard {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .scm-view .scm-editor {
+@@ -394,7 +394,7 @@
+ 	box-sizing: border-box;
+ 	border: 1px solid var(--vscode-input-border, transparent);
+ 	background-color: var(--vscode-input-background);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .scm-view .button-container {
+
+diff --git a/src/vs/workbench/contrib/debug/browser/media/debugViewlet.css b/src/vs/workbench/contrib/debug/browser/media/debugViewlet.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/debug/browser/media/debugViewlet.css
++++ b/src/vs/workbench/contrib/debug/browser/media/debugViewlet.css
+@@ -283,7 +283,7 @@
+ }
+ 
+ .debug-pane .monaco-list-row .expression .value.changed {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .debug-pane .monaco-inputbox {
+
+diff --git a/src/vs/workbench/browser/parts/activitybar/media/activityaction.css b/src/vs/workbench/browser/parts/activitybar/media/activityaction.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/browser/parts/activitybar/media/activityaction.css
++++ b/src/vs/workbench/browser/parts/activitybar/media/activityaction.css
+@@ -200,7 +200,7 @@
+ 	top: 14px;
+ 	right: 2px;
+ 	padding: 2px 2px;
+-	border-radius: 6px;
++	border-radius: var(--vscode-cornerRadius-medium);
+ }
+ 
+ .monaco-workbench .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item:active .profile-text-overlay,
+
+diff --git a/src/vs/workbench/browser/parts/notifications/media/notificationsToasts.css b/src/vs/workbench/browser/parts/notifications/media/notificationsToasts.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/browser/parts/notifications/media/notificationsToasts.css
++++ b/src/vs/workbench/browser/parts/notifications/media/notificationsToasts.css
+@@ -51,7 +51,7 @@
+ .monaco-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-scrollable-element,
+ .monaco-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-list:not(.element-focused):focus:before,
+ .monaco-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-list-row {
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .monaco-workbench.monaco-reduce-motion > .notifications-toasts .notification-toast-container > .notification-toast {
+
+diff --git a/src/vs/workbench/browser/parts/editor/media/modalEditorPart.css b/src/vs/workbench/browser/parts/editor/media/modalEditorPart.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/browser/parts/editor/media/modalEditorPart.css
++++ b/src/vs/workbench/browser/parts/editor/media/modalEditorPart.css
+@@ -131,7 +131,7 @@
+ 		display: flex;
+ 		align-items: center;
+ 		height: 22px;
+-		border-radius: 4px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 		border: 1px solid var(--vscode-commandCenter-border, transparent);
+ 		overflow: hidden;
+ 		user-select: none;
+
+diff --git a/src/vs/base/browser/ui/tree/media/tree.css b/src/vs/base/browser/ui/tree/media/tree.css
+index 0000000..0000000 100644
+--- a/src/vs/base/browser/ui/tree/media/tree.css
++++ b/src/vs/base/browser/ui/tree/media/tree.css
+@@ -84,8 +84,8 @@
+ 	z-index: 100;
+ 	margin: 0 10px 0 6px;
+ 	border: 1px solid var(--vscode-widget-border);
+-	border-bottom-left-radius: 4px;
+-	border-bottom-right-radius: 4px;
++	border-bottom-left-radius: var(--vscode-cornerRadius-small);
++	border-bottom-right-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .monaco-enable-motion .monaco-tree-type-filter {
+
+diff --git a/src/vs/base/browser/ui/dialog/dialog.css b/src/vs/base/browser/ui/dialog/dialog.css
+index 0000000..0000000 100644
+--- a/src/vs/base/browser/ui/dialog/dialog.css
++++ b/src/vs/base/browser/ui/dialog/dialog.css
+@@ -236,7 +236,7 @@
+ 	outline-width: 1px;
+ 	outline-style: solid;
+ 	outline-color: var(--vscode-focusBorder);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ 
+
+diff --git a/src/vs/editor/standalone/browser/iPadShowKeyboard/iPadShowKeyboard.css b/src/vs/editor/standalone/browser/iPadShowKeyboard/iPadShowKeyboard.css
+index 0000000..0000000 100644
+--- a/src/vs/editor/standalone/browser/iPadShowKeyboard/iPadShowKeyboard.css
++++ b/src/vs/editor/standalone/browser/iPadShowKeyboard/iPadShowKeyboard.css
+@@ -15,7 +15,7 @@
+ 	overflow: hidden;
+ 	background: url('keyboard-light.svg') center center no-repeat;
+ 	border: 4px solid #F6F6F6;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ }
+ 
+ .monaco-editor.vs-dark .iPadShowKeyboard {
+
+diff --git a/src/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.css b/src/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.css
++++ b/src/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.css
+@@ -6,7 +6,7 @@
+ .post-edit-widget {
+ 	box-shadow: var(--vscode-shadow-lg);
+ 	border: 1px solid var(--vscode-widget-border, transparent);
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	color: var(--vscode-button-foreground);
+ 	background-color: var(--vscode-button-background);
+ 	overflow: hidden;
+
+diff --git a/src/vs/editor/contrib/rename/browser/renameWidget.css b/src/vs/editor/contrib/rename/browser/renameWidget.css
+index 0000000..0000000 100644
+--- a/src/vs/editor/contrib/rename/browser/renameWidget.css
++++ b/src/vs/editor/contrib/rename/browser/renameWidget.css
+@@ -6,7 +6,7 @@
+ .monaco-editor .rename-box {
+ 	z-index: 100;
+ 	color: inherit;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	box-shadow: var(--vscode-shadow-lg);
+ }
+ 
+@@ -16,7 +16,7 @@
+ 
+ .monaco-editor .rename-box .rename-input-with-button {
+ 	padding: 3px;
+-	border-radius: 4px;
++	border-radius: var(--vscode-cornerRadius-small);
+ 	width: calc(100% - 8px); /* 4px padding on each side */
+ }
+ 
+
+diff --git a/src/vs/editor/browser/widget/diffEditor/style.css b/src/vs/editor/browser/widget/diffEditor/style.css
+index 0000000..0000000 100644
+--- a/src/vs/editor/browser/widget/diffEditor/style.css
++++ b/src/vs/editor/browser/widget/diffEditor/style.css
+@@ -381,7 +381,7 @@
+ 
+ 					.actions-container {
+ 						width: fit-content;
+-						border-radius: 4px;
++						border-radius: var(--vscode-cornerRadius-small);
+ 						background: var(--vscode-editorGutter-itemBackground);
+ 
+ 						.action-item {
