@@ -19,6 +19,7 @@ import {
 	ToolCallStatus,
 } from './acpClient';
 import { CdpClient } from './cdpClient';
+import { findLocalhostUrl } from './localhostUrl';
 import { describeError, describeStartupFailure } from './startupFailure';
 
 const PARTICIPANT_ID = 'boxcode.agent';
@@ -118,6 +119,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	let client: AcpClient | undefined;
 	let sessionId: string | undefined;
 	let ready: Promise<void> | undefined;
+	// Persists for the life of the extension host, not just one turn -- a
+	// dev server started earlier in the conversation is still running, and
+	// re-popping the browser open every time its URL appears again in later
+	// command output (e.g. a second `curl` check) would be exactly the kind
+	// of over-eager behavior the auto-open feature needs to avoid. See
+	// renderUpdate's own doc comment on this whole mechanism.
+	const openedDevServerUrls = new Set<string>();
 
 	const diffContentProvider = new DiffContentProvider();
 	context.subscriptions.push(
@@ -175,7 +183,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls);
 			}
 		};
 		const onPermissionRequest = (
@@ -370,7 +378,50 @@ function appendTitleSafely(line: vscode.MarkdownString, title: string): void {
 	line.appendMarkdown(escaped.value.replace(/\$/g, '\\$&'));
 }
 
-function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, toolCallTitles: Map<string, string>): void {
+/**
+ * Auto-opens the Integrated Browser the moment a shell command's own output
+ * mentions a dev server it just started (a "Local: http://localhost:5173/"
+ * line, the same shape `npm run dev`/`vite`/`python3 -m http.server` all
+ * print) -- without the model needing to decide to call `check_in_browser`
+ * first. Cursor's own equivalent (`autoOpenLocalhostUrls`) does the same
+ * thing for exactly the same reason: a human watching an agent scaffold a
+ * project expects to *see* it the moment it's running, not only once the
+ * model separately decides that's worth doing.
+ *
+ * Scoped deliberately narrow to avoid the false-positive class this could
+ * otherwise cause:
+ * - Only from a shell command's (`run_command`, title `"$ ..."`) own
+ *   *plain-text* output (`ToolCallContent`'s `content` variant) -- never
+ *   from a file read/write, whose content could just as easily be a URL
+ *   *string* the code happens to contain (a comment, a config value)
+ *   rather than a server this session actually started.
+ * - `findLocalhostUrl` itself only ever matches `localhost`/`127.0.0.1`/
+ *   `0.0.0.0` (see that module's own doc comment) -- never a real,
+ *   non-local URL a command's output might mention (a deploy target, a
+ *   README link, a curl target).
+ * - Each URL only triggers this once per extension-host lifetime
+ *   (`openedDevServerUrls`), not once per line of matching output -- a dev
+ *   server's own log output often repeats its own "Local:" URL, and
+ *   `checkInBrowser` itself already reuses an existing tab for the same
+ *   URL rather than opening a second one, but there's no reason to redo
+ *   the CDP round trip every time.
+ * - Fire-and-forget, failure swallowed: this is a convenience layered on
+ *   top of whatever the command's own result already is, never something
+ *   that should turn a successful command into a failed turn.
+ */
+function autoOpenDevServerUrl(update: SessionUpdate, title: string | undefined, openedDevServerUrls: Set<string>): void {
+	if (update.content?.type !== 'content' || !title?.startsWith('$ ')) {
+		return;
+	}
+	const url = findLocalhostUrl(update.content.text);
+	if (!url || openedDevServerUrls.has(url)) {
+		return;
+	}
+	openedDevServerUrls.add(url);
+	void checkInBrowser(url);
+}
+
+function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, toolCallTitles: Map<string, string>, openedDevServerUrls: Set<string>): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
 			const content = update.content;
@@ -405,6 +456,7 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, 
 			if (update.content?.type === 'image') {
 				stream.markdown(`![screenshot](data:${update.content.mimeType};base64,${update.content.data})`);
 			}
+			autoOpenDevServerUrl(update, title, openedDevServerUrls);
 			break;
 		}
 		default:
