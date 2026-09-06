@@ -330,6 +330,46 @@ function toolCallStatusIcon(status: ToolCallStatus | undefined): string {
 	}
 }
 
+/**
+ * Appends a tool-call title, working around a real gap in `appendText()`'s
+ * own escaping rather than a hypothetical one -- confirmed live in a built
+ * dmg, not just reasoned about, and confirmed again here against the real
+ * bundled `marked` + KaTeX extension (`src/vs/base/common/marked/marked.js`,
+ * `markedKatexExtension.ts`), not just by re-reading the code a second time.
+ *
+ * A command's title starts with a literal "$ " (`tools.rs`'s
+ * `Action::label`); `appendText()`'s escaping calls `escapeIcons()`, which
+ * only escapes text shaped like `$(word)` (protecting prose that happens to
+ * mention a real icon), never a bare "$" with no parens after it. That "$ "
+ * sails through unescaped, lands right after this icon's own "$(...)"
+ * syntax, and the chat renderer's KaTeX math support reads everything
+ * between the two "$"s as inline math -- silently swallowing the icon and
+ * however much of the title comes before the next "$", which is exactly the
+ * "$ " itself.
+ *
+ * A first attempt at fixing this wrapped a `$`-containing title in an inline
+ * code span instead, on the theory that code spans are tokenized before any
+ * later inline rule gets to look inside them -- verified false by actually
+ * running the real tokenizer: `marked`'s inline-token loop tries registered
+ * extensions (including the KaTeX one) *before* its own code-span rule, so
+ * the backtick fence is just an ordinary character to the math regex, and
+ * the span never exists. It also leaked a stray backtick into the next
+ * markdown link. Left as a cautionary comment, not a second version to
+ * maintain: the actual fix is to escape the character `appendText()` misses,
+ * not to route around its escaping with a different construct.
+ *
+ * `escapeMarkdownSyntaxTokens`'s own character class (`\`*_{}[]()#+!~`, see
+ * `htmlContent.ts`) never included `$` -- there was never a supported way to
+ * ask `appendText()` to do this for us. This runs the real `appendText()`
+ * first (for everything it already escapes correctly) via a throwaway
+ * `MarkdownString`, then escapes the one remaining gap by hand.
+ */
+function appendTitleSafely(line: vscode.MarkdownString, title: string): void {
+	const escaped = new vscode.MarkdownString(undefined, true);
+	escaped.appendText(title);
+	line.appendMarkdown(escaped.value.replace(/\$/g, '\\$&'));
+}
+
 function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, toolCallTitles: Map<string, string>): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -349,17 +389,11 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, 
 				// appendText(), not raw interpolation: a tool title is
 				// arbitrary text boxcode chose (a shell command, a file
 				// path), never something safe to splice into markdown
-				// source. A command's own title starts with a literal "$ "
-				// (tools.rs's Action::label) -- concatenated after this
-				// icon's own leading "$(...)", two "$"s land close enough
-				// together that the chat renderer's KaTeX math support
-				// reads everything between them as inline math and
-				// silently swallows it, which is genuinely what happened
-				// here before this used the escaping builder API instead
-				// of a template string.
+				// source. This alone turned out not to be enough for one
+				// specific case -- see appendTitleSafely's own doc comment.
 				const line = new vscode.MarkdownString(undefined, true);
 				line.appendMarkdown(`${toolCallStatusIcon(update.status)} `);
-				line.appendText(title);
+				appendTitleSafely(line, title);
 				line.appendMarkdown('\n\n');
 				stream.markdown(line);
 			}
@@ -595,6 +629,13 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 		const tab =
 			vscode.window.browserTabs.find(t => t.url === url || t.url === `${url}/`) ??
 			(await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true }));
+		// Fired here, not gated on the CDP screenshot succeeding below: a
+		// human watching chat should see *something* happening the moment a
+		// real tab exists, not only after a successful capture -- with the
+		// old placement, a check that timed out (the CDP steps below can
+		// each take up to their own timeout) left the human staring at
+		// nothing at all, unable to tell whether boxcode was doing anything.
+		void openBrowserPaneBeside(url);
 		session = await tab.startCDPSession();
 		cdp = new CdpClient(session);
 
@@ -617,7 +658,6 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 		await loaded.catch(() => undefined);
 
 		const { data } = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' }, sessionId);
-		void openBrowserPaneBeside(url);
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
 		return { outcome: 'failed', reason: describeError(error) };
@@ -628,10 +668,13 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 }
 
 /**
- * The visible half of `check_in_browser`: the CDP tab above is a hidden,
- * background-only surface for taking a screenshot, so a human watching chat
- * would otherwise never see the live page the agent just checked -- only a
- * static image after the fact. `workbench.action.browser.open`'s
+ * The visible half of `check_in_browser`: the CDP tab `checkInBrowser`
+ * drives is a hidden, background-only surface for taking a screenshot, so a
+ * human watching chat would otherwise never see the live page at all --
+ * called as soon as the tab exists, not gated on the screenshot succeeding
+ * (a real bug this once was: a check that timed out left nothing visible
+ * on screen for the whole wait, indistinguishable from the Integrated
+ * Browser not working at all). `workbench.action.browser.open`'s
  * `openToSide` opens (or, via `reuseUrlFilter`, reuses) a real Integrated
  * Browser pane next to whatever's currently active, matching the same
  * mechanism `LocalhostLinkOpenerContribution` already uses elsewhere in this
@@ -639,9 +682,9 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
  * inventing a second way to open one.
  *
  * Deliberately fire-and-forget and swallowed on failure: this is a
- * convenience on top of an already-successful screenshot, not something
- * that should turn a working `check_in_browser` result into a failure if
- * the command is ever unavailable for some reason.
+ * convenience alongside `check_in_browser`'s own result, not something
+ * that should turn a working (or failing) `check_in_browser` call into a
+ * different outcome if the command is ever unavailable for some reason.
  */
 async function openBrowserPaneBeside(url: string): Promise<void> {
 	try {
