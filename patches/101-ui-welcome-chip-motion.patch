@@ -1,0 +1,55 @@
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css b/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
+index c2556cf..fc951ab 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
+@@ -162,6 +162,50 @@
+ 	color: var(--vscode-descriptionForeground) !important;
+ }
+ 
++/*
++ * boxcode-ide: entrance + hover motion for the welcome chat input's example
++ * prompt chips. A one-shot mount animation (not a loop), so there's nothing
++ * to pause on visibility change -- unlike the title-bar/activity-bar
++ * chrome-hiding above, this needs no hook into setEditorVisible().
++ */
++@keyframes boxcodeChipEnter {
++	from {
++		opacity: 0;
++		transform: translateY(4px);
++	}
++	to {
++		opacity: 1;
++		transform: translateY(0);
++	}
++}
++
++.agentSessionsWelcome-chatSection .agentSessionsWelcome-suggestedPrompt {
++	animation: boxcodeChipEnter 200ms ease-out backwards;
++	transition: transform 120ms ease-out, background-color 120ms ease-out;
++}
++
++.agentSessionsWelcome-chatSection .agentSessionsWelcome-suggestedPrompt:nth-child(2) {
++	animation-delay: 40ms;
++}
++
++.agentSessionsWelcome-chatSection .agentSessionsWelcome-suggestedPrompt:nth-child(3) {
++	animation-delay: 80ms;
++}
++
++.agentSessionsWelcome-chatSection .agentSessionsWelcome-suggestedPrompt:nth-child(4) {
++	animation-delay: 120ms;
++}
++
++.agentSessionsWelcome-chatSection .agentSessionsWelcome-suggestedPrompt:hover {
++	transform: translateY(-1px);
++}
++
++@media (prefers-reduced-motion: reduce) {
++	.agentSessionsWelcome-chatSection .agentSessionsWelcome-suggestedPrompt {
++		animation: none;
++	}
++}
++
+ /* Sessions grid */
+ .agentSessionsWelcome-sessionsGrid {
+ 	width: 100%;
