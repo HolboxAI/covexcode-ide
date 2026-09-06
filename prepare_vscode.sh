@@ -162,20 +162,38 @@ if [[ "${DISABLE_UPDATE}" == "yes" ]] && [[ -f ../patches/00-update-disable.patc
   mv ../patches/00-update-disable.patch.yet ../patches/00-update-disable.patch
 fi
 
-for file in ../patches/*.json; do
+# boxcode-ide: a plain glob (`../patches/*.patch`) expands in lexicographic
+# (ASCII string) order, not numeric order -- "100-foo.patch" sorts between
+# "10-bar.patch" and "11-baz.patch" (compare char-by-char: "-" (0x2D) sorts
+# before "0" (0x30)), so a 3-digit patch would apply before the 2-digit
+# patches it depends on. Confirmed the hard way: PR #51/#52's CI failed
+# applying patches/100 and patches/101 before patches/84 and patches/97-99,
+# which they build on. `sort -V` fixes the numeric ordering.
+#
+# This is NOT a pure no-op versus the old order, and isn't claimed to be one:
+# `sort -V` also reorders "00-extension-disable-signature-verification"
+# ahead of the "00-ext-*" trio (version-sort treats "-" differently from
+# lexicographic sort in a non-digit run). Verified this specific reorder is
+# harmless -- the four patches involved touch disjoint files (confirmed by
+# applying all four in both orders against the pinned upstream commit and
+# diffing the resulting trees: byte-identical). Any future patch pair where
+# a hyphen competes with a letter at the same column could reorder the same
+# way; if that ever involves two patches touching the same file, that's the
+# one thing worth re-checking by hand.
+for file in $(find ../patches -maxdepth 1 -name '*.json' | sort -V); do
   if [[ -f "${file}" ]]; then
     apply_actions "${file}"
   fi
 done
 
-for file in ../patches/*.patch; do
+for file in $(find ../patches -maxdepth 1 -name '*.patch' | sort -V); do
   if [[ -f "${file}" ]]; then
     apply_patch "${file}"
   fi
 done
 
 if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-  for file in ../patches/insider/*.patch; do
+  for file in $(find ../patches/insider -maxdepth 1 -name '*.patch' 2>/dev/null | sort -V); do
     if [[ -f "${file}" ]]; then
       apply_patch "${file}"
     fi
@@ -183,14 +201,14 @@ if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
 fi
 
 if [[ -d "../patches/${OS_NAME}/" ]]; then
-  for file in "../patches/${OS_NAME}/"*.patch; do
+  for file in $(find "../patches/${OS_NAME}" -maxdepth 1 -name '*.patch' | sort -V); do
     if [[ -f "${file}" ]]; then
       apply_patch "${file}"
     fi
   done
 fi
 
-for file in ../patches/user/*.patch; do
+for file in $(find ../patches/user -maxdepth 1 -name '*.patch' 2>/dev/null | sort -V); do
   if [[ -f "${file}" ]]; then
     apply_patch "${file}"
   fi
