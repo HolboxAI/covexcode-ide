@@ -11,8 +11,11 @@ import {
 	BrowserInteraction,
 	CheckInBrowserOutcome,
 	CheckInBrowserRequest,
+	fetchProviders,
 	InteractInBrowserOutcome,
 	InteractInBrowserRequest,
+	probeBinaryExists,
+	ProviderDescriptor,
 	PromptContentBlock,
 	RequestPermissionOutcome,
 	RequestPermissionRequest,
@@ -30,6 +33,16 @@ const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
 const SECRET_API_KEY = 'boxcode.apiKey';
 const DIFF_SCHEME = 'boxcode-diff';
+
+/** The configured `boxcode.path` setting if set, otherwise the bare command
+ * name resolved off PATH -- an escape hatch for a binary installed
+ * somewhere a GUI-launched app's inherited PATH doesn't reach (e.g.
+ * `~/.cargo/bin` on macOS, invisible to a Finder-launched app even though a
+ * login shell sees it fine). */
+function resolveBoxcodeCommand(): string {
+	const configured = vscode.workspace.getConfiguration('boxcode').get<string>('path', '').trim();
+	return configured || BOXCODE_COMMAND;
+}
 
 /** Thrown by `ensureCredentials` when the user cancels the setup prompt -- distinguished from a real launch failure so the chat message shown for each reads correctly. */
 class SetupCancelled extends Error {}
@@ -142,9 +155,20 @@ export function activate(context: vscode.ExtensionContext): void {
 	function ensureReady(): Promise<void> {
 		if (!ready) {
 			ready = (async () => {
+				const boxcodeCommand = resolveBoxcodeCommand();
+				// Checked before ensureCredentials() runs at all -- a fresh
+				// install with no `boxcode` CLI used to walk through three
+				// credential prompts before ever learning the binary itself
+				// was missing. Thrown with `code: 'ENOENT'` so it lands on
+				// the exact branch `describeStartupFailure` already handles.
+				if (!(await probeBinaryExists(boxcodeCommand))) {
+					const notFound = new Error(`spawn ${boxcodeCommand} ENOENT`) as NodeJS.ErrnoException;
+					notFound.code = 'ENOENT';
+					throw notFound;
+				}
 				const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
-				const envOverrides = await ensureCredentials(context);
-				const acp = new AcpClient(BOXCODE_COMMAND, cwd, envOverrides);
+				const envOverrides = await ensureCredentials(context, boxcodeCommand);
+				const acp = new AcpClient(boxcodeCommand, cwd, envOverrides);
 				client = acp;
 				await acp.initialize();
 				sessionId = await acp.newSession(cwd);
@@ -270,6 +294,33 @@ export function activate(context: vscode.ExtensionContext): void {
 			} catch (error) {
 				void vscode.window.showErrorMessage(`boxcode: couldn't roll back (${describeError(error)})`);
 			}
+		}),
+	);
+
+	context.subscriptions.push(
+		// Closes a real gap: before this, a mistyped API key (or a switch to
+		// a different provider) had no in-product fix -- `ensureCredentials`
+		// only re-prompts when a value is *missing*, never when it's wrong,
+		// so the only recovery was hand-editing settings.json and clearing
+		// SecretStorage by hand.
+		vscode.commands.registerCommand('boxcode.changeProvider', async () => {
+			await context.secrets.delete(SECRET_API_KEY);
+			const config = vscode.workspace.getConfiguration('boxcode');
+			await config.update('provider', undefined, vscode.ConfigurationTarget.Global);
+			await config.update('endpoint', undefined, vscode.ConfigurationTarget.Global);
+			await config.update('model', undefined, vscode.ConfigurationTarget.Global);
+			// The next chat message must spawn a fresh session against the
+			// new credentials, not reuse a client already running with the
+			// old ones -- `ensureReady`'s own memoization exists precisely
+			// to avoid a second spawn per turn, so it has to be cleared
+			// explicitly here rather than just waiting for it to notice.
+			client?.dispose();
+			client = undefined;
+			sessionId = undefined;
+			ready = undefined;
+			void vscode.window.showInformationMessage(
+				'boxcode: cleared. Send a chat message to pick a new provider, model, and API key.',
+			);
 		}),
 	);
 }
@@ -471,6 +522,17 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, 
 	}
 }
 
+interface SetupResult {
+	/** Registry id from `providers.rs` (e.g. "deepseek"), or '' for a
+	 * manually-entered custom endpoint -- same meaning as `LlmConfig.provider`
+	 * on the Rust side, see that field's own doc comment on why it matters
+	 * (it's what makes a provider's `default_temperature()` apply). */
+	provider: string;
+	endpoint: string;
+	model: string;
+	apiKey: string;
+}
+
 /**
  * Resolves the env-var overrides to hand `boxcode --acp` (see
  * `AcpClient`'s own doc comment on why these are additive, never blanking):
@@ -482,26 +544,32 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, 
  * this runs a one-time setup prompt and persists the result. Throws
  * `SetupCancelled` if the user backs out of that prompt.
  */
-async function ensureCredentials(context: vscode.ExtensionContext): Promise<NodeJS.ProcessEnv> {
+async function ensureCredentials(context: vscode.ExtensionContext, boxcodeCommand: string): Promise<NodeJS.ProcessEnv> {
 	const config = vscode.workspace.getConfiguration('boxcode');
+	let provider = config.get<string>('provider', '');
 	let endpoint = config.get<string>('endpoint', '');
 	let model = config.get<string>('model', '');
 	let apiKey = (await context.secrets.get(SECRET_API_KEY)) ?? '';
 
 	if ((!endpoint || !model || !apiKey) && !configTomlExists()) {
-		const entered = await runSetupFlow();
+		const entered = await runSetupFlow(boxcodeCommand);
 		if (!entered) {
 			throw new SetupCancelled('boxcode setup was cancelled');
 		}
+		provider = entered.provider;
 		endpoint = entered.endpoint;
 		model = entered.model;
 		apiKey = entered.apiKey;
+		await config.update('provider', provider, vscode.ConfigurationTarget.Global);
 		await config.update('endpoint', endpoint, vscode.ConfigurationTarget.Global);
 		await config.update('model', model, vscode.ConfigurationTarget.Global);
 		await context.secrets.store(SECRET_API_KEY, apiKey);
 	}
 
 	const overrides: NodeJS.ProcessEnv = {};
+	if (provider) {
+		overrides.BOXCODE_PROVIDER = provider;
+	}
 	if (endpoint) {
 		overrides.BOXCODE_ENDPOINT = endpoint;
 	}
@@ -522,9 +590,101 @@ function configTomlExists(): boolean {
 	}
 }
 
-async function runSetupFlow(): Promise<{ endpoint: string; model: string; apiKey: string } | undefined> {
+/** Mirrors `providers.rs`'s `env_var_name()` exactly -- "deepseek" ->
+ * "DEEPSEEK_API_KEY" -- so a key a user already has exported for a
+ * provider's own conventional env var is picked up here without asking
+ * again, the same way `/provider` in the TUI does. */
+function providerEnvVarName(providerId: string): string {
+	return `${providerId.toUpperCase()}_API_KEY`;
+}
+
+const CUSTOM_ENDPOINT_ITEM = 'Custom endpoint…';
+
+/**
+ * Provider -> model -> API key, mirroring the TUI's own `/provider` overlay
+ * flow (`ProviderPicker`/`ModelPicker`/`ApiKeyPrompt` in `app.rs`) instead
+ * of asking for a raw endpoint URL -- see this function's own git history
+ * for why: a real tester hit the old three-bare-textbox version and asked
+ * "why do you need an endpoint? it should be pick a provider and model and
+ * enter an API key," which is exactly what the TUI already had.
+ *
+ * Falls back to the old raw endpoint/model/key flow (renamed
+ * `runCustomEndpointFlow` below) both for "Custom endpoint…" and, silently,
+ * if `boxcode --providers-json` fails for any reason -- an older `boxcode`
+ * binary predating this flag must still be onboardable, not just a binary
+ * that doesn't exist at all (that case is `probeBinaryExists`'s, checked
+ * before this ever runs).
+ */
+async function runSetupFlow(boxcodeCommand: string): Promise<SetupResult | undefined> {
+	let providers: ProviderDescriptor[];
+	try {
+		providers = await fetchProviders(boxcodeCommand);
+	} catch {
+		const custom = await runCustomEndpointFlow('boxcode setup');
+		return custom && { provider: '', ...custom };
+	}
+	if (providers.length === 0) {
+		const custom = await runCustomEndpointFlow('boxcode setup');
+		return custom && { provider: '', ...custom };
+	}
+
+	const providerPick = await vscode.window.showQuickPick(
+		[...providers.map(p => p.label), CUSTOM_ENDPOINT_ITEM],
+		{
+			title: 'boxcode setup (1/3) -- pick a provider',
+			ignoreFocusOut: true,
+		},
+	);
+	if (!providerPick) {
+		return undefined;
+	}
+	if (providerPick === CUSTOM_ENDPOINT_ITEM) {
+		const custom = await runCustomEndpointFlow('boxcode setup (custom endpoint)');
+		return custom && { provider: '', ...custom };
+	}
+	const provider = providers.find(p => p.label === providerPick);
+	if (!provider) {
+		return undefined;
+	}
+
+	const model = await vscode.window.showQuickPick(provider.models, {
+		title: `boxcode setup (2/3) -- pick a model for ${provider.label}`,
+		ignoreFocusOut: true,
+	});
+	if (!model) {
+		return undefined;
+	}
+
+	const envName = providerEnvVarName(provider.id);
+	const envKey = process.env[envName]?.trim();
+	if (envKey) {
+		return { provider: provider.id, endpoint: provider.endpoint, model, apiKey: envKey };
+	}
+
+	const apiKey = await vscode.window.showInputBox({
+		title: `boxcode setup (3/3) -- API key for ${provider.label}`,
+		prompt: `API key for ${provider.label} -- stored securely, never written to settings.json. ` +
+			`Tip: export ${envName} in your shell and this step is skipped next time.`,
+		password: true,
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An API key is required.'),
+	});
+	if (!apiKey) {
+		return undefined;
+	}
+
+	return { provider: provider.id, endpoint: provider.endpoint, model, apiKey: apiKey.trim() };
+}
+
+/** The original raw endpoint/model/key flow -- kept as the escape hatch for
+ * "Custom endpoint…" and as a fallback for a `boxcode` binary too old to
+ * support `--providers-json`. `titlePrefix` lets callers distinguish "the
+ * whole setup is a custom endpoint" from "the picker itself fell back". */
+async function runCustomEndpointFlow(
+	titlePrefix: string,
+): Promise<{ endpoint: string; model: string; apiKey: string } | undefined> {
 	const endpoint = await vscode.window.showInputBox({
-		title: 'boxcode setup (1/3)',
+		title: `${titlePrefix} (1/3)`,
 		prompt: "boxcode's LLM endpoint -- an OpenAI-compatible base URL",
 		placeHolder: 'https://api.deepseek.com',
 		ignoreFocusOut: true,
@@ -535,9 +695,8 @@ async function runSetupFlow(): Promise<{ endpoint: string; model: string; apiKey
 	}
 
 	const model = await vscode.window.showInputBox({
-		title: 'boxcode setup (2/3)',
+		title: `${titlePrefix} (2/3)`,
 		prompt: 'Model name to request from that endpoint',
-		placeHolder: 'deepseek-chat',
 		ignoreFocusOut: true,
 		validateInput: value => (value.trim() ? undefined : 'A model name is required.'),
 	});
@@ -546,7 +705,7 @@ async function runSetupFlow(): Promise<{ endpoint: string; model: string; apiKey
 	}
 
 	const apiKey = await vscode.window.showInputBox({
-		title: 'boxcode setup (3/3)',
+		title: `${titlePrefix} (3/3)`,
 		prompt: 'API key for that endpoint -- stored securely, never written to settings.json',
 		password: true,
 		ignoreFocusOut: true,
