@@ -20,6 +20,7 @@ import {
 } from './acpClient';
 import { CdpClient } from './cdpClient';
 import { findLocalhostUrl } from './localhostUrl';
+import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure } from './startupFailure';
 
 const PARTICIPANT_ID = 'boxcode.agent';
@@ -303,16 +304,6 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest): Promise<Pr
 
 	const text = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
 	return [{ type: 'text', text }, ...images];
-}
-
-function describeReferenceValue(value: string | vscode.Uri | vscode.Location | unknown): string {
-	if (typeof value === 'string') {
-		return value;
-	}
-	if (value instanceof vscode.Location) {
-		return `${value.uri.toString()} (line ${value.range.start.line + 1})`;
-	}
-	return String(value);
 }
 
 /**
