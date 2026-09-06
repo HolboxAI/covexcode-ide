@@ -1,0 +1,193 @@
+diff --git a/src/vs/workbench/services/themes/common/workbenchThemeService.ts b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+index 57ed5ac..7660968 100644
+--- a/src/vs/workbench/services/themes/common/workbenchThemeService.ts
++++ b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+@@ -100,10 +100,20 @@ export function migrateThemeSettingsId(settingsId: string): string {
+ // measures 5.02:1. #D97706 itself is untouched everywhere else (borders,
+ // underlines, progress fills) -- those aren't text-on-fill pairs, so the
+ // same AA text-contrast requirement doesn't apply to them.
++// A real, named gap in the pass above, flagged by an earlier review and
++// left unaddressed for a full pass afterward: only 3 small floating-widget
++// keys (dropdown/editorWidget/input) ever got the warm-surface treatment --
++// every large chrome surface (activity bar, panel, side bar, status bar,
++// tab bar, title bar, the welcome page) and the secondary button variant
++// (previously fully transparent, #00000000 -- literally invisible, which is
++// why the welcome page's suggested-prompt pills had no visible fill at all)
++// were still stock flat gray. This closes that gap the same way: a slight
++// warm bias on the same two lightness tiers already established (~#181818
++// ground -> #1A1713, ~#1F1F1F editor -> #211E1A), not a new palette.
+ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'actionBar.toggledBackground': '#383a49',
+ 	'activityBar.activeBorder': '#D97706',
+-	'activityBar.background': '#181818',
++	'activityBar.background': '#1A1713',
+ 	'activityBar.border': '#2B2B2B',
+ 	'activityBar.foreground': '#D7D7D7',
+ 	'activityBar.inactiveForeground': '#868686',
+@@ -115,9 +125,9 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'button.border': '#FFFFFF12',
+ 	'button.foreground': '#FFFFFF',
+ 	'button.hoverBackground': '#92400E',
+-	'button.secondaryBackground': '#313131',
++	'button.secondaryBackground': '#2C2822',
+ 	'button.secondaryForeground': '#CCCCCC',
+-	'button.secondaryHoverBackground': '#3C3C3C',
++	'button.secondaryHoverBackground': '#37312A',
+ 	'chat.slashCommandBackground': '#26477866',
+ 	'chat.slashCommandForeground': '#85B6FF',
+ 	'chat.editedFileForeground': '#E2C08D',
+@@ -129,13 +139,13 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'dropdown.border': '#3C3C3C',
+ 	'dropdown.foreground': '#CCCCCC',
+ 	'dropdown.listBackground': '#1F1F1F',
+-	'editor.background': '#1F1F1F',
++	'editor.background': '#211E1A',
+ 	'editor.findMatchBackground': '#9E6A03',
+ 	'editor.foreground': '#CCCCCC',
+ 	'editor.inactiveSelectionBackground': '#3A3D41',
+ 	'editor.selectionHighlightBackground': '#ADD6FF26',
+ 	'editorGroup.border': '#FFFFFF17',
+-	'editorGroupHeader.tabsBackground': '#181818',
++	'editorGroupHeader.tabsBackground': '#1A1713',
+ 	'editorGroupHeader.tabsBorder': '#2B2B2B',
+ 	'editorGutter.addedBackground': '#2EA043',
+ 	'editorGutter.deletedBackground': '#F85149',
+@@ -169,7 +179,7 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'notifications.background': '#1F1F1F',
+ 	'notifications.border': '#2B2B2B',
+ 	'notifications.foreground': '#CCCCCC',
+-	'panel.background': '#181818',
++	'panel.background': '#1A1713',
+ 	'panel.border': '#2B2B2B',
+ 	'panelInput.border': '#2B2B2B',
+ 	'panelTitle.activeBorder': '#D97706',
+@@ -188,14 +198,14 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'settings.dropdownBorder': '#3C3C3C',
+ 	'settings.headerForeground': '#FFFFFF',
+ 	'settings.modifiedItemIndicator': '#BB800966',
+-	'sideBar.background': '#181818',
++	'sideBar.background': '#1A1713',
+ 	'sideBar.border': '#2B2B2B',
+ 	'sideBar.foreground': '#CCCCCC',
+-	'sideBarSectionHeader.background': '#181818',
++	'sideBarSectionHeader.background': '#1A1713',
+ 	'sideBarSectionHeader.border': '#2B2B2B',
+ 	'sideBarSectionHeader.foreground': '#CCCCCC',
+ 	'sideBarTitle.foreground': '#CCCCCC',
+-	'statusBar.background': '#181818',
++	'statusBar.background': '#1A1713',
+ 	'statusBar.border': '#2B2B2B',
+ 	'statusBar.debuggingBackground': '#0078D4',
+ 	'statusBar.debuggingForeground': '#FFFFFF',
+@@ -212,7 +222,7 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'tab.activeForeground': '#FFFFFF',
+ 	'tab.border': '#2B2B2B',
+ 	'tab.hoverBackground': '#1F1F1F',
+-	'tab.inactiveBackground': '#181818',
++	'tab.inactiveBackground': '#1A1713',
+ 	'tab.inactiveForeground': '#9D9D9D',
+ 	'tab.lastPinnedBorder': '#ccc3',
+ 	'tab.selectedBackground': '#222222',
+@@ -232,11 +242,12 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ 	'textPreformat.background': '#3C3C3C',
+ 	'textPreformat.foreground': '#D0D0D0',
+ 	'textSeparator.foreground': '#21262D',
+-	'titleBar.activeBackground': '#181818',
++	'titleBar.activeBackground': '#1A1713',
+ 	'titleBar.activeForeground': '#CCCCCC',
+ 	'titleBar.border': '#2B2B2B',
+-	'titleBar.inactiveBackground': '#1F1F1F',
++	'titleBar.inactiveBackground': '#211E1A',
+ 	'titleBar.inactiveForeground': '#9D9D9D',
++	'welcomePage.background': '#211E1A',
+ 	'welcomePage.progress.foreground': '#D97706',
+ 	'welcomePage.tileBackground': '#2B2B2B',
+ 	'widget.border': '#313131'
+@@ -253,10 +264,14 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
+ // button.background/hoverBackground, menu.selectionBackground,
+ // statusBarItem.remoteBackground) -- see that block's comment for the
+ // actual contrast numbers.
++// Same warm-surface-coverage pass as the dark block above, same reason:
++// chrome surfaces and the secondary button variant were still stock flat
++// (#F8F8F8 / #E5E5E5), including the welcome page, whose suggested-prompt
++// pills use button.secondaryBackground directly.
+ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'actionBar.toggledBackground': '#dddddd',
+ 	'activityBar.activeBorder': '#D97706',
+-	'activityBar.background': '#F8F8F8',
++	'activityBar.background': '#F7F4F0',
+ 	'activityBar.border': '#E5E5E5',
+ 	'activityBar.foreground': '#1F1F1F',
+ 	'activityBar.inactiveForeground': '#616161',
+@@ -268,9 +283,9 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'button.border': '#0000001a',
+ 	'button.foreground': '#FFFFFF',
+ 	'button.hoverBackground': '#92400E',
+-	'button.secondaryBackground': '#E5E5E5',
++	'button.secondaryBackground': '#EDE7DF',
+ 	'button.secondaryForeground': '#3B3B3B',
+-	'button.secondaryHoverBackground': '#CCCCCC',
++	'button.secondaryHoverBackground': '#DED4C6',
+ 	'chat.slashCommandBackground': '#ADCEFF7A',
+ 	'chat.slashCommandForeground': '#26569E',
+ 	'chat.editedFileForeground': '#895503',
+@@ -287,7 +302,7 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'editor.inactiveSelectionBackground': '#E5EBF1',
+ 	'editor.selectionHighlightBackground': '#ADD6FF80',
+ 	'editorGroup.border': '#E5E5E5',
+-	'editorGroupHeader.tabsBackground': '#F8F8F8',
++	'editorGroupHeader.tabsBackground': '#F7F4F0',
+ 	'editorGroupHeader.tabsBorder': '#E5E5E5',
+ 	'editorGutter.addedBackground': '#2EA043',
+ 	'editorGutter.deletedBackground': '#F85149',
+@@ -326,7 +341,7 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'notifications.background': '#FFFFFF',
+ 	'notifications.border': '#E5E5E5',
+ 	'notifications.foreground': '#3B3B3B',
+-	'panel.background': '#F8F8F8',
++	'panel.background': '#F7F4F0',
+ 	'panel.border': '#E5E5E5',
+ 	'panelInput.border': '#E5E5E5',
+ 	'panelTitle.activeBorder': '#D97706',
+@@ -348,14 +363,14 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'settings.modifiedItemIndicator': '#BB800966',
+ 	'settings.numberInputBorder': '#CECECE',
+ 	'settings.textInputBorder': '#CECECE',
+-	'sideBar.background': '#F8F8F8',
++	'sideBar.background': '#F7F4F0',
+ 	'sideBar.border': '#E5E5E5',
+ 	'sideBar.foreground': '#3B3B3B',
+-	'sideBarSectionHeader.background': '#F8F8F8',
++	'sideBarSectionHeader.background': '#F7F4F0',
+ 	'sideBarSectionHeader.border': '#E5E5E5',
+ 	'sideBarSectionHeader.foreground': '#3B3B3B',
+ 	'sideBarTitle.foreground': '#3B3B3B',
+-	'statusBar.background': '#F8F8F8',
++	'statusBar.background': '#F7F4F0',
+ 	'statusBar.border': '#E5E5E5',
+ 	'statusBar.debuggingBackground': '#FD716C',
+ 	'statusBar.debuggingForeground': '#000000',
+@@ -375,7 +390,7 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'tab.activeForeground': '#3B3B3B',
+ 	'tab.border': '#E5E5E5',
+ 	'tab.hoverBackground': '#FFFFFF',
+-	'tab.inactiveBackground': '#F8F8F8',
++	'tab.inactiveBackground': '#F7F4F0',
+ 	'tab.inactiveForeground': '#868686',
+ 	'tab.lastPinnedBorder': '#D4D4D4',
+ 	'tab.selectedBackground': '#ffffffa5',
+@@ -396,11 +411,12 @@ export const COLOR_THEME_LIGHT_INITIAL_COLORS = {
+ 	'textPreformat.background': '#0000001F',
+ 	'textPreformat.foreground': '#3B3B3B',
+ 	'textSeparator.foreground': '#21262D',
+-	'titleBar.activeBackground': '#F8F8F8',
++	'titleBar.activeBackground': '#F7F4F0',
+ 	'titleBar.activeForeground': '#1E1E1E',
+ 	'titleBar.border': '#E5E5E5',
+-	'titleBar.inactiveBackground': '#F8F8F8',
++	'titleBar.inactiveBackground': '#F7F4F0',
+ 	'titleBar.inactiveForeground': '#8B949E',
++	'welcomePage.background': '#FAF8F6',
+ 	'welcomePage.tileBackground': '#F3F3F3',
+ 	'widget.border': '#E5E5E5'
+ };
