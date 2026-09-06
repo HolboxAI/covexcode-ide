@@ -1,0 +1,219 @@
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
+@@ -55,6 +55,7 @@
+ import { IMarkdownRendererService } from '../../../../platform/markdown/browser/markdownRenderer.js';
+ import { MarkdownString } from '../../../../base/common/htmlContent.js';
+ import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
++import { IFileService } from '../../../../platform/files/common/files.js';
+ import { IWorkspacesService, IRecentFolder, IRecentWorkspace, isRecentFolder, isRecentWorkspace } from '../../../../platform/workspaces/common/workspaces.js';
+ import { IHostService } from '../../../services/host/browser/host.js';
+ import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
+@@ -151,6 +152,116 @@
+ 	},
+ ];
+ 
++type WelcomeFrameworkId = 'next' | 'vite' | 'react' | 'vue' | 'svelte' | 'angular' | 'node';
++
++/**
++ * boxcode-ide: framework-specific overrides of OPEN_WORKSPACE_EXAMPLE_PROMPTS.
++ * Each set keeps the two prompts above that hold regardless of framework
++ * (Tailwind, responsive) and swaps only the framework-shaped ones, so a
++ * detected project gets chips that name its actual stack instead of the
++ * generic default. `node` is backend-only and has no responsive/Tailwind
++ * angle, so it gets four backend-shaped prompts instead.
++ */
++const FRAMEWORK_EXAMPLE_PROMPTS: { readonly [K in WelcomeFrameworkId]: IWelcomeExamplePrompt[] } = {
++	next: [
++		{
++			id: 'next.addPage',
++			icon: Codicon.file,
++			label: localize('examplePrompt.next.addPage.label', "Add a new page"),
++			prompt: localize('examplePrompt.next.addPage.prompt', "Add a new page to this Next.js app under the App Router, linked from the nav."),
++		},
++		{
++			id: 'next.addApiRoute',
++			icon: Codicon.plug,
++			label: localize('examplePrompt.next.addApiRoute.label', "Add an API route"),
++			prompt: localize('examplePrompt.next.addApiRoute.prompt', "Add a new API route to this Next.js app and call it from a client component."),
++		},
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
++	],
++	vue: [
++		{
++			id: 'vue.addComponent',
++			icon: Codicon.symbolClass,
++			label: localize('examplePrompt.vue.addComponent.label', "Add a new component"),
++			prompt: localize('examplePrompt.vue.addComponent.prompt', "Add a new Vue single-file component to this project and wire it into the router."),
++		},
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[0],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
++	],
++	svelte: [
++		{
++			id: 'svelte.addRoute',
++			icon: Codicon.file,
++			label: localize('examplePrompt.svelte.addRoute.label', "Add a new route"),
++			prompt: localize('examplePrompt.svelte.addRoute.prompt', "Add a new SvelteKit route to this project, linked from the nav."),
++		},
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[0],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
++	],
++	angular: [
++		{
++			id: 'angular.addComponent',
++			icon: Codicon.symbolClass,
++			label: localize('examplePrompt.angular.addComponent.label', "Add a new component"),
++			prompt: localize('examplePrompt.angular.addComponent.prompt', "Generate a new Angular component for this project and wire it into a route."),
++		},
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[0],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
++	],
++	vite: [
++		{
++			id: 'vite.addComponent',
++			icon: Codicon.symbolClass,
++			label: localize('examplePrompt.vite.addComponent.label', "Add a new component"),
++			prompt: localize('examplePrompt.vite.addComponent.prompt', "Add a new component to this project and use it from the main entry point."),
++		},
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[0],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
++	],
++	react: [
++		{
++			id: 'react.addComponent',
++			icon: Codicon.symbolClass,
++			label: localize('examplePrompt.react.addComponent.label', "Add a new component"),
++			prompt: localize('examplePrompt.react.addComponent.prompt', "Add a new React component to this project and render it from the app root."),
++		},
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[0],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
++	],
++	node: [
++		{
++			id: 'node.addEndpoint',
++			icon: Codicon.plug,
++			label: localize('examplePrompt.node.addEndpoint.label', "Add an API endpoint"),
++			prompt: localize('examplePrompt.node.addEndpoint.prompt', "Add a new endpoint to this backend and write a test for it."),
++		},
++		{
++			id: 'node.addErrorHandling',
++			icon: Codicon.shield,
++			label: localize('examplePrompt.node.addErrorHandling.label', "Add error handling"),
++			prompt: localize('examplePrompt.node.addErrorHandling.prompt', "Add centralized error handling and input validation to this backend's routes."),
++		},
++		{
++			id: 'node.addTests',
++			icon: Codicon.beaker,
++			label: localize('examplePrompt.node.addTests.label', "Add request handler tests"),
++			prompt: localize('examplePrompt.node.addTests.prompt', "Add tests for this project's main request handlers and make them pass."),
++		},
++		{
++			id: 'node.addLogging',
++			icon: Codicon.output,
++			label: localize('examplePrompt.node.addLogging.label', "Add structured logging"),
++			prompt: localize('examplePrompt.node.addLogging.prompt', "Add structured request logging to this backend."),
++		},
++	],
++};
++
+ /**
+  * - visibleDurationMs: Do they close it right away or leave it open (#3)
+  * - closedBy: Track what action caused the close (viewAllSessions, chatSubmission, sessionClicked, etc.) (#5)
+@@ -246,6 +357,7 @@
+ 		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
+ 		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
+ 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
++		@IFileService private readonly fileService: IFileService,
+ 		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
+ 		@IHostService private readonly hostService: IHostService,
+ 		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
+@@ -339,7 +451,7 @@
+ 
+ 		// boxcode-ide: seeded example prompts directly under the input, so the
+ 		// first-run user is shown what to ask for instead of a blank box.
+-		this.buildExamplePrompts(chatSection);
++		await this.buildExamplePrompts(chatSection);
+ 
+ 		// Sessions or walkthroughs
+ 		const sessionsSection = append(this.contentContainer, $('.agentSessionsWelcome-sessionsSection'));
+@@ -530,14 +642,70 @@
+ 	}
+ 
+ 	/**
++	 * boxcode-ide: best-effort framework detection for the open-workspace
++	 * example prompts, so the seeded chips name what's actually in the folder
++	 * instead of a generic set for every project. Reads package.json at the
++	 * workspace root only - deliberately checks meta-frameworks (next, svelte,
++	 * vue, angular) before the bare build-tool/library signals (vite, react),
++	 * since e.g. a SvelteKit or Vue+Vite project also lists `vite` as a
++	 * dependency and would otherwise be misclassified as generic Vite. Never
++	 * throws - any failure (no folder, missing/invalid package.json, no match)
++	 * returns undefined and the caller falls back to OPEN_WORKSPACE_EXAMPLE_PROMPTS.
++	 */
++	private async detectFramework(): Promise<WelcomeFrameworkId | undefined> {
++		const root = this.workspaceContextService.getWorkspace().folders[0]?.uri;
++		if (!root) {
++			return undefined;
++		}
++
++		try {
++			const content = await this.fileService.readFile(URI.joinPath(root, 'package.json'));
++			const pkg = JSON.parse(content.value.toString());
++			const deps: Record<string, unknown> = { ...pkg?.dependencies, ...pkg?.devDependencies };
++
++			if ('next' in deps) {
++				return 'next';
++			}
++			if ('@sveltejs/kit' in deps || 'svelte' in deps) {
++				return 'svelte';
++			}
++			if ('vue' in deps) {
++				return 'vue';
++			}
++			if ('@angular/core' in deps) {
++				return 'angular';
++			}
++			if ('vite' in deps) {
++				return 'vite';
++			}
++			if ('react' in deps) {
++				return 'react';
++			}
++			if ('express' in deps || 'fastify' in deps || 'koa' in deps) {
++				return 'node';
++			}
++		} catch {
++			// No package.json, invalid JSON, or unreadable - fall back to the generic set.
++		}
++
++		return undefined;
++	}
++
++	/**
+ 	 * boxcode-ide: render the example prompt chips under the chat input.
+ 	 *
+ 	 * Clicking a chip fills the input and focuses it - it deliberately does not
+ 	 * submit, so the prompt stays editable and the user can add their own detail
+ 	 * before sending. Same mechanism `applyPrefillData` already uses.
+ 	 */
+-	private buildExamplePrompts(container: HTMLElement): void {
+-		const prompts = this._isEmptyWorkspace ? EMPTY_WORKSPACE_EXAMPLE_PROMPTS : OPEN_WORKSPACE_EXAMPLE_PROMPTS;
++	private async buildExamplePrompts(container: HTMLElement): Promise<void> {
++		let prompts: IWelcomeExamplePrompt[];
++		if (this._isEmptyWorkspace) {
++			prompts = EMPTY_WORKSPACE_EXAMPLE_PROMPTS;
++		} else {
++			const framework = await this.detectFramework();
++			prompts = framework ? FRAMEWORK_EXAMPLE_PROMPTS[framework] : OPEN_WORKSPACE_EXAMPLE_PROMPTS;
++		}
+ 		if (prompts.length === 0) {
+ 			return;
+ 		}
