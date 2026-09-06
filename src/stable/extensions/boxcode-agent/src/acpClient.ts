@@ -374,3 +374,94 @@ export class AcpClient extends EventEmitter {
 		}
 	}
 }
+
+export interface ProviderDescriptor {
+	id: string;
+	label: string;
+	endpoint: string;
+	models: string[];
+}
+
+/**
+ * Whether `boxcodeCommand` actually resolves to a working binary, checked
+ * with the same cheap `--version` flag `boxcode` itself already answers for
+ * this exact purpose (see `main.rs`'s `-V`/`--version` handling, which
+ * returns before touching a terminal or a config file).
+ *
+ * This is deliberately called *before* `ensureCredentials()`'s setup wizard
+ * runs (see `extension.ts`'s `ensureReady()`) -- a fresh install with no
+ * `boxcode` CLI on PATH used to walk a user through three credential
+ * prompts before ever surfacing that the binary itself was missing, which
+ * is exactly what a real tester hit. Failing this check early skips the
+ * wizard entirely and goes straight to `describeStartupFailure`'s install
+ * instructions.
+ */
+export function probeBinaryExists(boxcodeCommand: string, args: string[] = ['--version']): Promise<boolean> {
+	return new Promise(resolve => {
+		let settled = false;
+		const settle = (ok: boolean) => {
+			if (!settled) {
+				settled = true;
+				resolve(ok);
+			}
+		};
+		try {
+			const child = cp.spawn(boxcodeCommand, args);
+			child.on('error', () => settle(false));
+			child.on('exit', code => settle(code === 0));
+			// A hung binary must not block the wizard forever -- this is a
+			// liveness probe, not a real invocation, so a few seconds is
+			// already generous.
+			setTimeout(() => {
+				if (!settled) {
+					child.kill();
+					settle(false);
+				}
+			}, 5_000);
+		} catch {
+			settle(false);
+		}
+	});
+}
+
+/**
+ * Reads `boxcode`'s own provider registry (`providers.rs`) over
+ * `boxcode --providers-json`, so the picker in `extension.ts`'s
+ * `runSetupFlow()` shows the same list `/provider` does in the TUI instead
+ * of a hand-copied table that rots independently (see the registry's own
+ * doc comment on `providers.rs` -- this is exactly how the old placeholder
+ * ended up suggesting a model retired months earlier).
+ *
+ * Only call this after `probeBinaryExists()` has already confirmed the
+ * binary is there -- a missing binary here would just be a second, less
+ * clear way to discover the same ENOENT.
+ */
+export function fetchProviders(boxcodeCommand: string, args: string[] = ['--providers-json']): Promise<ProviderDescriptor[]> {
+	return new Promise((resolve, reject) => {
+		let stdout = '';
+		let stderr = '';
+		const child = cp.spawn(boxcodeCommand, args);
+		child.stdout.on('data', (chunk: Buffer) => {
+			stdout += chunk.toString();
+		});
+		child.stderr.on('data', (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		child.on('error', reject);
+		child.on('exit', code => {
+			if (code !== 0) {
+				reject(new Error(`boxcode --providers-json exited ${code}: ${stderr.trim()}`));
+				return;
+			}
+			try {
+				resolve(JSON.parse(stdout) as ProviderDescriptor[]);
+			} catch (error) {
+				reject(new Error(`boxcode --providers-json did not print valid JSON: ${describeErrorLocal(error)}`));
+			}
+		});
+	});
+}
+
+function describeErrorLocal(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}

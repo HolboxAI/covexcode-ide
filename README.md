@@ -4,6 +4,17 @@ A Code-OSS-based editor for boxcode, aimed at frontend engineers. This repo owns
 
 **Status: P1 in progress.** Build tooling (adapted from [VSCodium](https://github.com/VSCodium/vscodium)'s MIT-licensed scripts — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)) has landed: a pinned `microsoft/vscode` checkout, a patch set for de-branding/Open VSX/telemetry, and boxcode's own product identity (`utils.sh`, `prepare_vscode.sh`). See [`docs/howto-build.md`](docs/howto-build.md) to build locally.
 
+## Install
+
+boxcode-ide and the `boxcode` CLI are separate installs: this repo is only the editor surface, and the chat participant it ships shells out to a `boxcode` binary already on your `PATH` (see the Architecture section below). Install that binary first:
+
+```sh
+curl -fsSL https://boxcode.sh/install.sh | bash      # macOS/Linux
+irm https://boxcode.sh/install.ps1 | iex              # Windows (PowerShell)
+```
+
+Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist from using the CLI directly.
+
 ## Architecture
 
 Two repos, one brain:

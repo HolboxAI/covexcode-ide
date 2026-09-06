@@ -13,9 +13,11 @@ export function describeError(error: unknown): string {
 
 /**
  * A fresh boxcode-ide install has no `boxcode` CLI bundled with it -- it's a
- * separate install (see README.md's own "Install" section) that
- * `ensureReady()` (in `extension.ts`) just shells out to by bare command
- * name. On a machine that's never run that install step at all, `cp.spawn`
+ * separate install (see README.md's own "Install" section, which names the
+ * same two commands as `installCommand` below) that `ensureReady()` (in
+ * `extension.ts`) probes for before ever showing the credential wizard --
+ * see `probeBinaryExists()`. On a machine that's never run that install step
+ * at all, `cp.spawn`
  * in `acpClient.ts` fails with a plain Node `ENOENT`, which used to surface
  * as generic prose ("Make sure `boxcode` is installed and on your PATH")
  * with no actual next step. This gives the one thing that actually gets a

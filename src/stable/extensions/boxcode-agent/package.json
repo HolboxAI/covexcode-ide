@@ -58,11 +58,26 @@
         "command": "boxcode.rollback",
         "title": "boxcode: Undo Session's File Changes",
         "category": "boxcode"
+      },
+      {
+        "command": "boxcode.changeProvider",
+        "title": "boxcode: Change Provider / Model / API Key",
+        "category": "boxcode"
       }
     ],
     "configuration": {
       "title": "boxcode",
       "properties": {
+        "boxcode.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `boxcode` binary, if it isn't on the PATH this app was launched with (a GUI-launched app's inherited PATH doesn't always match a login shell's -- e.g. a binary installed to `~/.cargo/bin` on macOS). Leave empty to resolve `boxcode` off PATH normally."
+        },
+        "boxcode.provider": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Registry id of the LLM provider picked during setup (e.g. `deepseek`), or empty for a manually-entered custom endpoint. Set automatically by the setup flow and by `boxcode: Change Provider / Model / API Key` -- not normally edited by hand."
+        },
         "boxcode.endpoint": {
           "type": "string",
           "default": "",
@@ -71,7 +86,7 @@
         "boxcode.model": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Model name to request from the configured endpoint (e.g. `deepseek-chat`)."
+          "markdownDescription": "Model name to request from the configured endpoint. Set automatically by the setup flow; run `boxcode: Change Provider / Model / API Key` to change it."
         }
       }
     }
