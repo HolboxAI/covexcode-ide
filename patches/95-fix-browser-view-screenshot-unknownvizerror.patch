@@ -1,0 +1,58 @@
+diff --git a/src/vs/platform/browserView/electron-main/browserView.ts b/src/vs/platform/browserView/electron-main/browserView.ts
+index 15d0433..dee98ee 100644
+--- a/src/vs/platform/browserView/electron-main/browserView.ts
++++ b/src/vs/platform/browserView/electron-main/browserView.ts
+@@ -693,6 +693,25 @@ export class BrowserView extends Disposable {
+ 		return this._view.webContents.navigationHistory.canGoForward();
+ 	}
+ 
++	/**
++	 * boxcode-ide: extracted from captureScreenshot()'s own guarded toggle
++	 * below (unchanged in behavior there) so a raw CDP client capturing via
++	 * `Page.captureScreenshot` directly -- which bypasses captureScreenshot()
++	 * entirely, see `BrowserViewGroup.activateTarget` -- can wake a hidden
++	 * view's compositor the exact same way. Deliberately calls `this._view.
++	 * setVisible()` (the raw underlying view), not this class's own public
++	 * `setVisible()`: that method additionally refocuses the window if the
++	 * view was focused and fires `_onDidChangeVisibility` (which a listener
++	 * elsewhere reacts to by taking its own screenshot) -- side effects this
++	 * purely-internal compositor-wake has no business causing.
++	 */
++	wakeCompositorIfHidden(): void {
++		if (!this._view.getVisible()) {
++			this._view.setVisible(true);
++			this._view.setVisible(false);
++		}
++	}
++
+ 	/**
+ 	 * Capture a screenshot of this view
+ 	 */
+diff --git a/src/vs/platform/browserView/electron-main/browserViewGroup.ts b/src/vs/platform/browserView/electron-main/browserViewGroup.ts
+index b8a9a3d..755a0b3 100644
+--- a/src/vs/platform/browserView/electron-main/browserViewGroup.ts
++++ b/src/vs/platform/browserView/electron-main/browserViewGroup.ts
+@@ -217,7 +217,22 @@ export class BrowserViewGroup extends Disposable implements ICDPBrowserTarget, I
+ 		if (!(target instanceof BrowserViewCDPTarget)) {
+ 			throw new Error('Can only activate BrowserView targets');
+ 		}
+-		// TODO@kycutler
++		// boxcode-ide: a view opened in the background (e.g. an extension's
++		// `vscode.window.openBrowserTab(url, { background: true })`) can
++		// have never produced a single composited frame, which makes a
++		// later raw CDP `Page.captureScreenshot` over this same target fail
++		// with Electron's "UnknownVizError" -- `BrowserView.
++		// captureScreenshot()` already works around the identical problem
++		// for its own internal callers (see that method's own comment and
++		// `wakeCompositorIfHidden()`, added alongside it for exactly this
++		// case), but a raw CDP client driving `Target.attachToTarget` ->
++		// `Page.captureScreenshot` directly never goes through
++		// captureScreenshot() at all, so it never got that protection.
++		// `Target.activateTarget` was already wired end-to-end from any CDP
++		// client down to this exact previously-empty stub
++		// (`// TODO@kycutler`) -- no new plumbing needed, just an
++		// implementation.
++		target.view.wakeCompositorIfHidden();
+ 	}
+ 
+ 	async closeTarget(target: ICDPTarget): Promise<boolean> {

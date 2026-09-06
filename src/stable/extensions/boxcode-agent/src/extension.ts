@@ -629,13 +629,21 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 		const tab =
 			vscode.window.browserTabs.find(t => t.url === url || t.url === `${url}/`) ??
 			(await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true }));
-		// Fired here, not gated on the CDP screenshot succeeding below: a
-		// human watching chat should see *something* happening the moment a
-		// real tab exists, not only after a successful capture -- with the
-		// old placement, a check that timed out (the CDP steps below can
-		// each take up to their own timeout) left the human staring at
-		// nothing at all, unable to tell whether boxcode was doing anything.
-		void openBrowserPaneBeside(url);
+		// Awaited, and fired here rather than gated on the CDP screenshot
+		// succeeding below: a human watching chat should see *something*
+		// happening the moment a real tab exists, not only after a
+		// successful capture -- with the old placement, a check that timed
+		// out (the CDP steps below can each take up to their own timeout)
+		// left the human staring at nothing at all, unable to tell whether
+		// boxcode was doing anything. Awaiting (not fire-and-forget) also
+		// matters functionally now, not just for UX: this opens the tab as
+		// a real editor via `reuseUrlFilter`, which is a second, independent
+		// way this same tab becomes visible (`workbench.action.browser.open`
+		// -> `editorService.openEditor`) -- letting it race the CDP work
+		// below risked capturing mid-transition instead of once actually
+		// settled, on top of whatever `Target.activateTarget` does later in
+		// this function.
+		await openBrowserPaneBeside(url);
 		session = await tab.startCDPSession();
 		cdp = new CdpClient(session);
 
@@ -657,6 +665,23 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 		// itself useful evidence, not a reason to fail the whole check.
 		await loaded.catch(() => undefined);
 
+		// Immediately before capturing, not immediately after attaching --
+		// matching exactly where VS Code's own BrowserView.captureScreenshot()
+		// does the identical toggle for its internal callers (its own
+		// comment: "ensures the webContents rendering pipeline is ready").
+		// A tab opened with `background: true` above (and the navigation
+		// just above this) can leave the view without a single composited
+		// frame, which makes Page.captureScreenshot below fail with
+		// Electron's own "UnknownVizError" -- confirmed live, then
+		// root-caused against that exact method. Raw CDP never goes through
+		// captureScreenshot() at all, so it never got that protection until
+		// this call -- see the core patch implementing Target.activateTarget
+		// (previously an empty `// TODO@kycutler` stub) for the actual
+		// mechanism. Harmless if `openBrowserPaneBeside` above already made
+		// the view visible: `wakeCompositorIfHidden()` on the other end is
+		// a no-op once the view is already visible.
+		await cdp.send('Target.activateTarget', { targetId: page.targetId });
+
 		const { data } = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' }, sessionId);
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
@@ -671,28 +696,41 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
  * The visible half of `check_in_browser`: the CDP tab `checkInBrowser`
  * drives is a hidden, background-only surface for taking a screenshot, so a
  * human watching chat would otherwise never see the live page at all --
- * called as soon as the tab exists, not gated on the screenshot succeeding
- * (a real bug this once was: a check that timed out left nothing visible
- * on screen for the whole wait, indistinguishable from the Integrated
- * Browser not working at all). `workbench.action.browser.open`'s
+ * called (and awaited) as soon as the tab exists, not gated on the
+ * screenshot succeeding (a real bug this once was: a check that timed out
+ * left nothing visible on screen for the whole wait, indistinguishable from
+ * the Integrated Browser not working at all). `workbench.action.browser.open`'s
  * `openToSide` opens (or, via `reuseUrlFilter`, reuses) a real Integrated
  * Browser pane next to whatever's currently active, matching the same
  * mechanism `LocalhostLinkOpenerContribution` already uses elsewhere in this
  * tree (`patches/83-ui-auto-open-localhost-browser.patch`) rather than
  * inventing a second way to open one.
  *
- * Deliberately fire-and-forget and swallowed on failure: this is a
- * convenience alongside `check_in_browser`'s own result, not something
- * that should turn a working (or failing) `check_in_browser` call into a
- * different outcome if the command is ever unavailable for some reason.
+ * No longer fire-and-forget: `checkInBrowser` now awaits this before its own
+ * CDP work, since `reuseUrlFilter` opening the *same* tab as a real editor is
+ * a second, independent way that tab becomes visible -- letting the two race
+ * risked capturing mid-transition. Failure is still swallowed (a convenience
+ * alongside `check_in_browser`'s own result, not something that should turn
+ * a working -- or failing -- check into a different outcome), but a *hang*
+ * here is a new risk awaiting introduced that fire-and-forget never had:
+ * `checkInBrowser` has no outer timeout of its own, so an unbounded wait
+ * here would silently hang the whole tool call. Bounded to
+ * `PANE_OPEN_TIMEOUT_MS` for exactly that reason -- proceeding on a timeout,
+ * not failing the check, since this pane is a UX nicety, not something the
+ * screenshot capture below actually depends on.
  */
+const PANE_OPEN_TIMEOUT_MS = 5_000;
+
 async function openBrowserPaneBeside(url: string): Promise<void> {
 	try {
-		await vscode.commands.executeCommand('workbench.action.browser.open', {
-			url,
-			openToSide: true,
-			reuseUrlFilter: url,
-		});
+		await Promise.race([
+			vscode.commands.executeCommand('workbench.action.browser.open', {
+				url,
+				openToSide: true,
+				reuseUrlFilter: url,
+			}),
+			new Promise<void>(resolve => setTimeout(resolve, PANE_OPEN_TIMEOUT_MS)),
+		]);
 	} catch {
 		// See doc comment above -- not worth surfacing.
 	}
