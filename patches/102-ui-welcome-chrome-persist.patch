@@ -1,0 +1,204 @@
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
+@@ -5,7 +5,6 @@
+ 
+ import './media/agentSessionsWelcome.css';
+ import { $, addDisposableListener, append, clearNode, Dimension, getWindow, scheduleAtNextAnimationFrame } from '../../../../base/browser/dom.js';
+-import { mainWindow } from '../../../../base/browser/window.js';
+ import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
+ import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
+ import { Toggle } from '../../../../base/browser/ui/toggle/toggle.js';
+@@ -34,7 +33,7 @@ import { IEditorOpenContext, IEditorSerializer } from '../../../common/editor.js
+ import { SIDE_BAR_FOREGROUND } from '../../../common/theme.js';
+ import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
+ import { IEditorService } from '../../../services/editor/common/editorService.js';
+-import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
++import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
+ import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../chat/common/constants.js';
+ import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
+ import { ChatWidget } from '../../chat/browser/widget/chatWidget.js';
+@@ -1137,24 +1136,6 @@ export class AgentSessionsWelcomePage extends EditorPane {
+ 		this.chatWidget?.focusInput();
+ 	}
+ 
+-	/**
+-	 * boxcode-ide: the landing page is meant to read as a clean, dedicated
+-	 * first-run screen, not a full IDE with an empty sidebar/toolbar already
+-	 * showing -- the activity bar (file/search/git/debug/extensions icons)
+-	 * and the title bar's right-side icon cluster (editor-layout-split
+-	 * controls, the Integrated Browser toggle) are both meaningless before
+-	 * any project or session actually exists. Hidden only while this page is
+-	 * the visible editor, restored the moment it isn't (a real session
+-	 * opening, or "Open Folder") -- this is a visibility toggle on existing
+-	 * chrome, not a removal, so normal IDE use past this screen is
+-	 * unaffected.
+-	 */
+-	override setEditorVisible(visible: boolean): void {
+-		super.setEditorVisible(visible);
+-		this.layoutService.setPartHidden(visible, Parts.ACTIVITYBAR_PART);
+-		this.layoutService.getContainer(mainWindow).classList.toggle('boxcode-chrome-minimal', visible);
+-	}
+-
+ 	private async revealMaximizedChat(): Promise<void> {
+ 		try {
+ 			await this.closeEditorAndMaximizeAuxiliaryBar();
+
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.ts b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.ts
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.ts
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.ts
+@@ -5,6 +5,7 @@
+ 
+ import { localize } from '../../../../nls.js';
+ import { Disposable } from '../../../../base/common/lifecycle.js';
++import { mainWindow } from '../../../../base/browser/window.js';
+ import { Registry } from '../../../../platform/registry/common/platform.js';
+ import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
+ import { registerWorkbenchContribution2, WorkbenchPhase, IWorkbenchContribution } from '../../../common/contributions.js';
+@@ -23,6 +24,7 @@ import { AgentSessionsWelcomePage, AgentSessionsWelcomeInputSerializer } from '.
+ import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+ import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
+ import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
++import { IWorkbenchLayoutService, Parts, LayoutSettings } from '../../../services/layout/browser/layoutService.js';
+ 
+ // Registration priority
+ const agentSessionsWelcomeInputTypeId = 'workbench.editors.agentSessionsWelcomeInput';
+@@ -167,6 +169,91 @@ class AgentSessionsWelcomeRunnerContribution extends Disposable implements IWork
+ 	}
+ }
+ 
++/**
++ * boxcode-ide: the landing page (and, by extension, an active boxcode chat
++ * session) is meant to read as a clean, dedicated surface, not a full IDE
++ * with an empty sidebar/toolbar already showing -- the activity bar (file/
++ * search/git/debug/extensions icons) and the title bar's right-side icon
++ * cluster (editor-layout-split controls, the Integrated Browser toggle) are
++ * both meaningless before any project or session actually exists.
++ *
++ * A first version of this lived entirely inside `AgentSessionsWelcomePage`'s
++ * own `setEditorVisible()` override -- but submitting the first prompt calls
++ * `closeEditorAndMaximizeAuxiliaryBar()`, which *closes* the welcome editor
++ * to reveal the chat view (contributed to the auxiliary bar, not the editor
++ * area -- see `boxcode-agent/package.json`'s `"locations": ["panel"]`), so
++ * `setEditorVisible(false)` fired at exactly the moment the user started
++ * using the product, undoing the whole effect on first contact. Keying off
++ * `isAuxiliaryBarMaximized()` (already the real, guarded signal for "a
++ * boxcode chat session, not just a stray view, has taken over the window" --
++ * see patches/89's fix to `closeEditorAndMaximizeAuxiliaryBar`) as well as
++ * "the welcome page is the active editor" keeps the minimal treatment
++ * through that exact transition, and lets it end naturally the moment the
++ * user opens a real file (which un-maximizes the auxiliary bar) rather than
++ * needing separate logic to detect "the user is coding now."
++ */
++class BoxcodeMinimalChromeContribution extends Disposable implements IWorkbenchContribution {
++	static readonly ID = 'workbench.contrib.boxcodeMinimalChrome';
++
++	// Whether the activity bar was visible immediately before this
++	// contribution hid it -- restored on the way out instead of
++	// unconditionally forcing it back on, so a user who has set
++	// workbench.activityBar.location to "hidden" doesn't get it forced
++	// visible, and one running "top"/"bottom" doesn't get a duplicate grid
++	// activity bar alongside the title-bar activity actions.
++	private activityBarWasVisible = true;
++	private isMinimal = false;
++
++	constructor(
++		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
++		@IEditorService private readonly editorService: IEditorService,
++		@IConfigurationService private readonly configurationService: IConfigurationService,
++	) {
++		super();
++
++		this._register(this.layoutService.onDidChangeAuxiliaryBarMaximized(() => this.update()));
++		this._register(this.editorService.onDidActiveEditorChange(() => this.update()));
++		this.update();
++	}
++
++	private update(): void {
++		const shouldBeMinimal = this.layoutService.isAuxiliaryBarMaximized()
++			|| this.editorService.activeEditor instanceof AgentSessionsWelcomeInput;
++
++		if (shouldBeMinimal === this.isMinimal) {
++			return;
++		}
++		this.isMinimal = shouldBeMinimal;
++
++		if (shouldBeMinimal) {
++			this.activityBarWasVisible = this.layoutService.isVisible(Parts.ACTIVITYBAR_PART, mainWindow);
++			this.layoutService.setPartHidden(true, Parts.ACTIVITYBAR_PART);
++		} else {
++			this.layoutService.setPartHidden(!this.activityBarWasVisible, Parts.ACTIVITYBAR_PART);
++		}
++
++		const container = this.layoutService.getContainer(mainWindow);
++		container.classList.toggle('boxcode-chrome-minimal', shouldBeMinimal);
++
++		// titlebarPart.ts renders layout-control actions, editor actions, and
++		// -- only when workbench.activityBar.location is "top"/"bottom" -- the
++		// global settings gear and Accounts menu, all as undifferentiated
++		// siblings in one shared toolbar container, with no per-item class or
++		// data attribute to target individually (confirmed by reading
++		// createActionToolBarMenus() and actionViewItemProvider() in
++		// titlebarPart.ts, and BaseActionViewItem's render() in
++		// actionViewItems.ts). Rather than hide someone's settings/accounts
++		// menu along with the layout controls, only apply the CSS class (see
++		// agentSessionsWelcome.css) that blanket-hides that container when the
++		// activity bar is NOT rendered in the title bar at all -- the default
++		// placement, and the only one this can hide safely.
++		const activityBarLocation = this.configurationService.getValue<string>(LayoutSettings.ACTIVITY_BAR_LOCATION);
++		const safeToHideTitleBarCluster = activityBarLocation !== 'top' && activityBarLocation !== 'bottom';
++		container.classList.toggle('boxcode-titlebar-minimal', shouldBeMinimal && safeToHideTitleBarCluster);
++	}
++}
++
+ // Register contributions
+ registerWorkbenchContribution2(AgentSessionsWelcomeEditorResolverContribution.ID, AgentSessionsWelcomeEditorResolverContribution, WorkbenchPhase.BlockStartup);
++registerWorkbenchContribution2(BoxcodeMinimalChromeContribution.ID, BoxcodeMinimalChromeContribution, WorkbenchPhase.AfterRestored);
+ registerWorkbenchContribution2(AgentSessionsWelcomeRunnerContribution.ID, AgentSessionsWelcomeRunnerContribution, WorkbenchPhase.AfterRestored);
+
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css b/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
+index 0000000..0000000 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
+@@ -628,17 +628,28 @@
+ 
+ /*
+  * boxcode-ide: hides the title bar's right-side icon cluster (editor
+- * layout/split controls, the Integrated Browser toggle) while this welcome
+- * page is the visible editor -- toggled from agentSessionsWelcome.ts's own
+- * setEditorVisible() override, the same lifecycle hook that hides the
+- * activity bar for the same reason. .action-toolbar-container is the real
+- * element (titlebarPart.ts) that both MenuId.TitleBar (the browser toggle
+- * registers here, see browserTabManagementFeatures.ts) and
+- * MenuId.LayoutControlMenu render into -- one rule covers both icon groups
+- * without touching .center-adjacent-toolbar-container (the update
+- * indicator) or .window-controls-container (the actual window
+- * minimize/maximize/close buttons), neither of which this is about.
++ * layout/split controls, the Integrated Browser toggle) while a boxcode chat
++ * session is the active surface -- toggled from
++ * BoxcodeMinimalChromeContribution (agentSessionsWelcome.contribution.ts).
++ * .action-toolbar-container is the real element (titlebarPart.ts) that both
++ * MenuId.TitleBar (the browser toggle registers here, see
++ * browserTabManagementFeatures.ts) and MenuId.LayoutControlMenu render into
++ * -- one rule covers both icon groups without touching
++ * .center-adjacent-toolbar-container (the update indicator) or
++ * .window-controls-container (the actual window minimize/maximize/close
++ * buttons), neither of which this is about.
++ *
++ * `.boxcode-titlebar-minimal` (a second, narrower class from the same
++ * contribution) is deliberately NOT the same class `setPartHidden` gates the
++ * activity bar on: titlebarPart.ts renders layout-control actions, editor
++ * actions, and -- only when workbench.activityBar.location is "top"/
++ * "bottom" -- the global settings gear and Accounts menu, all as
++ * undifferentiated siblings inside this one container with no per-item class
++ * or data attribute to target individually. The contribution only adds this
++ * class when the activity bar is NOT rendered in the title bar at all (the
++ * default placement), so this blanket display:none can never hide someone's
++ * settings gear or Accounts menu.
+  */
+-.monaco-workbench.boxcode-chrome-minimal .titlebar-right .action-toolbar-container {
++.monaco-workbench.boxcode-titlebar-minimal .titlebar-right .action-toolbar-container {
+ 	display: none;
+ }
