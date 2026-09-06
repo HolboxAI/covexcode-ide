@@ -8,8 +8,11 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
 	AcpClient,
+	BrowserInteraction,
 	CheckInBrowserOutcome,
 	CheckInBrowserRequest,
+	InteractInBrowserOutcome,
+	InteractInBrowserRequest,
 	PromptContentBlock,
 	RequestPermissionOutcome,
 	RequestPermissionRequest,
@@ -203,10 +206,19 @@ export function activate(context: vscode.ExtensionContext): void {
 				void checkInBrowser(browserRequest.url).then(respond);
 			}
 		};
+		const onBrowserInteractRequest = (
+			interactRequest: InteractInBrowserRequest,
+			respond: (outcome: InteractInBrowserOutcome) => void,
+		) => {
+			if (interactRequest.sessionId === activeSessionId) {
+				void interactInBrowser(interactRequest.url, interactRequest.interaction).then(respond);
+			}
+		};
 
 		activeClient.on('update', onUpdate);
 		activeClient.on('permissionRequest', onPermissionRequest);
 		activeClient.on('browserCheckRequest', onBrowserCheckRequest);
+		activeClient.on('browserInteractRequest', onBrowserInteractRequest);
 		// v1 has no cancellation plumbing into HeadlessSession yet -- see
 		// boxcode's own transport.rs docs on `session/cancel`. A cancelled
 		// request here still waits for the in-flight turn to finish rather
@@ -221,6 +233,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			activeClient.off('update', onUpdate);
 			activeClient.off('permissionRequest', onPermissionRequest);
 			activeClient.off('browserCheckRequest', onBrowserCheckRequest);
+			activeClient.off('browserInteractRequest', onBrowserInteractRequest);
 			onCancel.dispose();
 		}
 	};
@@ -665,73 +678,174 @@ async function showDiff(
  * this function's job is only to describe what went wrong, not to decide
  * what the model does about it.
  */
+interface BrowserPageAttachment {
+	session: vscode.BrowserCDPSession;
+	cdp: CdpClient;
+	sessionId: string;
+	targetId: string;
+}
+
+/**
+ * The find-or-open-tab, attach-to-its-page-target preamble both
+ * `checkInBrowser` and `interactInBrowser` need identically -- factored out
+ * once both existed, rather than duplicated, per this same doc comment's own
+ * explanation (still accurate, read it below) of why `flatten: true` and an
+ * explicit page-session `sessionId` are required at all.
+ *
+ * Deliberately does NOT navigate -- that is `checkInBrowser`'s own next
+ * step, not this shared preamble's job. `interactInBrowser` acts on
+ * whatever the tab already shows (the same tab a prior `check_in_browser`
+ * call already looked at); forcing a fresh `Page.navigate` here would
+ * reload the page out from under it and destroy the exact state -- a
+ * filled-in form, a clicked-open menu -- the interaction exists to act on.
+ *
+ * A `BrowserCDPSession` starts out attached to nothing but the *browser*
+ * level of the CDP proxy (`platform/browserView/common/cdp/proxy.ts`'s
+ * `CDPBrowserProxy`), which only understands a handful of `Browser.*`/
+ * `Target.*` methods -- not `Page.*`/`Input.*`. Every such call needs a real
+ * page-session `sessionId`, obtained by listing the tab's own CDP targets
+ * and explicitly attaching to the page one (`flatten: true` is required,
+ * the proxy rejects `attachToTarget` without it). Skipping this and
+ * sending `Page.enable` bare is what silently makes it come back
+ * `Method not found` -- indistinguishable from the method genuinely not
+ * existing, which is what made this take a while to actually root-cause.
+ */
+async function attachToBrowserTab(url: string): Promise<BrowserPageAttachment> {
+	const tab =
+		vscode.window.browserTabs.find(t => t.url === url || t.url === `${url}/`) ??
+		(await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true }));
+	// Awaited, and fired here rather than gated on the CDP work below
+	// succeeding: a human watching chat should see *something* happening
+	// the moment a real tab exists. Awaiting (not fire-and-forget) also
+	// matters functionally, not just for UX: this opens the tab as a real
+	// editor via `reuseUrlFilter`, a second, independent way this same tab
+	// becomes visible -- letting it race the CDP work below risked
+	// attaching mid-transition.
+	await openBrowserPaneBeside(url);
+	const session = await tab.startCDPSession();
+	const cdp = new CdpClient(session);
+
+	// The tab itself is always the first `type: 'page'` target -- iframes
+	// and workers the page happens to have loaded also show up here, so
+	// this can't just take targetInfos[0].
+	const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>('Target.getTargets');
+	const page = targetInfos.find(t => t.type === 'page');
+	if (!page) {
+		cdp.dispose();
+		void session.close();
+		throw new Error('No page target attached to this browser tab.');
+	}
+	const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
+	await cdp.send('Page.enable', undefined, sessionId);
+
+	return { session, cdp, sessionId, targetId: page.targetId };
+}
+
+/**
+ * Immediately before capturing, not immediately after attaching --
+ * matching exactly where VS Code's own BrowserView.captureScreenshot()
+ * does the identical toggle for its internal callers (its own comment:
+ * "ensures the webContents rendering pipeline is ready"). A tab opened
+ * with `background: true` can leave the view without a single composited
+ * frame, which makes `Page.captureScreenshot` fail with Electron's own
+ * "UnknownVizError" -- confirmed live, then root-caused against that exact
+ * method. Raw CDP never goes through captureScreenshot() at all, so it
+ * never got that protection until this call -- see the core patch
+ * implementing `Target.activateTarget` (previously an empty
+ * `// TODO@kycutler` stub) for the actual mechanism. Harmless if the tab is
+ * already visible: `wakeCompositorIfHidden()` on the other end is a no-op
+ * once the view already is.
+ */
+async function captureScreenshot(attachment: BrowserPageAttachment): Promise<string> {
+	await attachment.cdp.send('Target.activateTarget', { targetId: attachment.targetId });
+	const { data } = await attachment.cdp.send<{ data: string }>(
+		'Page.captureScreenshot',
+		{ format: 'png' },
+		attachment.sessionId,
+	);
+	return data;
+}
+
+/**
+ * Fulfills `check_in_browser` on the client side: finds or opens the tab at
+ * `url`, forces a fresh navigation (a reused tab could otherwise show
+ * stale content for a page with no hot-reload of its own), and screenshots
+ * it via raw CDP -- `vscode.proposed.browser`'s `BrowserCDPSession` is a
+ * bare bidirectional message channel, not a request/response API, so
+ * `CdpClient` does the request-id correlation `boxcode`'s own ACP client
+ * (`AcpClient`) already does for a different protocol.
+ *
+ * Never throws: a failure becomes `{ outcome: 'failed', reason }`, which
+ * `HeadlessSession::check_browser` on the other end already knows how to
+ * turn into text the model can react to (see its own doc comment) --
+ * this function's job is only to describe what went wrong, not to decide
+ * what the model does about it.
+ */
 async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
-	let session: vscode.BrowserCDPSession | undefined;
-	let cdp: CdpClient | undefined;
+	let attachment: BrowserPageAttachment | undefined;
 	try {
-		const tab =
-			vscode.window.browserTabs.find(t => t.url === url || t.url === `${url}/`) ??
-			(await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true }));
-		// Awaited, and fired here rather than gated on the CDP screenshot
-		// succeeding below: a human watching chat should see *something*
-		// happening the moment a real tab exists, not only after a
-		// successful capture -- with the old placement, a check that timed
-		// out (the CDP steps below can each take up to their own timeout)
-		// left the human staring at nothing at all, unable to tell whether
-		// boxcode was doing anything. Awaiting (not fire-and-forget) also
-		// matters functionally now, not just for UX: this opens the tab as
-		// a real editor via `reuseUrlFilter`, which is a second, independent
-		// way this same tab becomes visible (`workbench.action.browser.open`
-		// -> `editorService.openEditor`) -- letting it race the CDP work
-		// below risked capturing mid-transition instead of once actually
-		// settled, on top of whatever `Target.activateTarget` does later in
-		// this function.
-		await openBrowserPaneBeside(url);
-		session = await tab.startCDPSession();
-		cdp = new CdpClient(session);
-
-		// The tab itself is always the first `type: 'page'` target -- iframes
-		// and workers the page happens to have loaded also show up here, so
-		// this can't just take targetInfos[0].
-		const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>('Target.getTargets');
-		const page = targetInfos.find(t => t.type === 'page');
-		if (!page) {
-			throw new Error('No page target attached to this browser tab.');
-		}
-		const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
-
-		await cdp.send('Page.enable', undefined, sessionId);
-		const loaded = cdp.waitForEvent('Page.loadEventFired', 10_000);
-		await cdp.send('Page.navigate', { url }, sessionId);
+		attachment = await attachToBrowserTab(url);
+		const loaded = attachment.cdp.waitForEvent('Page.loadEventFired', 10_000);
+		await attachment.cdp.send('Page.navigate', { url }, attachment.sessionId);
 		// A page that never fires the load event (a script error, an
 		// infinite spinner) still gets screenshotted as-is below -- that is
 		// itself useful evidence, not a reason to fail the whole check.
 		await loaded.catch(() => undefined);
 
-		// Immediately before capturing, not immediately after attaching --
-		// matching exactly where VS Code's own BrowserView.captureScreenshot()
-		// does the identical toggle for its internal callers (its own
-		// comment: "ensures the webContents rendering pipeline is ready").
-		// A tab opened with `background: true` above (and the navigation
-		// just above this) can leave the view without a single composited
-		// frame, which makes Page.captureScreenshot below fail with
-		// Electron's own "UnknownVizError" -- confirmed live, then
-		// root-caused against that exact method. Raw CDP never goes through
-		// captureScreenshot() at all, so it never got that protection until
-		// this call -- see the core patch implementing Target.activateTarget
-		// (previously an empty `// TODO@kycutler` stub) for the actual
-		// mechanism. Harmless if `openBrowserPaneBeside` above already made
-		// the view visible: `wakeCompositorIfHidden()` on the other end is
-		// a no-op once the view is already visible.
-		await cdp.send('Target.activateTarget', { targetId: page.targetId });
-
-		const { data } = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' }, sessionId);
+		const data = await captureScreenshot(attachment);
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
 		return { outcome: 'failed', reason: describeError(error) };
 	} finally {
-		cdp?.dispose();
-		void session?.close();
+		attachment?.cdp.dispose();
+		void attachment?.session.close();
+	}
+}
+
+/**
+ * Fulfills `interact_in_browser` on the client side: clicks or types into
+ * the SAME tab `checkInBrowser` already looked at (no fresh navigation --
+ * see `attachToBrowserTab`'s own doc comment for why), via CDP's `Input`
+ * domain, then screenshots the result the same way `checkInBrowser` does so
+ * the model sees what actually happened rather than guessing.
+ *
+ * `Input.dispatchMouseEvent` needs an explicit press-then-release pair --
+ * a single event with no `type` distinction is not a click, it is a mouse
+ * sitting at a point. `Input.insertText` (rather than synthesizing
+ * `Input.dispatchKeyEvent` per character) inserts at whatever element
+ * currently has focus, the same primitive Playwright's own `page.fill()`
+ * uses -- simpler and more reliable than simulating individual keystrokes
+ * for the click+type slice this is scoped to.
+ *
+ * Never throws, same posture and same reason as `checkInBrowser`.
+ */
+async function interactInBrowser(url: string, interaction: BrowserInteraction): Promise<InteractInBrowserOutcome> {
+	let attachment: BrowserPageAttachment | undefined;
+	try {
+		attachment = await attachToBrowserTab(url);
+		if (interaction.action === 'click') {
+			const { x, y } = interaction;
+			await attachment.cdp.send(
+				'Input.dispatchMouseEvent',
+				{ type: 'mousePressed', x, y, button: 'left', clickCount: 1 },
+				attachment.sessionId,
+			);
+			await attachment.cdp.send(
+				'Input.dispatchMouseEvent',
+				{ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 },
+				attachment.sessionId,
+			);
+		} else {
+			await attachment.cdp.send('Input.insertText', { text: interaction.text }, attachment.sessionId);
+		}
+
+		const data = await captureScreenshot(attachment);
+		return { outcome: 'screenshot', mimeType: 'image/png', data };
+	} catch (error) {
+		return { outcome: 'failed', reason: describeError(error) };
+	} finally {
+		attachment?.cdp.dispose();
+		void attachment?.session.close();
 	}
 }
 
