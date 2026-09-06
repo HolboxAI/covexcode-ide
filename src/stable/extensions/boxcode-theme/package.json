@@ -25,7 +25,10 @@
         "uiTheme": "vs",
         "path": "./themes/boxcode-light.json"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "window.autoDetectColorScheme": true
+    }
   },
   "repository": {
     "type": "git",
