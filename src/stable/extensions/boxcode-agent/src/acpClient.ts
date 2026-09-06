@@ -131,6 +131,36 @@ export type CheckInBrowserOutcome =
 	| { outcome: 'screenshot'; mimeType: string; data: string }
 	| { outcome: 'failed'; reason: string };
 
+/**
+ * Mirrors `boxcode`'s own `tools::BrowserInteraction` exactly (internally
+ * tagged on `action`, `rename_all = "snake_case"`) -- the smallest safe
+ * first slice of the agent-driven browser loop: click and type only, no
+ * key-press support and no `Runtime.evaluate`/arbitrary JS, both
+ * deliberately deferred to a follow-up.
+ */
+export type BrowserInteraction =
+	| { action: 'click'; x: number; y: number }
+	| { action: 'type'; text: string };
+
+/**
+ * `session/interactInBrowser` -- same non-ACP-spec shape and reasoning as
+ * `session/checkInBrowser` above, mirroring `boxcode`'s own
+ * `protocol.rs::InteractInBrowserRequest`/`InteractInBrowserOutcome`
+ * exactly. Kept as a separate request/outcome pair rather than an optional
+ * field folded onto `CheckInBrowserRequest`, matching the server side's own
+ * stated convention (see `transport.rs`'s `Router` doc comment): a small,
+ * explicit type per real use.
+ */
+export interface InteractInBrowserRequest {
+	sessionId: string;
+	url: string;
+	interaction: BrowserInteraction;
+}
+
+export type InteractInBrowserOutcome =
+	| { outcome: 'screenshot'; mimeType: string; data: string }
+	| { outcome: 'failed'; reason: string };
+
 interface PendingRequest {
 	resolve: (result: unknown) => void;
 	reject: (error: Error) => void;
@@ -138,6 +168,7 @@ interface PendingRequest {
 
 type RespondToPermission = (outcome: RequestPermissionOutcome) => void;
 type RespondToBrowserCheck = (outcome: CheckInBrowserOutcome) => void;
+type RespondToBrowserInteract = (outcome: InteractInBrowserOutcome) => void;
 
 /**
  * A minimal ACP v1 client for a `boxcode --acp` subprocess -- JSON-RPC 2.0
@@ -157,7 +188,9 @@ type RespondToBrowserCheck = (outcome: CheckInBrowserOutcome) => void;
  * Emits: `update` (`SessionNotification`), `permissionRequest`
  * (`RequestPermissionRequest`, a callback to answer it),
  * `browserCheckRequest` (`CheckInBrowserRequest`, a callback to answer it),
- * `stderr` (`string`), `exit` (`code`, `signal`), `spawnError` (`Error`).
+ * `browserInteractRequest` (`InteractInBrowserRequest`, a callback to
+ * answer it), `stderr` (`string`), `exit` (`code`, `signal`), `spawnError`
+ * (`Error`).
  */
 export class AcpClient extends EventEmitter {
 	private readonly child: cp.ChildProcessWithoutNullStreams;
@@ -236,6 +269,13 @@ export class AcpClient extends EventEmitter {
 				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
 			};
 			this.emit('browserCheckRequest', value.params as CheckInBrowserRequest, respond);
+			return;
+		}
+		if (value.method === 'session/interactInBrowser') {
+			const respond: RespondToBrowserInteract = outcome => {
+				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
+			};
+			this.emit('browserInteractRequest', value.params as InteractInBrowserRequest, respond);
 			return;
 		}
 		if (typeof value.id !== 'undefined' && (value.result !== undefined || value.error !== undefined)) {
