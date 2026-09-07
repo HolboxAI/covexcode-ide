@@ -42,11 +42,15 @@ on:
 # channel yet. ASSETS_REPOSITORY is set explicitly (rather than relying on
 # utils.sh's fallback) so a misconfigured run can never silently point at
 # VSCodium's own release/update infrastructure.
+#
+# DISABLE_UPDATE=no bakes updateUrl into product.json so a shipped .app
+# can notice a newer rolling build. The app still asks before downloading;
+# it does not silent-install. Local ./dev/build.sh keeps DISABLE_UPDATE=yes.
 env:
   APP_NAME: Boxcode
   ASSETS_REPOSITORY: ${{ github.repository }}
   BINARY_NAME: boxcode-ide
-  DISABLE_UPDATE: yes
+  DISABLE_UPDATE: no
   GH_REPO_PATH: ${{ github.repository }}
   GITHUB_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.head }}
   ORG_NAME: ${{ github.repository_owner }}
@@ -113,7 +117,7 @@ jobs:
           # prepare_assets.sh are the packaging path. icons/ is copied into
           # the overlay. Omitting any of these meant a PR that only touched
           # the agent, a packaging script, or an icon skipped compile.
-          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|prepare_assets\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|src/|build/|icons/|\.github/workflows/ci-build-macos\.yml)'; then
+          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|prepare_assets\.sh|publish_update_feed\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|src/|build/|icons/|\.github/workflows/ci-build-macos\.yml)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "a build-relevant path changed"
           else
@@ -367,3 +371,8 @@ jobs:
             --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`). The .app is ad-hoc signed so that warning is actually reachable; without it macOS refuses to launch at all." \
             --prerelease 2>/dev/null || true
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip assets/*.dmg
+
+      - name: Publish update feed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./publish_update_feed.sh

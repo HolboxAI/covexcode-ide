@@ -1,0 +1,72 @@
+diff --git a/src/vs/workbench/contrib/update/browser/update.ts b/src/vs/workbench/contrib/update/browser/update.ts
+--- a/src/vs/workbench/contrib/update/browser/update.ts
++++ b/src/vs/workbench/contrib/update/browser/update.ts
+@@ -211,12 +211,13 @@
+ 	private majorMinorUpdateAvailableContextKey: IContextKey<boolean>;
+ 
+ 	constructor(
+-		@IStorageService storageService: IStorageService,
++		@IStorageService private readonly storageService: IStorageService,
+ 		@IInstantiationService private readonly instantiationService: IInstantiationService,
+ 		@IUpdateService private readonly updateService: IUpdateService,
+ 		@IActivityService private readonly activityService: IActivityService,
+ 		@IContextKeyService contextKeyService: IContextKeyService,
+ 		@IProductService private readonly productService: IProductService,
++		@INotificationService private readonly notificationService: INotificationService,
+ 	) {
+ 		super();
+ 		this.state = updateService.state;
+@@ -235,12 +236,12 @@
+ 		*/
+ 
+ 		const currentVersion = this.productService.commit;
+-		const lastKnownVersion = storageService.get('update/lastKnownVersion', StorageScope.APPLICATION);
++		const lastKnownVersion = this.storageService.get('update/lastKnownVersion', StorageScope.APPLICATION);
+ 
+ 		// if current version != stored version, clear both fields
+ 		if (currentVersion !== lastKnownVersion) {
+-			storageService.remove('update/lastKnownVersion', StorageScope.APPLICATION);
+-			storageService.remove('update/updateNotificationTime', StorageScope.APPLICATION);
++			this.storageService.remove('update/lastKnownVersion', StorageScope.APPLICATION);
++			this.storageService.remove('update/updateNotificationTime', StorageScope.APPLICATION);
+ 		}
+ 
+ 		this.registerGlobalActivityActions();
+@@ -261,6 +262,10 @@
+ 			}
+ 		}
+ 
++		if (state.type === StateType.AvailableForDownload) {
++			this.promptIfNewUpdate(state.update.productVersion ?? state.update.version);
++		}
++
+ 		let badge: IBadge | undefined = undefined;
+ 
+ 		if (state.type === StateType.AvailableForDownload || state.type === StateType.Downloaded || state.type === StateType.Ready) {
+@@ -282,6 +287,26 @@
+ 		this.state = state;
+ 	}
+ 
++	private promptIfNewUpdate(version: string): void {
++		const key = 'update/lastNotifiedProductVersion';
++		if (this.storageService.get(key, StorageScope.APPLICATION) === version) {
++			return;
++		}
++
++		this.storageService.store(key, version, StorageScope.APPLICATION, StorageTarget.MACHINE);
++		this.notificationService.prompt(
++			Severity.Info,
++			nls.localize('boxcodeUpdateAvailable', "A new version of {0} is available ({1}). Update now?", this.productService.nameLong, version),
++			[{
++				label: nls.localize('updateNow', "Update"),
++				run: () => this.updateService.downloadUpdate(true)
++			}, {
++				label: nls.localize('updateLater', "Later"),
++				run: () => { }
++			}]
++		);
++	}
++
+ 	private registerGlobalActivityActions(): void {
+ 		CommandsRegistry.registerCommand('update.check', () => this.updateService.checkForUpdates(true));
+ 		CommandsRegistry.registerCommand('update.checking', () => { });

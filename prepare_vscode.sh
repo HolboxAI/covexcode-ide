@@ -60,13 +60,13 @@ setpath "product" "requestFeatureUrl" "https://go.microsoft.com/fwlink/?LinkID=5
 setpath "product" "tipsAndTricksUrl" "https://go.microsoft.com/fwlink/?linkid=852118"
 setpath "product" "twitterUrl" "https://go.microsoft.com/fwlink/?LinkID=533687"
 
-# P1: no boxcode-owned update server exists yet. Rather than point at
-# VSCodium's update infrastructure (which is what would happen if these were
-# left as-is), auto-update stays off by default until boxcode-ide stands up
-# its own release feed. Set DISABLE_UPDATE=no once that exists, and swap the
-# URLs below for a HolboxAI-owned versions feed at the same time.
+# Rolling macOS builds publish latest.json to the update-feed branch of this
+# repo (see publish_update_feed.sh). Set DISABLE_UPDATE=yes to compile an
+# app that never checks. The default update.mode is "default": the app
+# notifies when a newer build exists and waits for the user to confirm
+# before downloading. It does not silently replace the running app.
 if [[ "${DISABLE_UPDATE}" != "yes" ]]; then
-  setpath "product" "updateUrl" "https://raw.githubusercontent.com/HolboxAI/boxcode-ide-versions/refs/heads/main"
+  setpath "product" "updateUrl" "https://raw.githubusercontent.com/HolboxAI/boxcode-ide/update-feed"
 
   if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
     setpath "product" "downloadUrl" "https://github.com/HolboxAI/boxcode-ide-insiders/releases"
