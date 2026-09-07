@@ -425,6 +425,55 @@ export function probeBinaryExists(boxcodeCommand: string, args: string[] = ['--v
 }
 
 /**
+ * Whether this `boxcode` binary actually accepts `--acp`. `--version` is
+ * not enough: a CLI from before ACP landed still prints a version and
+ * still sits on PATH, then `boxcode --acp` exits 2 with "Unknown
+ * argument" -- which used to surface as a PATH error even though the
+ * binary was found. Stdin is left open so a real ACP server waits for
+ * JSON-RPC instead of exiting on EOF; still-running after a short wait
+ * means the flag was accepted. Exit 2 (the unknown-argument code in
+ * `main.rs`) means it was not.
+ */
+export function probeAcpSupported(boxcodeCommand: string, args: string[] = ['--acp'], timeoutMs = 1_000): Promise<boolean> {
+	return new Promise(resolve => {
+		let settled = false;
+		let stderr = '';
+		const settle = (ok: boolean) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			resolve(ok);
+		};
+		try {
+			const child = cp.spawn(boxcodeCommand, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+			child.stderr?.on('data', (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+			child.on('error', () => settle(false));
+			child.on('exit', code => {
+				if (/unknown argument/i.test(stderr) || code === 2) {
+					settle(false);
+					return;
+				}
+				// The flag was recognized. A later config/runtime failure is
+				// a different problem -- this probe only asks whether --acp
+				// exists.
+				settle(true);
+			});
+			setTimeout(() => {
+				if (!settled) {
+					child.kill();
+					settle(true);
+				}
+			}, timeoutMs);
+		} catch {
+			settle(false);
+		}
+	});
+}
+
+/**
  * Reads `boxcode`'s own provider registry (`providers.rs`) over
  * `boxcode --providers-json`, so the picker in `extension.ts`'s
  * `runSetupFlow()` shows the same list `/provider` does in the TUI instead
@@ -435,28 +484,55 @@ export function probeBinaryExists(boxcodeCommand: string, args: string[] = ['--v
  * Only call this after `probeBinaryExists()` has already confirmed the
  * binary is there -- a missing binary here would just be a second, less
  * clear way to discover the same ENOENT.
+ *
+ * Bounded the same way `probeBinaryExists` is: a hung `--providers-json`
+ * (an older binary that doesn't know the flag and waits for a TUI, a
+ * stuck process) used to freeze the whole setup wizard with no way out.
  */
-export function fetchProviders(boxcodeCommand: string, args: string[] = ['--providers-json']): Promise<ProviderDescriptor[]> {
+export function fetchProviders(boxcodeCommand: string, args: string[] = ['--providers-json'], timeoutMs = 5_000): Promise<ProviderDescriptor[]> {
 	return new Promise((resolve, reject) => {
 		let stdout = '';
 		let stderr = '';
-		const child = cp.spawn(boxcodeCommand, args);
-		child.stdout.on('data', (chunk: Buffer) => {
+		let settled = false;
+		let child: cp.ChildProcess | undefined;
+		const settle = (fn: () => void) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearTimeout(timer);
+			fn();
+		};
+		const timer = setTimeout(() => {
+			child?.kill();
+			settle(() => reject(new Error(`boxcode --providers-json timed out after ${timeoutMs}ms`)));
+		}, timeoutMs);
+		try {
+			child = cp.spawn(boxcodeCommand, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+		} catch (error) {
+			settle(() => reject(error instanceof Error ? error : new Error(String(error))));
+			return;
+		}
+		child.stdout?.on('data', (chunk: Buffer) => {
 			stdout += chunk.toString();
 		});
-		child.stderr.on('data', (chunk: Buffer) => {
+		child.stderr?.on('data', (chunk: Buffer) => {
 			stderr += chunk.toString();
 		});
-		child.on('error', reject);
-		child.on('exit', code => {
+		child.on('error', error => settle(() => reject(error)));
+		// `close`, not `exit`: `exit` can fire before stdout is flushed into
+		// the 'data' handler, which would parse an empty string and look like
+		// invalid JSON for a binary that actually printed the registry.
+		child.on('close', code => {
 			if (code !== 0) {
-				reject(new Error(`boxcode --providers-json exited ${code}: ${stderr.trim()}`));
+				settle(() => reject(new Error(`boxcode --providers-json exited ${code}: ${stderr.trim()}`)));
 				return;
 			}
 			try {
-				resolve(JSON.parse(stdout) as ProviderDescriptor[]);
+				const parsed = JSON.parse(stdout) as ProviderDescriptor[];
+				settle(() => resolve(parsed));
 			} catch (error) {
-				reject(new Error(`boxcode --providers-json did not print valid JSON: ${describeErrorLocal(error)}`));
+				settle(() => reject(new Error(`boxcode --providers-json did not print valid JSON: ${describeErrorLocal(error)}`)));
 			}
 		});
 	});

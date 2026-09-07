@@ -24,8 +24,27 @@ export function describeError(error: unknown): string {
  * first-time tester unblocked: the real, copy-pasteable install command
  * from boxcode.sh, picked by platform.
  */
+/**
+ * Thrown when a `boxcode` binary exists and answers `--version`, but
+ * `--acp` is an unknown flag (exit 2 in `main.rs`). That is the first-run
+ * failure a user with an older CLI hits -- the binary is on PATH, chat
+ * still cannot start.
+ */
+export class AcpUnsupportedError extends Error {
+	constructor() {
+		super('boxcode --acp is not supported by this CLI');
+		this.name = 'AcpUnsupportedError';
+	}
+}
+
 export function describeStartupFailure(error: unknown, platform: NodeJS.Platform): string {
 	const isMissingBinary = error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT';
+	if (isAcpUnsupported(error)) {
+		return (
+			"Your `boxcode` CLI is installed, but it's too old for this IDE -- chat needs `boxcode --acp`, " +
+			"which this build doesn't have. Upgrade, then send your message again:\n\n```\nboxcode --upgrade\n```"
+		);
+	}
 	if (!isMissingBinary) {
 		return `Couldn't start \`boxcode --acp\` (${describeError(error)}). Make sure \`boxcode\` is installed and on your PATH.`;
 	}
@@ -37,4 +56,12 @@ export function describeStartupFailure(error: unknown, platform: NodeJS.Platform
 		"The `boxcode` CLI isn't installed yet -- boxcode IDE and the `boxcode` command are separate installs. " +
 		`Run this in a terminal, then send your message again:\n\n\`\`\`\n${installCommand}\n\`\`\``
 	);
+}
+
+function isAcpUnsupported(error: unknown): boolean {
+	if (error instanceof AcpUnsupportedError) {
+		return true;
+	}
+	const message = describeError(error);
+	return /unknown argument:\s*--acp/i.test(message) || /exited \(code 2\b/.test(message);
 }

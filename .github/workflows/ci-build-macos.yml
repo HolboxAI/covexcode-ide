@@ -108,7 +108,12 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED"
 
-          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|\.github/workflows/ci-build-macos\.yml)'; then
+          # src/ is copied into the vscode tree by prepare_vscode.sh (the
+          # boxcode-agent extension and branding overlay). build/ and
+          # prepare_assets.sh are the packaging path. icons/ is copied into
+          # the overlay. Omitting any of these meant a PR that only touched
+          # the agent, a packaging script, or an icon skipped compile.
+          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|prepare_assets\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|src/|build/|icons/|\.github/workflows/ci-build-macos\.yml)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "a build-relevant path changed"
           else
@@ -359,6 +364,6 @@ jobs:
           TAG="macos-dev-latest"
           gh release create "$TAG" --repo "${{ github.repository }}" \
             --title "macOS dev build (rolling)" \
-            --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`)." \
+            --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`). The .app is ad-hoc signed so that warning is actually reachable; without it macOS refuses to launch at all." \
             --prerelease 2>/dev/null || true
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip assets/*.dmg

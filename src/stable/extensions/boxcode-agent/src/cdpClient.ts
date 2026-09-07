@@ -13,7 +13,7 @@
  */
 export interface CdpSession {
 	onDidReceiveMessage(listener: (message: unknown) => void): { dispose(): void };
-	sendMessage(message: unknown): Thenable<void>;
+	sendMessage(message: unknown): PromiseLike<void>;
 }
 
 /** `send()`'s default timeout when a caller doesn't specify one -- see its own doc comment for why every command needs one at all. */
@@ -27,13 +27,30 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
  * This correlates outgoing commands to their replies by CDP's own `id`
  * field, and separately lets a caller wait for one named event.
  */
+interface EventWaiter {
+	dispose(): void;
+	reject(error: Error): void;
+	timeout: ReturnType<typeof setTimeout>;
+}
+
 export class CdpClient {
 	private nextId = 1;
 	private readonly pending = new Map<number, { resolve: (result: unknown) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
+	private readonly eventWaiters = new Set<EventWaiter>();
 	private readonly listener: { dispose(): void };
+	private readonly unrefTimers: boolean;
 
-	constructor(private readonly session: CdpSession) {
+	constructor(private readonly session: CdpSession, options: { unrefTimers?: boolean } = {}) {
+		this.unrefTimers = options.unrefTimers !== false;
 		this.listener = session.onDidReceiveMessage(message => this.handleMessage(message));
+	}
+
+	private armTimeout(ms: number, fn: () => void): ReturnType<typeof setTimeout> {
+		const timeout = setTimeout(fn, ms);
+		if (this.unrefTimers) {
+			timeout.unref?.();
+		}
+		return timeout;
 	}
 
 	private handleMessage(message: unknown): void {
@@ -81,14 +98,13 @@ export class CdpClient {
 	send<T = unknown>(method: string, params?: unknown, sessionId?: string, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS): Promise<T> {
 		const id = this.nextId++;
 		const reply = new Promise<T>((resolve, reject) => {
-			const timeout = setTimeout(() => {
+			const timeout = this.armTimeout(timeoutMs, () => {
 				this.pending.delete(id);
 				reject(new Error(`timed out waiting for a reply to ${method}`));
-			}, timeoutMs);
-			timeout.unref?.(); // a safety-net timer has no business keeping the extension host process alive on its own
+			});
 			this.pending.set(id, { resolve: resolve as (result: unknown) => void, reject, timeout });
 		});
-		void this.session.sendMessage(sessionId ? { id, method, params, sessionId } : { id, method, params }).then(undefined, error => {
+		void this.session.sendMessage(sessionId ? { id, method, params, sessionId } : { id, method, params }).then(undefined, (error: unknown) => {
 			const pending = this.pending.get(id);
 			if (pending) {
 				this.pending.delete(id);
@@ -101,19 +117,33 @@ export class CdpClient {
 
 	waitForEvent(method: string, timeoutMs: number): Promise<unknown> {
 		return new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				sub.dispose();
-				reject(new Error(`timed out waiting for ${method}`));
-			}, timeoutMs);
-			timeout.unref?.();
+			let settled = false;
+			let waiter: EventWaiter;
+			const timeout = this.armTimeout(timeoutMs, () => {
+				settle(() => reject(new Error(`timed out waiting for ${method}`)));
+			});
 			const sub = this.session.onDidReceiveMessage(message => {
 				const { method: eventMethod, params } = (message ?? {}) as { method?: string; params?: unknown };
 				if (eventMethod === method) {
-					clearTimeout(timeout);
-					sub.dispose();
-					resolve(params);
+					settle(() => resolve(params));
 				}
 			});
+			const settle = (fn: () => void) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				this.eventWaiters.delete(waiter);
+				clearTimeout(timeout);
+				sub.dispose();
+				fn();
+			};
+			waiter = {
+				timeout,
+				reject,
+				dispose: () => settle(() => reject(new Error('CdpClient disposed before the event arrived'))),
+			};
+			this.eventWaiters.add(waiter);
 		});
 	}
 
@@ -126,6 +156,14 @@ export class CdpClient {
 			clearTimeout(pending.timeout);
 			pending.reject(new Error('CdpClient disposed before a reply arrived'));
 			this.pending.delete(id);
+		}
+		// waitForEvent() registers a *second* listener on the session, not
+		// the one stored in `this.listener`. checkInBrowser() always
+		// dispose()s in a finally -- including when Page.navigate throws
+		// before the load event -- so leaving those waiters alive used to
+		// reject later as an unhandled rejection after the 10s timeout.
+		for (const waiter of [...this.eventWaiters]) {
+			waiter.dispose();
 		}
 		this.listener.dispose();
 	}

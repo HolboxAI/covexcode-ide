@@ -27,7 +27,7 @@
   "scripts": {
     "compile": "gulp compile-extension:boxcode-agent",
     "watch": "gulp watch-extension:boxcode-agent",
-    "test": "tsc -p . --outDir out-test && node --test out-test/*.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test out-test/*.test.js"
   },
   "contributes": {
     "chatParticipants": [
@@ -71,7 +71,7 @@
         "boxcode.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to the `boxcode` binary, if it isn't on the PATH this app was launched with (a GUI-launched app's inherited PATH doesn't always match a login shell's -- e.g. a binary installed to `~/.cargo/bin` on macOS). Leave empty to resolve `boxcode` off PATH normally."
+          "markdownDescription": "Path to the `boxcode` binary, if it isn't on the PATH this app was launched with. Leave empty to resolve `boxcode` off PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.boxcode/bin` (the locations `install.sh` actually writes to, which a Finder-launched app's PATH often misses)."
         },
         "boxcode.provider": {
           "type": "string",
@@ -92,7 +92,8 @@
     }
   },
   "devDependencies": {
-    "@types/node": "24.x"
+    "@types/node": "24.x",
+    "typescript": "^5.9.2"
   },
   "repository": {
     "type": "git",

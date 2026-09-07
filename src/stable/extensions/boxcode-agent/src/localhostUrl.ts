@@ -31,5 +31,9 @@ export function findLocalhostUrl(text: string): string | undefined {
 	if (!match) {
 		return undefined;
 	}
-	return match[0].replace(/^(https?:\/\/)0\.0\.0\.0/i, '$1localhost');
+	// Logs and prose often put a URL at the end of a sentence. The greedy
+	// path class above does not stop at `.` / `,` / `;`, so
+	// "http://localhost:3000." would otherwise be opened as-is and miss.
+	const url = match[0].replace(/[.,;:]+$/, '');
+	return url.replace(/^(https?:\/\/)0\.0\.0\.0/i, '$1localhost');
 }
