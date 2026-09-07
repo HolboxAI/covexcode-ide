@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeStartupFailure } from './startupFailure';
+import { describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 
 function enoent(): NodeJS.ErrnoException {
 	const error = new Error('spawn boxcode ENOENT') as NodeJS.ErrnoException;
@@ -21,6 +21,19 @@ test('describeStartupFailure() gives the real install command when the boxcode b
 test('describeStartupFailure() picks the PowerShell install command on win32', () => {
 	const message = describeStartupFailure(enoent(), 'win32');
 	assert.match(message, /irm https:\/\/boxcode\.sh\/install\.ps1 \| iex/);
+});
+
+test('describeStartupFailure() tells an installed-but-old CLI to upgrade, not to reinstall', () => {
+	const message = describeStartupFailure(new AcpUnsupportedError(), 'darwin');
+	assert.match(message, /boxcode --upgrade/);
+	assert.match(message, /too old/);
+	assert.doesNotMatch(message, /Make sure `boxcode` is installed/);
+	assert.doesNotMatch(message, /curl -fsSL/);
+});
+
+test('describeStartupFailure() treats exit code 2 as an unknown --acp flag', () => {
+	const message = describeStartupFailure(new Error('boxcode --acp exited (code 2, signal null)'), 'darwin');
+	assert.match(message, /boxcode --upgrade/);
 });
 
 test('describeStartupFailure() falls back to generic prose for a non-ENOENT failure', () => {

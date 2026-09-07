@@ -425,6 +425,55 @@ export function probeBinaryExists(boxcodeCommand: string, args: string[] = ['--v
 }
 
 /**
+ * Whether this `boxcode` binary actually accepts `--acp`. `--version` is
+ * not enough: a CLI from before ACP landed still prints a version and
+ * still sits on PATH, then `boxcode --acp` exits 2 with "Unknown
+ * argument" -- which used to surface as a PATH error even though the
+ * binary was found. Stdin is left open so a real ACP server waits for
+ * JSON-RPC instead of exiting on EOF; still-running after a short wait
+ * means the flag was accepted. Exit 2 (the unknown-argument code in
+ * `main.rs`) means it was not.
+ */
+export function probeAcpSupported(boxcodeCommand: string, args: string[] = ['--acp'], timeoutMs = 1_000): Promise<boolean> {
+	return new Promise(resolve => {
+		let settled = false;
+		let stderr = '';
+		const settle = (ok: boolean) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			resolve(ok);
+		};
+		try {
+			const child = cp.spawn(boxcodeCommand, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+			child.stderr?.on('data', (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+			child.on('error', () => settle(false));
+			child.on('exit', code => {
+				if (/unknown argument/i.test(stderr) || code === 2) {
+					settle(false);
+					return;
+				}
+				// The flag was recognized. A later config/runtime failure is
+				// a different problem -- this probe only asks whether --acp
+				// exists.
+				settle(true);
+			});
+			setTimeout(() => {
+				if (!settled) {
+					child.kill();
+					settle(true);
+				}
+			}, timeoutMs);
+		} catch {
+			settle(false);
+		}
+	});
+}
+
+/**
  * Reads `boxcode`'s own provider registry (`providers.rs`) over
  * `boxcode --providers-json`, so the picker in `extension.ts`'s
  * `runSetupFlow()` shows the same list `/provider` does in the TUI instead

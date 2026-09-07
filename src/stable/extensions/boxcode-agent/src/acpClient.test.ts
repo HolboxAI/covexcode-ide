@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fetchProviders, probeBinaryExists } from './acpClient';
+import { fetchProviders, probeAcpSupported, probeBinaryExists } from './acpClient';
 
 /**
  * `probeBinaryExists`/`fetchProviders` spawn a real child process -- these
@@ -29,6 +29,24 @@ test('probeBinaryExists() resolves false for a command that exits nonzero', asyn
 test('probeBinaryExists() resolves false, not rejects, for a genuinely missing binary', async () => {
 	const ok = await probeBinaryExists('this-binary-does-not-exist-anywhere-12345');
 	assert.equal(ok, false);
+});
+
+test('probeAcpSupported() is false when the CLI rejects --acp as an unknown argument', async () => {
+	const ok = await probeAcpSupported(
+		process.execPath,
+		['-e', 'console.error("Unknown argument: --acp"); process.exit(2)'],
+		200,
+	);
+	assert.equal(ok, false);
+});
+
+test('probeAcpSupported() is true when the process stays running (ACP server waiting on stdin)', async () => {
+	const ok = await probeAcpSupported(
+		process.execPath,
+		['-e', 'setInterval(() => {}, 1000)'],
+		80,
+	);
+	assert.equal(ok, true);
 });
 
 test('fetchProviders() parses real stdout JSON from the child process', async () => {

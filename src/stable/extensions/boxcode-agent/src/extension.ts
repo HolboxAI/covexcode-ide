@@ -14,6 +14,7 @@ import {
 	fetchProviders,
 	InteractInBrowserOutcome,
 	InteractInBrowserRequest,
+	probeAcpSupported,
 	probeBinaryExists,
 	ProviderDescriptor,
 	PromptContentBlock,
@@ -30,7 +31,7 @@ import { isFreshChat } from './freshChat';
 import { findLocalhostUrl } from './localhostUrl';
 import { permissionOutcomeFromChoice } from './permissionOutcome';
 import { describeReferenceValue } from './referenceDescription';
-import { describeError, describeStartupFailure } from './startupFailure';
+import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
@@ -175,6 +176,9 @@ export function activate(context: vscode.ExtensionContext): void {
 					const notFound = new Error(`spawn ${candidates[0] ?? BOXCODE_COMMAND} ENOENT`) as NodeJS.ErrnoException;
 					notFound.code = 'ENOENT';
 					throw notFound;
+				}
+				if (!(await probeAcpSupported(boxcodeCommand))) {
+					throw new AcpUnsupportedError();
 				}
 				const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
 				const envOverrides = await ensureCredentials(context, boxcodeCommand);
