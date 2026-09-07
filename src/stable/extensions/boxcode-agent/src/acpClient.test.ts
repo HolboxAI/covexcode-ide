@@ -59,3 +59,10 @@ test('fetchProviders() rejects with a clear message on invalid JSON, not a raw p
 test('fetchProviders() rejects for a genuinely missing binary', async () => {
 	await assert.rejects(() => fetchProviders('this-binary-does-not-exist-anywhere-12345'));
 });
+
+test('fetchProviders() rejects on timeout instead of hanging forever', async () => {
+	await assert.rejects(
+		() => fetchProviders(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], 50),
+		/timed out/,
+	);
+});

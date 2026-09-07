@@ -435,28 +435,55 @@ export function probeBinaryExists(boxcodeCommand: string, args: string[] = ['--v
  * Only call this after `probeBinaryExists()` has already confirmed the
  * binary is there -- a missing binary here would just be a second, less
  * clear way to discover the same ENOENT.
+ *
+ * Bounded the same way `probeBinaryExists` is: a hung `--providers-json`
+ * (an older binary that doesn't know the flag and waits for a TUI, a
+ * stuck process) used to freeze the whole setup wizard with no way out.
  */
-export function fetchProviders(boxcodeCommand: string, args: string[] = ['--providers-json']): Promise<ProviderDescriptor[]> {
+export function fetchProviders(boxcodeCommand: string, args: string[] = ['--providers-json'], timeoutMs = 5_000): Promise<ProviderDescriptor[]> {
 	return new Promise((resolve, reject) => {
 		let stdout = '';
 		let stderr = '';
-		const child = cp.spawn(boxcodeCommand, args);
-		child.stdout.on('data', (chunk: Buffer) => {
+		let settled = false;
+		let child: cp.ChildProcess | undefined;
+		const settle = (fn: () => void) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearTimeout(timer);
+			fn();
+		};
+		const timer = setTimeout(() => {
+			child?.kill();
+			settle(() => reject(new Error(`boxcode --providers-json timed out after ${timeoutMs}ms`)));
+		}, timeoutMs);
+		try {
+			child = cp.spawn(boxcodeCommand, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+		} catch (error) {
+			settle(() => reject(error instanceof Error ? error : new Error(String(error))));
+			return;
+		}
+		child.stdout?.on('data', (chunk: Buffer) => {
 			stdout += chunk.toString();
 		});
-		child.stderr.on('data', (chunk: Buffer) => {
+		child.stderr?.on('data', (chunk: Buffer) => {
 			stderr += chunk.toString();
 		});
-		child.on('error', reject);
-		child.on('exit', code => {
+		child.on('error', error => settle(() => reject(error)));
+		// `close`, not `exit`: `exit` can fire before stdout is flushed into
+		// the 'data' handler, which would parse an empty string and look like
+		// invalid JSON for a binary that actually printed the registry.
+		child.on('close', code => {
 			if (code !== 0) {
-				reject(new Error(`boxcode --providers-json exited ${code}: ${stderr.trim()}`));
+				settle(() => reject(new Error(`boxcode --providers-json exited ${code}: ${stderr.trim()}`)));
 				return;
 			}
 			try {
-				resolve(JSON.parse(stdout) as ProviderDescriptor[]);
+				const parsed = JSON.parse(stdout) as ProviderDescriptor[];
+				settle(() => resolve(parsed));
 			} catch (error) {
-				reject(new Error(`boxcode --providers-json did not print valid JSON: ${describeErrorLocal(error)}`));
+				settle(() => reject(new Error(`boxcode --providers-json did not print valid JSON: ${describeErrorLocal(error)}`)));
 			}
 		});
 	});
