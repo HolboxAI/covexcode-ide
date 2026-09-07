@@ -1,0 +1,50 @@
+diff --git a/src/vs/platform/update/electron-main/updateService.darwin.ts b/src/vs/platform/update/electron-main/updateService.darwin.ts
+--- a/src/vs/platform/update/electron-main/updateService.darwin.ts
++++ b/src/vs/platform/update/electron-main/updateService.darwin.ts
+@@ -13,6 +13,7 @@
+ import { IEnvironmentMainService } from '../../environment/electron-main/environmentMainService.js';
+ import { ILifecycleMainService, IRelaunchHandler, IRelaunchOptions } from '../../lifecycle/electron-main/lifecycleMainService.js';
+ import { ILogService } from '../../log/common/log.js';
++import { INativeHostMainService } from '../../native/electron-main/nativeHostMainService.js';
+ import { IProductService } from '../../product/common/productService.js';
+ import { asJson, IRequestService, NO_FETCH_TELEMETRY } from '../../request/common/request.js';
+ import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
+@@ -47,6 +48,7 @@
+ 		@IProductService productService: IProductService,
+ 		@IApplicationStorageMainService applicationStorageMainService: IApplicationStorageMainService,
+ 		@IMeteredConnectionService meteredConnectionService: IMeteredConnectionService,
++		@INativeHostMainService private readonly nativeHostMainService: INativeHostMainService,
+ 	) {
+ 		super(lifecycleMainService, configurationService, environmentMainService, requestService, logService, productService, telemetryService, applicationStorageMainService, meteredConnectionService, true);
+ 
+@@ -132,10 +134,10 @@
+ 					this.setState(State.Idle(UpdateType.Setup, undefined, explicit || undefined));
+ 				}
+ 				else {
+-					this.logService.info('update#doCheckForUpdates - using Electron autoUpdater');
+-
+-					electron.autoUpdater.setFeedURL({ url });
+-					electron.autoUpdater.checkForUpdates();
++					// Unsigned / ad-hoc-signed builds cannot use Squirrel.Mac.
++					// Notify and wait for the user to confirm before opening the zip.
++					this.logService.info('update#doCheckForUpdates - offering download (Electron autoUpdater needs a signed app)');
++					this.setState(State.AvailableForDownload(result.update));
+ 				}
+ 
+ 				return Promise.resolve(null);
+@@ -212,10 +214,11 @@
+ 	}
+ 
+ 	protected override async doDownloadUpdate(state: AvailableForDownload): Promise<void> {
+-		// Rebuild feed URL and trigger download via Electron's auto-updater
+-		this.buildUpdateFeedUrl(this.quality!, { internalOrg: this.getInternalOrg() });
+-		this.setState(State.CheckingForUpdates(true));
+-		electron.autoUpdater.checkForUpdates();
++		const url = state.update.url || this.productService.downloadUrl;
++		if (url) {
++			this.nativeHostMainService.openExternal(undefined, url);
++		}
++		this.setState(State.Idle(UpdateType.Archive));
+ 	}
+ 
+ 	protected override doQuitAndInstall(): void {
