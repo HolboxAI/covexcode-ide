@@ -39,11 +39,15 @@ class FakeCdpSession implements CdpSession {
 			listener(message);
 		}
 	}
+
+	listenerCount(): number {
+		return this.listeners.length;
+	}
 }
 
 test('send() resolves with the result whose id matches the outgoing command', async () => {
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	const reply = cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' });
 	assert.equal(session.sent.length, 1);
@@ -62,7 +66,7 @@ test('send() includes sessionId on the outgoing message when given one, and omit
 	// handlers instead of the actual page -- coming back "Method not
 	// found" for a method (Page.enable) that does exist, just not there.
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	void cdp.send('Page.enable', undefined, 'page-session-1');
 	void cdp.send('Target.getTargets');
@@ -71,11 +75,13 @@ test('send() includes sessionId on the outgoing message when given one, and omit
 	const withoutSession = session.sent[1] as { sessionId?: string };
 	assert.equal(withSession.sessionId, 'page-session-1');
 	assert.equal('sessionId' in withoutSession, false);
+	session.deliver({ id: (session.sent[0] as { id: number }).id, result: {} });
+	session.deliver({ id: (session.sent[1] as { id: number }).id, result: {} });
 });
 
 test('send() rejects when the reply carries a matching-id error', async () => {
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	const reply = cdp.send('Page.navigate', { url: 'http://localhost:3000' });
 	const outgoing = session.sent[0] as { id: number };
@@ -91,7 +97,7 @@ test('send() rejects on its own if no reply ever arrives, instead of hanging for
 	// promise permanently unsettled -- not rejected, just never resolved --
 	// which is what actually hung a real chat turn end to end.
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	const reply = cdp.send('Page.captureScreenshot', { format: 'png' }, undefined, 10);
 	// Deliberately never call session.deliver() -- this is the whole point.
@@ -104,7 +110,7 @@ test('two outstanding commands are correlated independently, not first-in-first-
 	// CDP replies are not guaranteed to arrive in the order the commands
 	// were sent.
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	const first = cdp.send<{ tag: string }>('A');
 	const second = cdp.send<{ tag: string }>('B');
@@ -120,7 +126,7 @@ test('two outstanding commands are correlated independently, not first-in-first-
 
 test('a message with no id is treated as an event, not a reply, and ignored by send()', async () => {
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	const reply = cdp.send<{ ok: boolean }>('Page.enable');
 	const outgoing = session.sent[0] as { id: number };
@@ -135,7 +141,7 @@ test('a message with no id is treated as an event, not a reply, and ignored by s
 
 test('waitForEvent() resolves with the params of the first matching event, ignoring others', async () => {
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	const waiting = cdp.waitForEvent('Page.loadEventFired', 1_000);
 	session.deliver({ method: 'Page.frameStartedLoading', params: { frameId: 'x' } });
@@ -146,14 +152,14 @@ test('waitForEvent() resolves with the params of the first matching event, ignor
 
 test('waitForEvent() rejects if the event never arrives within the timeout', async () => {
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	await assert.rejects(cdp.waitForEvent('Page.loadEventFired', 10), /timed out/);
 });
 
 test('dispose() rejects a command still in flight, rather than leaving it to hang', async () => {
 	const session = new FakeCdpSession();
-	const cdp = new CdpClient(session);
+	const cdp = new CdpClient(session, { unrefTimers: false });
 
 	const reply = cdp.send<{ ok: boolean }>('Page.enable');
 	const outgoing = session.sent[0] as { id: number };
@@ -165,4 +171,25 @@ test('dispose() rejects a command still in flight, rather than leaving it to han
 	// it -- dispose() already rejected and removed it from `pending`, so
 	// this has nothing left to match against.
 	assert.doesNotThrow(() => session.deliver({ id: outgoing.id, result: { ok: true } }));
+});
+
+test('dispose() rejects waitForEvent() instead of leaving it to time out later', async () => {
+	const session = new FakeCdpSession();
+	const cdp = new CdpClient(session, { unrefTimers: false });
+
+	const waiting = cdp.waitForEvent('Page.loadEventFired', 5_000);
+	cdp.dispose();
+
+	await assert.rejects(waiting, /disposed before the event arrived/);
+	assert.equal(session.listenerCount(), 0);
+});
+
+test('dispose() after waitForEvent() already resolved does not reject a second time', async () => {
+	const session = new FakeCdpSession();
+	const cdp = new CdpClient(session, { unrefTimers: false });
+
+	const waiting = cdp.waitForEvent('Page.loadEventFired', 1_000);
+	session.deliver({ method: 'Page.loadEventFired', params: { timestamp: 1 } });
+	assert.deepEqual(await waiting, { timestamp: 1 });
+	assert.doesNotThrow(() => cdp.dispose());
 });
