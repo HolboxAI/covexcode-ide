@@ -26,5 +26,18 @@ jobs:
             exit 1
           fi
 
-  # Placeholder — real build/lint/test jobs get added once P1 fork source lands.
-  # Do not stub these green; leave the job absent until there's something real to check.
+  # The overlay tests do not need a vscode checkout -- tsconfig.test.json
+  # excludes extension.ts (the only file that imports `vscode`).
+  agent-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/stable/extensions/boxcode-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      - run: npm test
+
