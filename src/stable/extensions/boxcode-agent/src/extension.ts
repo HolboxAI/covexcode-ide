@@ -25,7 +25,10 @@ import {
 	ToolCallStatus,
 } from './acpClient';
 import { CdpClient } from './cdpClient';
+import { boxcodeBinaryCandidates } from './boxcodeBinary';
+import { isFreshChat } from './freshChat';
 import { findLocalhostUrl } from './localhostUrl';
+import { permissionOutcomeFromChoice } from './permissionOutcome';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure } from './startupFailure';
 
@@ -35,13 +38,12 @@ const SECRET_API_KEY = 'boxcode.apiKey';
 const DIFF_SCHEME = 'boxcode-diff';
 
 /** The configured `boxcode.path` setting if set, otherwise the bare command
- * name resolved off PATH -- an escape hatch for a binary installed
- * somewhere a GUI-launched app's inherited PATH doesn't reach (e.g.
- * `~/.cargo/bin` on macOS, invisible to a Finder-launched app even though a
- * login shell sees it fine). */
-function resolveBoxcodeCommand(): string {
-	const configured = vscode.workspace.getConfiguration('boxcode').get<string>('path', '').trim();
-	return configured || BOXCODE_COMMAND;
+ * name plus the locations `install.sh` writes to -- an escape hatch for a
+ * binary installed somewhere a GUI-launched app's inherited PATH doesn't
+ * reach (e.g. `~/.local/bin` on macOS, invisible to a Finder-launched app
+ * even though a login shell sees it fine). */
+function configuredBoxcodePath(): string {
+	return vscode.workspace.getConfiguration('boxcode').get<string>('path', '').trim();
 }
 
 /** Thrown by `ensureCredentials` when the user cancels the setup prompt -- distinguished from a real launch failure so the chat message shown for each reads correctly. */
@@ -114,11 +116,12 @@ class StubLanguageModelProvider implements vscode.LanguageModelChatProvider {
  * history across `session/prompt` calls, so reusing one session here is
  * what lets that continuity actually work.
  *
- * Known limitation, stated rather than hidden: VS Code's own "new chat"
- * action does not currently start a fresh `boxcode` session -- every turn
- * in this window shares the one ACP session opened on the first message.
- * Scoped narrower on purpose, matching the same "small, honest first
- * version" precedent `headless.rs` itself documents.
+ * Known limitation, stated rather than hidden: VS Code's own "New Chat"
+ * action used to keep the same `boxcode` ACP session -- every turn in this
+ * window shared the one session opened on the first message. An empty
+ * `ChatContext.history` now disposes that session before `ensureReady`, so
+ * "New Chat" actually starts fresh. Follow-up turns in the same thread keep
+ * the session because their history is non-empty.
  *
  * First-run configuration: a fresh install has no `~/.boxcode/config.toml`
  * and no `boxcode.endpoint`/`boxcode.model` settings, so the very first
@@ -155,14 +158,21 @@ export function activate(context: vscode.ExtensionContext): void {
 	function ensureReady(): Promise<void> {
 		if (!ready) {
 			ready = (async () => {
-				const boxcodeCommand = resolveBoxcodeCommand();
+				const candidates = boxcodeBinaryCandidates(configuredBoxcodePath(), os.homedir());
+				let boxcodeCommand: string | undefined;
+				for (const candidate of candidates) {
+					if (await probeBinaryExists(candidate)) {
+						boxcodeCommand = candidate;
+						break;
+					}
+				}
 				// Checked before ensureCredentials() runs at all -- a fresh
 				// install with no `boxcode` CLI used to walk through three
 				// credential prompts before ever learning the binary itself
 				// was missing. Thrown with `code: 'ENOENT'` so it lands on
 				// the exact branch `describeStartupFailure` already handles.
-				if (!(await probeBinaryExists(boxcodeCommand))) {
-					const notFound = new Error(`spawn ${boxcodeCommand} ENOENT`) as NodeJS.ErrnoException;
+				if (!boxcodeCommand) {
+					const notFound = new Error(`spawn ${candidates[0] ?? BOXCODE_COMMAND} ENOENT`) as NodeJS.ErrnoException;
 					notFound.code = 'ENOENT';
 					throw notFound;
 				}
@@ -185,7 +195,17 @@ export function activate(context: vscode.ExtensionContext): void {
 		return ready;
 	}
 
-	const requestHandler: vscode.ChatRequestHandler = async (request, _chatContext, stream, token) => {
+	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
+		if (isFreshChat(chatContext.history.length) && client) {
+			// VS Code's "New Chat" reuses this extension host, so without
+			// this the next empty-history request would keep talking to the
+			// previous HeadlessSession -- every "new chat" was the same
+			// conversation on the daemon side.
+			client.dispose();
+			client = undefined;
+			sessionId = undefined;
+			ready = undefined;
+		}
 		try {
 			await ensureReady();
 		} catch (error) {
@@ -220,6 +240,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
 				void askPermission(permissionRequest, diffContentProvider).then(respond);
+			} else {
+				respond({ outcome: 'cancelled' });
 			}
 		};
 		const onBrowserCheckRequest = (
@@ -228,6 +250,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		) => {
 			if (browserRequest.sessionId === activeSessionId) {
 				void checkInBrowser(browserRequest.url).then(respond);
+			} else {
+				respond({ outcome: 'failed', reason: 'browser check arrived for a different session' });
 			}
 		};
 		const onBrowserInteractRequest = (
@@ -236,6 +260,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		) => {
 			if (interactRequest.sessionId === activeSessionId) {
 				void interactInBrowser(interactRequest.url, interactRequest.interaction).then(respond);
+			} else {
+				respond({ outcome: 'failed', reason: 'browser interaction arrived for a different session' });
 			}
 		};
 
@@ -751,8 +777,8 @@ async function askPermission(
 		rejectLabel,
 	);
 
-	if (allow && choice === allowLabel) {
-		return { outcome: 'selected', optionId: allow.optionId };
+	if (choice === allowLabel || choice === rejectLabel) {
+		return permissionOutcomeFromChoice(choice, allow, reject);
 	}
 	return { outcome: 'cancelled' };
 }
@@ -944,12 +970,16 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 	let attachment: BrowserPageAttachment | undefined;
 	try {
 		attachment = await attachToBrowserTab(url);
-		const loaded = attachment.cdp.waitForEvent('Page.loadEventFired', 10_000);
+		// Catch immediately, not only after navigate succeeds: the finally
+		// below dispose()s the client, and waitForEvent now rejects on
+		// dispose. Awaiting loaded only after navigate used to leave that
+		// rejection unhandled when navigate itself threw.
+		const loaded = attachment.cdp.waitForEvent('Page.loadEventFired', 10_000).catch(() => undefined);
 		await attachment.cdp.send('Page.navigate', { url }, attachment.sessionId);
 		// A page that never fires the load event (a script error, an
 		// infinite spinner) still gets screenshotted as-is below -- that is
 		// itself useful evidence, not a reason to fail the whole check.
-		await loaded.catch(() => undefined);
+		await loaded;
 
 		const data = await captureScreenshot(attachment);
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
