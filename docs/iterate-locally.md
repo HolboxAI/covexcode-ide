@@ -15,6 +15,8 @@ export ORG_NAME=HolboxAI
 export OS_NAME=osx
 export VSCODE_ARCH=arm64
 export VSCODE_QUALITY=stable
+# Set DISABLE_UPDATE=no to bake in the rolling-build update feed
+# (https://raw.githubusercontent.com/HolboxAI/boxcode-ide/update-feed).
 export DISABLE_UPDATE=yes
 export SHOULD_BUILD=yes
 export SHOULD_BUILD_REH=no
@@ -52,4 +54,8 @@ Only needed when you want a distributable. Dispatch
 `CI - Build - macOS` with `generate_assets: true`, or run
 `./prepare_assets.sh` after a local compile (sets `OS_NAME=osx`).
 The packaging script ad-hoc-signs when no Developer ID certificate is
-configured, then builds the zip/dmg.
+configured, then builds the zip/dmg. That same dispatch also publishes
+`latest.json` on the `update-feed` branch. A previously installed app
+with updates enabled will notify that a new version is available and
+ask before opening the zip; it will not replace itself in the
+background.
