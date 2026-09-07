@@ -46,3 +46,8 @@ test('findLocalhostUrl() finds the first localhost URL when multiple lines are p
 	const output = 'compiling...\nLocal:   http://localhost:3000\nNetwork: http://192.168.1.5:3000';
 	assert.equal(findLocalhostUrl(output), 'http://localhost:3000');
 });
+
+test('findLocalhostUrl() strips trailing sentence punctuation from the URL', () => {
+	assert.equal(findLocalhostUrl('Started at http://localhost:3000.'), 'http://localhost:3000');
+	assert.equal(findLocalhostUrl('see http://127.0.0.1:8080/), next'), 'http://127.0.0.1:8080/');
+});
