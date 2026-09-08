@@ -76,6 +76,9 @@
         "category": "boxcode"
       }
     ],
+    "configurationDefaults": {
+      "security.workspace.trust.banner": "always"
+    },
     "configuration": {
       "title": "boxcode",
       "properties": {

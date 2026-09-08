@@ -39,7 +39,15 @@ import {
 import { isFreshChat } from './freshChat';
 import { findLocalhostUrl } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
-import { describeError, describeRestrictedMode, describeStartupFailure, AcpUnsupportedError, TRUST_COMMAND } from './startupFailure';
+import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
+import {
+	describeRestrictedMode,
+	folderTrustKey,
+	shouldPromptForWorkspaceTrust,
+	TRUST_COMMAND,
+	TRUST_TOAST_ACTION,
+	TRUST_TOAST_MESSAGE,
+} from './workspaceTrust';
 import {
 	prependWorkspacePrefix,
 	resolvePathAgainstCwd,
@@ -161,6 +169,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	// against `$HOME` on the chat-first landing page.
 	let sessionCwd: string | undefined;
 	const permissionGate = new PermissionGate();
+	const promptedTrustFolders = new Set<string>();
 	// Persists for the life of the extension host, not just one turn -- a
 	// dev server started earlier in the conversation is still running, and
 	// re-popping the browser open every time its URL appears again in later
@@ -191,6 +200,40 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessionId = undefined;
 		ready = undefined;
 		sessionCwd = undefined;
+	}
+
+	async function requestFolderTrust(): Promise<void> {
+		const requestTrust = (vscode.workspace as { requestWorkspaceTrust?: (options?: { message?: string }) => Thenable<boolean | undefined> }).requestWorkspaceTrust;
+		if (typeof requestTrust === 'function') {
+			await requestTrust({
+				message: 'boxcode needs trust to read, write, and run commands in this folder.',
+			});
+			return;
+		}
+		await vscode.commands.executeCommand('workbench.trust.manage');
+	}
+
+	/**
+	 * Chat-first is a trusted empty window. Opening a folder does not
+	 * always show VS Code's own startup trust prompt, so Restricted Mode
+	 * used to arrive silently and disable the agent. Ask immediately,
+	 * with a non-modal toast -- not a center-screen system dialog -- and
+	 * only once per folder set.
+	 */
+	async function promptTrustIfNeeded(): Promise<void> {
+		const folders = vscode.workspace.workspaceFolders ?? [];
+		if (!shouldPromptForWorkspaceTrust(vscode.workspace.isTrusted, folders.length)) {
+			return;
+		}
+		const key = folderTrustKey(folders.map(folder => folder.uri.toString()));
+		if (promptedTrustFolders.has(key)) {
+			return;
+		}
+		promptedTrustFolders.add(key);
+		const choice = await vscode.window.showInformationMessage(TRUST_TOAST_MESSAGE, TRUST_TOAST_ACTION);
+		if (choice === TRUST_TOAST_ACTION) {
+			await requestFolderTrust();
+		}
 	}
 
 	function ensureReady(workspace: WorkspaceContext): Promise<void> {
@@ -239,7 +282,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	}
 
 	context.subscriptions.push(
-		vscode.workspace.onDidChangeWorkspaceFolders(() => discardSession()),
+		vscode.workspace.onDidChangeWorkspaceFolders(() => {
+			discardSession();
+			void promptTrustIfNeeded();
+		}),
 		vscode.commands.registerCommand(PERMISSION_COMMAND, (...args: unknown[]) => {
 			const parsed = parsePermissionCommandArgs(args);
 			if (!parsed) {
@@ -248,19 +294,14 @@ export function activate(context: vscode.ExtensionContext): void {
 			permissionGate.respond(parsed.id, parsed.choice);
 		}),
 		vscode.commands.registerCommand(TRUST_COMMAND, async () => {
-			const requestTrust = (vscode.workspace as { requestWorkspaceTrust?: (options?: { message?: string }) => Thenable<boolean | undefined> }).requestWorkspaceTrust;
-			if (typeof requestTrust === 'function') {
-				await requestTrust({
-					message: 'boxcode needs trust to read, write, and run commands in this folder.',
-				});
-				return;
-			}
-			await vscode.commands.executeCommand('workbench.trust.manage');
+			await requestFolderTrust();
 		}),
 		vscode.workspace.onDidGrantWorkspaceTrust(() => {
-			void vscode.window.showInformationMessage('boxcode: this folder is trusted. Send your chat message again.');
+			void vscode.commands.executeCommand('workbench.action.chat.open');
+			void vscode.window.showInformationMessage('This folder is trusted. Chat can read, write, and run here now.');
 		}),
 	);
+	void promptTrustIfNeeded();
 
 	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
 		// A confirmation-card click is a new ChatRequest, not a new turn.
