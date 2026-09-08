@@ -2,7 +2,7 @@
   "name": "boxcode-agent",
   "displayName": "boxcode",
   "description": "Chat with boxcode, driven over its ACP stdio interface.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "boxcode",
   "license": "MIT",
   "engines": {
@@ -17,7 +17,8 @@
   "capabilities": {
     "virtualWorkspaces": false,
     "untrustedWorkspaces": {
-      "supported": false
+      "supported": "limited",
+      "description": "Chat stays available in Restricted Mode. boxcode will not read, write, or run commands until this folder is trusted."
     }
   },
   "activationEvents": [
@@ -63,8 +64,21 @@
         "command": "boxcode.changeProvider",
         "title": "boxcode: Change Provider / Model / API Key",
         "category": "boxcode"
+      },
+      {
+        "command": "boxcode.permission.respond",
+        "title": "boxcode: Respond to Permission",
+        "category": "boxcode"
+      },
+      {
+        "command": "boxcode.trustWorkspace",
+        "title": "boxcode: Trust This Folder",
+        "category": "boxcode"
       }
     ],
+    "configurationDefaults": {
+      "security.workspace.trust.banner": "always"
+    },
     "configuration": {
       "title": "boxcode",
       "properties": {

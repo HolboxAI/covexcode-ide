@@ -59,3 +59,18 @@ configured, then builds the zip/dmg. That same dispatch also publishes
 with updates enabled will notify that a new version is available and
 ask before opening the zip; it will not replace itself in the
 background.
+
+## Windows portable build
+
+`CI - Build - Windows` now runs on PRs the same way macOS does. After
+`pack (windows-x64)` is green, download the `compiled-win32-x64`
+artifact, then:
+
+```bat
+tar -xzf compiled.tar.gz
+VSCode-win32-x64\Boxcode.exe
+```
+
+Installers (exe/msi) are still dispatch-only (`generate_assets: true`).
+arm64 Windows packing is dispatch-only too. The `boxcode` CLI is a
+separate install: `irm https://boxcode.sh/install.ps1 | iex`.
