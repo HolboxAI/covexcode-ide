@@ -37,7 +37,7 @@ import {
 	PERMISSION_COMMAND,
 } from './chatPermission';
 import { isFreshChat } from './freshChat';
-import { findLocalhostUrl } from './localhostUrl';
+import { findLocalhostUrl, findMatchingBrowserTab, canonicalizeLocalhostUrl } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import {
@@ -1066,17 +1066,7 @@ interface BrowserPageAttachment {
  * existing, which is what made this take a while to actually root-cause.
  */
 async function attachToBrowserTab(url: string): Promise<BrowserPageAttachment> {
-	const tab =
-		vscode.window.browserTabs.find(t => t.url === url || t.url === `${url}/`) ??
-		(await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true }));
-	// Awaited, and fired here rather than gated on the CDP work below
-	// succeeding: a human watching chat should see *something* happening
-	// the moment a real tab exists. Awaiting (not fire-and-forget) also
-	// matters functionally, not just for UX: this opens the tab as a real
-	// editor via `reuseUrlFilter`, a second, independent way this same tab
-	// becomes visible -- letting it race the CDP work below risked
-	// attaching mid-transition.
-	await openBrowserPaneBeside(url);
+	const tab = await ensureBrowserTab(url);
 	const session = await tab.startCDPSession();
 	const cdp = new CdpClient(session);
 
@@ -1210,39 +1200,50 @@ async function interactInBrowser(url: string, interaction: BrowserInteraction): 
 
 /**
  * The visible half of `check_in_browser`: the CDP tab `checkInBrowser`
- * drives is a hidden, background-only surface for taking a screenshot, so a
- * human watching chat would otherwise never see the live page at all --
- * called (and awaited) as soon as the tab exists, not gated on the
- * screenshot succeeding (a real bug this once was: a check that timed out
- * left nothing visible on screen for the whole wait, indistinguishable from
- * the Integrated Browser not working at all). `workbench.action.browser.open`'s
- * `openToSide` opens (or, via `reuseUrlFilter`, reuses) a real Integrated
- * Browser pane next to whatever's currently active, matching the same
- * mechanism `LocalhostLinkOpenerContribution` already uses elsewhere in this
- * tree (`patches/83-ui-auto-open-localhost-browser.patch`) rather than
- * inventing a second way to open one.
- *
- * No longer fire-and-forget: `checkInBrowser` now awaits this before its own
- * CDP work, since `reuseUrlFilter` opening the *same* tab as a real editor is
- * a second, independent way that tab becomes visible -- letting the two race
- * risked capturing mid-transition. Failure is still swallowed (a convenience
- * alongside `check_in_browser`'s own result, not something that should turn
- * a working -- or failing -- check into a different outcome), but a *hang*
- * here is a new risk awaiting introduced that fire-and-forget never had:
- * `checkInBrowser` has no outer timeout of its own, so an unbounded wait
- * here would silently hang the whole tool call. Bounded to
- * `PANE_OPEN_TIMEOUT_MS` for exactly that reason -- proceeding on a timeout,
- * not failing the check, since this pane is a UX nicety, not something the
- * screenshot capture below actually depends on.
+ * drives starts as a background tab, so a human watching chat would
+ * otherwise never see the live page -- `workbench.action.browser.open`
+ * reveals it as a real Integrated Browser editor. `openToSide` only on
+ * the first open for a URL: a later `check_in_browser` (or a second
+ * "Local:" log line with a different slash/`127.0.0.1` spelling) used to
+ * stack another editor group beside the first. `reuseUrlFilter` uses the
+ * tab's own URL when we already have one, so core can match it exactly.
  */
 const PANE_OPEN_TIMEOUT_MS = 5_000;
+const openingBrowserTabs = new Map<string, Promise<void>>();
 
-async function openBrowserPaneBeside(url: string): Promise<void> {
+async function ensureBrowserTab(url: string) {
+	const existing = findMatchingBrowserTab(vscode.window.browserTabs, url);
+	if (existing) {
+		await openBrowserPaneBeside(existing.url, false);
+		return existing;
+	}
+
+	const key = canonicalizeLocalhostUrl(url);
+	let opening = openingBrowserTabs.get(key);
+	if (!opening) {
+		opening = (async () => {
+			await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true });
+			await openBrowserPaneBeside(url, true);
+		})().finally(() => {
+			openingBrowserTabs.delete(key);
+		});
+		openingBrowserTabs.set(key, opening);
+	}
+	await opening;
+
+	const tab = findMatchingBrowserTab(vscode.window.browserTabs, url);
+	if (!tab) {
+		throw new Error('Browser tab did not open.');
+	}
+	return tab;
+}
+
+async function openBrowserPaneBeside(url: string, toSide: boolean): Promise<void> {
 	try {
 		await Promise.race([
 			vscode.commands.executeCommand('workbench.action.browser.open', {
 				url,
-				openToSide: true,
+				openToSide: toSide,
 				reuseUrlFilter: url,
 			}),
 			new Promise<void>(resolve => setTimeout(resolve, PANE_OPEN_TIMEOUT_MS)),
