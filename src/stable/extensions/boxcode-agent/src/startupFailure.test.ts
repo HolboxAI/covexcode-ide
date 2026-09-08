@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeStartupFailure, AcpUnsupportedError } from './startupFailure';
+import { describeRestrictedMode, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 
 function enoent(): NodeJS.ErrnoException {
 	const error = new Error('spawn boxcode ENOENT') as NodeJS.ErrnoException;
@@ -49,4 +49,11 @@ test('describeStartupFailure() falls back to generic prose for a non-ENOENT fail
 test('describeStartupFailure() handles a non-Error thrown value the same way as a non-ENOENT failure', () => {
 	const message = describeStartupFailure('a plain string was thrown', 'darwin');
 	assert.match(message, /Make sure `boxcode` is installed and on your PATH/);
+});
+
+test('describeRestrictedMode() tells the user to trust the folder instead of implying chat is gone', () => {
+	const message = describeRestrictedMode();
+	assert.match(message, /Restricted Mode/);
+	assert.match(message, /Trust the folder/);
+	assert.doesNotMatch(message, /Drag a view here/);
 });

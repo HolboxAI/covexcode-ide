@@ -39,7 +39,7 @@ import {
 import { isFreshChat } from './freshChat';
 import { findLocalhostUrl } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
-import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
+import { describeError, describeRestrictedMode, describeStartupFailure, AcpUnsupportedError, TRUST_COMMAND } from './startupFailure';
 import {
 	prependWorkspacePrefix,
 	resolvePathAgainstCwd,
@@ -247,6 +247,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			permissionGate.respond(parsed.id, parsed.choice);
 		}),
+		vscode.commands.registerCommand(TRUST_COMMAND, async () => {
+			const requestTrust = (vscode.workspace as { requestWorkspaceTrust?: (options?: { message?: string }) => Thenable<boolean | undefined> }).requestWorkspaceTrust;
+			if (typeof requestTrust === 'function') {
+				await requestTrust({
+					message: 'boxcode needs trust to read, write, and run commands in this folder.',
+				});
+				return;
+			}
+			await vscode.commands.executeCommand('workbench.trust.manage');
+		}),
+		vscode.workspace.onDidGrantWorkspaceTrust(() => {
+			void vscode.window.showInformationMessage('boxcode: this folder is trusted. Send your chat message again.');
+		}),
 	);
 
 	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
@@ -259,6 +272,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		);
 		if (confirmation) {
 			permissionGate.respond(confirmation.id, confirmation.choice);
+			return;
+		}
+		if (!vscode.workspace.isTrusted) {
+			stream.markdown(restrictedModeMarkdown());
 			return;
 		}
 		if (isFreshChat(chatContext.history.length) && client) {
@@ -466,6 +483,14 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
 	const text = prependWorkspacePrefix(userText, workspacePromptPrefix(workspace));
 	return [{ type: 'text', text }, ...images];
+}
+
+function restrictedModeMarkdown(): vscode.MarkdownString {
+	const line = new vscode.MarkdownString(undefined, true);
+	line.isTrusted = { enabledCommands: [TRUST_COMMAND] };
+	line.appendMarkdown(`${describeRestrictedMode()}\n\n`);
+	line.appendMarkdown(`[$(shield) Trust this folder](command:${TRUST_COMMAND})\n\n`);
+	return line;
 }
 
 /**

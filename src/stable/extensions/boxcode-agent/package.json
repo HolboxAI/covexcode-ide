@@ -17,7 +17,8 @@
   "capabilities": {
     "virtualWorkspaces": false,
     "untrustedWorkspaces": {
-      "supported": false
+      "supported": "limited",
+      "description": "Chat stays available in Restricted Mode. boxcode will not read, write, or run commands until this folder is trusted."
     }
   },
   "activationEvents": [
@@ -67,6 +68,11 @@
       {
         "command": "boxcode.permission.respond",
         "title": "boxcode: Respond to Permission",
+        "category": "boxcode"
+      },
+      {
+        "command": "boxcode.trustWorkspace",
+        "title": "boxcode: Trust This Folder",
         "category": "boxcode"
       }
     ],

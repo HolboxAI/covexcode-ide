@@ -37,6 +37,23 @@ export class AcpUnsupportedError extends Error {
 	}
 }
 
+/**
+ * Restricted Mode (workspace trust) used to disable this extension
+ * entirely (`untrustedWorkspaces.supported: false`), which removed the
+ * default chat participant and left the auxiliary bar as an empty
+ * "Drag a view here to display" pane. Chat now stays loaded; this copy
+ * is what we show instead of spawning `boxcode --acp` against an
+ * untrusted folder.
+ */
+export function describeRestrictedMode(): string {
+	return (
+		'This folder is in Restricted Mode, so boxcode cannot read, write, or run anything here yet. ' +
+		'Trust the folder to continue, then send your message again.'
+	);
+}
+
+export const TRUST_COMMAND = 'boxcode.trustWorkspace';
+
 export function describeStartupFailure(error: unknown, platform: NodeJS.Platform): string {
 	const isMissingBinary = error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT';
 	if (isAcpUnsupported(error)) {
