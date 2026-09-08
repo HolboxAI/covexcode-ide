@@ -27,11 +27,26 @@ import {
 } from './acpClient';
 import { CdpClient } from './cdpClient';
 import { boxcodeBinaryCandidates } from './boxcodeBinary';
+import {
+	parsePermissionCommandArgs,
+	permissionChoiceFromConfirmation,
+	permissionCommandUri,
+	permissionConfirmationData,
+	permissionOutcomeFromGate,
+	PermissionGate,
+	PERMISSION_COMMAND,
+} from './chatPermission';
 import { isFreshChat } from './freshChat';
 import { findLocalhostUrl } from './localhostUrl';
-import { permissionOutcomeFromChoice } from './permissionOutcome';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
+import {
+	prependWorkspacePrefix,
+	resolvePathAgainstCwd,
+	resolveWorkspaceCwd,
+	workspacePromptPrefix,
+	type WorkspaceContext,
+} from './workspaceContext';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
@@ -140,6 +155,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	let client: AcpClient | undefined;
 	let sessionId: string | undefined;
 	let ready: Promise<void> | undefined;
+	// Last cwd handed to `session/new`. Compared at the start of each turn
+	// so File > Open Folder (or switching roots in a multi-root window)
+	// actually starts a new ACP session instead of keeping the one spawned
+	// against `$HOME` on the chat-first landing page.
+	let sessionCwd: string | undefined;
+	const permissionGate = new PermissionGate();
 	// Persists for the life of the extension host, not just one turn -- a
 	// dev server started earlier in the conversation is still running, and
 	// re-popping the browser open every time its URL appears again in later
@@ -156,7 +177,23 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.lm.registerLanguageModelChatProvider('boxcode', new StubLanguageModelProvider()),
 	);
 
-	function ensureReady(): Promise<void> {
+	function currentWorkspace(): WorkspaceContext {
+		const folders = vscode.workspace.workspaceFolders?.map(folder => ({ fsPath: folder.uri.fsPath }));
+		const activeUri = vscode.window.activeTextEditor?.document.uri;
+		const activeFilePath = activeUri?.scheme === 'file' ? activeUri.fsPath : undefined;
+		return resolveWorkspaceCwd(folders, activeFilePath, os.homedir());
+	}
+
+	function discardSession(): void {
+		permissionGate.cancelAll();
+		client?.dispose();
+		client = undefined;
+		sessionId = undefined;
+		ready = undefined;
+		sessionCwd = undefined;
+	}
+
+	function ensureReady(workspace: WorkspaceContext): Promise<void> {
 		if (!ready) {
 			ready = (async () => {
 				const candidates = boxcodeBinaryCandidates(configuredBoxcodePath(), os.homedir());
@@ -180,12 +217,13 @@ export function activate(context: vscode.ExtensionContext): void {
 				if (!(await probeAcpSupported(boxcodeCommand))) {
 					throw new AcpUnsupportedError();
 				}
-				const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+				const cwd = workspace.cwd;
 				const envOverrides = await ensureCredentials(context, boxcodeCommand);
 				const acp = new AcpClient(boxcodeCommand, cwd, envOverrides);
 				client = acp;
 				await acp.initialize();
 				sessionId = await acp.newSession(cwd);
+				sessionCwd = cwd;
 			})().catch(error => {
 				// A failed launch must not wedge every later message behind
 				// the same rejected promise forever -- clear the memoized
@@ -193,25 +231,49 @@ export function activate(context: vscode.ExtensionContext): void {
 				// permanently broken participant until the window reloads.
 				ready = undefined;
 				client = undefined;
+				sessionCwd = undefined;
 				throw error;
 			});
 		}
 		return ready;
 	}
 
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeWorkspaceFolders(() => discardSession()),
+		vscode.commands.registerCommand(PERMISSION_COMMAND, (...args: unknown[]) => {
+			const parsed = parsePermissionCommandArgs(args);
+			if (!parsed) {
+				return;
+			}
+			permissionGate.respond(parsed.id, parsed.choice);
+		}),
+	);
+
 	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
+		// A confirmation-card click is a new ChatRequest, not a new turn.
+		// Resolve the in-flight ACP waiter and return -- starting another
+		// `session/prompt` here would interleave two agent turns.
+		const confirmation = permissionChoiceFromConfirmation(
+			request.acceptedConfirmationData,
+			request.rejectedConfirmationData,
+		);
+		if (confirmation) {
+			permissionGate.respond(confirmation.id, confirmation.choice);
+			return;
+		}
 		if (isFreshChat(chatContext.history.length) && client) {
 			// VS Code's "New Chat" reuses this extension host, so without
 			// this the next empty-history request would keep talking to the
 			// previous HeadlessSession -- every "new chat" was the same
 			// conversation on the daemon side.
-			client.dispose();
-			client = undefined;
-			sessionId = undefined;
-			ready = undefined;
+			discardSession();
+		}
+		const workspace = currentWorkspace();
+		if (sessionCwd !== undefined && sessionCwd !== workspace.cwd) {
+			discardSession();
 		}
 		try {
-			await ensureReady();
+			await ensureReady(workspace);
 		} catch (error) {
 			if (error instanceof SetupCancelled) {
 				stream.markdown('Configuration needed -- send another message when you\'re ready to set boxcode up.');
@@ -223,6 +285,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (!client || !sessionId) {
 			stream.markdown("boxcode isn't ready yet -- try again in a moment.");
 			return;
+		}
+		if (!workspace.hasFolder) {
+			stream.markdown(
+				'No folder is open in this window, so I don\'t have a project working directory. ' +
+					'Use **File > Open Folder**, then send your message again if you want me to work in a project.\n\n',
+			);
 		}
 		const activeClient = client;
 		const activeSessionId = sessionId;
@@ -243,7 +311,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider).then(respond);
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd).then(respond);
 			} else {
 				respond({ outcome: 'cancelled' });
 			}
@@ -277,8 +345,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		// boxcode's own transport.rs docs on `session/cancel`. A cancelled
 		// request here still waits for the in-flight turn to finish rather
 		// than abandoning it silently.
-		const onCancel = token.onCancellationRequested(() => {});
-		const content = await attachReferencesToPrompt(request);
+		const onCancel = token.onCancellationRequested(() => {
+			permissionGate.cancelAll();
+		});
+		const content = await attachReferencesToPrompt(request, workspace);
 		try {
 			await activeClient.prompt(activeSessionId, content);
 		} catch (error) {
@@ -294,7 +364,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, requestHandler);
 	context.subscriptions.push(participant);
-	context.subscriptions.push({ dispose: () => client?.dispose() });
+	context.subscriptions.push({ dispose: () => discardSession() });
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('boxcode.rollback', async () => {
@@ -344,10 +414,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			// old ones -- `ensureReady`'s own memoization exists precisely
 			// to avoid a second spawn per turn, so it has to be cleared
 			// explicitly here rather than just waiting for it to notice.
-			client?.dispose();
-			client = undefined;
-			sessionId = undefined;
-			ready = undefined;
+			discardSession();
 			void vscode.window.showInformationMessage(
 				'boxcode: cleared. Send a chat message to pick a new provider, model, and API key.',
 			);
@@ -377,7 +444,7 @@ export function activate(context: vscode.ExtensionContext): void {
  * `string | Uri | Location | unknown`, so those are the two known non-string
  * shapes actually worth special-casing.
  */
-async function attachReferencesToPrompt(request: vscode.ChatRequest): Promise<PromptContentBlock[]> {
+async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: WorkspaceContext): Promise<PromptContentBlock[]> {
 	const sections: string[] = [];
 	const images: PromptContentBlock[] = [];
 
@@ -396,7 +463,8 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest): Promise<Pr
 		sections.push(`### Attached: ${heading}\n\n${body}`);
 	}
 
-	const text = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
+	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
+	const text = prependWorkspacePrefix(userText, workspacePromptPrefix(workspace));
 	return [{ type: 'text', text }, ...images];
 }
 
@@ -752,16 +820,22 @@ async function runCustomEndpointFlow(
  * A developer approving a write/edit over ACP was approving blind -- only a
  * title string, never what would actually change (see `HeadlessSession::
  * ask_permission`'s own doc comment on `protocol.rs`'s `ToolCallContent::
- * Diff` for the wire side of this). Scoped deliberately narrow, matching
- * the research this was built from: `vscode.changes` is a stable *viewer*,
- * not an approval workflow, so this shows the real diff right before the
- * existing Allow/Reject modal rather than attempting per-hunk accept/
- * reject, which would need proposed, unconfirmed-scope multi-diff-editor
- * menu APIs. Real per-hunk review stays a scoped-out v2.
+ * Diff` for the wire side of this). The diff still opens in `vscode.changes`
+ * (a stable *viewer*, not an approval workflow). The Allow/Reject choice
+ * itself used to be `showWarningMessage({ modal: true })`, a system-level
+ * dialog in the middle of the screen, outside chat. That blocks the whole
+ * window and is easy to miss as "not part of this conversation." The
+ * decision now lives on the in-flight chat response as trusted command
+ * links -- `session/prompt` is still awaiting, so a follow-up ChatRequest
+ * (`stream.confirmation`) would deadlock behind VS Code's one-request-at-a-
+ * time Send button.
  */
 async function askPermission(
 	request: RequestPermissionRequest,
 	diffContentProvider: DiffContentProvider,
+	stream: vscode.ChatResponseStream,
+	permissionGate: PermissionGate,
+	cwd: string,
 ): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
@@ -771,20 +845,46 @@ async function askPermission(
 
 	const diff = request.toolCall.content;
 	if (diff?.type === 'diff') {
-		await showDiff(diff, diffContentProvider);
+		await showDiff(diff, diffContentProvider, cwd);
 	}
 
-	const choice = await vscode.window.showWarningMessage(
-		`boxcode wants to ${action}`,
-		{ modal: true },
-		allowLabel,
-		rejectLabel,
-	);
-
-	if (choice === allowLabel || choice === rejectLabel) {
-		return permissionOutcomeFromChoice(choice, allow, reject);
+	const { id, wait } = permissionGate.create();
+	// Native in-chat confirmation card when the proposed API is present.
+	// Clicks arrive as a follow-up ChatRequest (`acceptedConfirmationData`)
+	// and are consumed at the top of requestHandler. Command links below
+	// are the path that cannot deadlock: `session/prompt` is still awaiting
+	// this turn, so Send is disabled until it finishes.
+	if (typeof stream.confirmation === 'function') {
+		stream.confirmation(
+			`boxcode wants to ${action}`,
+			'Allow or reject this in chat to continue.',
+			permissionConfirmationData(id),
+			[allowLabel, rejectLabel],
+		);
 	}
-	return { outcome: 'cancelled' };
+	stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id));
+	const choice = await wait;
+	return permissionOutcomeFromGate(choice, allow, reject);
+}
+
+function escapeMarkdownLinkLabel(label: string): string {
+	return label.replace(/[[\]()]/g, '\\$&');
+}
+
+function permissionDecisionMarkdown(
+	action: string,
+	allowLabel: string,
+	rejectLabel: string,
+	id: string,
+): vscode.MarkdownString {
+	const line = new vscode.MarkdownString(undefined, true);
+	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND] };
+	line.appendMarkdown('$(warning) **boxcode needs permission**\n\nboxcode wants to ');
+	line.appendText(action);
+	line.appendMarkdown('.\n\n');
+	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})\n\n`);
+	return line;
 }
 
 /**
@@ -825,9 +925,9 @@ class DiffContentProvider implements vscode.TextDocumentContentProvider {
 async function showDiff(
 	diff: Extract<ToolCallContent, { type: 'diff' }>,
 	diffContentProvider: DiffContentProvider,
+	cwd: string,
 ): Promise<void> {
-	const cwd = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(os.homedir());
-	const labelUri = vscode.Uri.joinPath(cwd, diff.path);
+	const labelUri = vscode.Uri.file(resolvePathAgainstCwd(cwd, diff.path));
 	const leftUri = diffContentProvider.register(diff.oldText ?? '');
 	const rightUri = diffContentProvider.register(diff.newText);
 	try {
@@ -836,8 +936,8 @@ async function showDiff(
 		]);
 	} catch {
 		// Never block the actual Allow/Reject decision on the diff viewer
-		// failing to open -- the modal that follows is still the real
-		// approval gate, this is a courtesy on top of it.
+		// failing to open -- the in-chat buttons that follow are still the
+		// real approval gate, this is a courtesy on top of it.
 	}
 }
 
