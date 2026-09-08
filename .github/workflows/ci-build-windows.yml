@@ -14,23 +14,23 @@ on:
       - main
     paths-ignore:
       - "**/*.md"
+  pull_request:
+    branches:
+      - "**"
+    paths-ignore:
+      - "**/*.md"
 
-# Deliberately manual-only again (workflow_dispatch, not pull_request) - not
-# the same mistake as before. This is a real, stated scope decision: Windows
-# is not being tested right now, only macOS is, while Windows/Linux get
-# revisited later. The earlier problem was disabling automatic signal on the
-# platform actually being validated (macOS) while still claiming to gate
-# merges on it. This workflow's code stays in the repo (useful later, not
-# deleted) but isn't a merge gate or an automatic PR check right now - see
-# docs/BACKLOG.md and branch protection's required_status_checks, which no
-# longer lists this workflow's checks. Restore pull_request triggering here
-# whenever Windows actually comes back into active testing scope.
+# Windows x64 is back on automatic PRs so testers can download a runnable
+# tree (same idea as macOS compile uploading compiled.tar.gz). Installers
+# (exe/msi) stay behind generate_assets, which only exists on
+# workflow_dispatch — PR/push runs pack the portable folder and stop.
+# arm64 packing is dispatch-only too: most Windows testers are x64, and a
+# second pack job is real extra time. Linux stays workflow_dispatch-only.
 #
-# What keeps a manual run affordable when it IS run: `generate_assets` (the
-# expensive packaging/installer step) is a workflow_dispatch-only input, so
-# leaving it unset skips packaging (the `build` job and friends, gated by
-# `needs: compile`) automatically - only the real "compile" job (compile+
-# typecheck) runs.
+# What keeps this affordable: generate_assets is the expensive installer
+# step. The `build` job still has to run on PRs — unlike macOS, Windows
+# `build.sh` skips gulp packing when CI_BUILD != no, so the runnable
+# VSCode-win32-* tree is produced here, not in compile.
 
 # P1: boxcode-ide only builds the "stable" quality for now — no insider
 # channel yet. ASSETS_REPOSITORY is set explicitly (rather than relying on
@@ -46,6 +46,8 @@ env:
   ORG_NAME: ${{ github.repository_owner }}
   OS_NAME: windows
   VSCODE_QUALITY: stable
+  SHOULD_BUILD_REH: 'no'
+  SHOULD_BUILD_REH_WEB: 'no'
 
 # boxcode-ide is private (unlike VSCodium's public repo, where an empty
 # permissions block still allows read access) — GITHUB_TOKEN needs an
@@ -54,12 +56,51 @@ permissions:
   contents: read
 
 jobs:
+  # Same skip logic as macOS: don't spend a Windows runner on a PR that
+  # cannot affect this build. Defaults to relevant on push/dispatch or if
+  # git diff fails.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      build-relevant: ${{ steps.check.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull_request event (push/workflow_dispatch) - always running the real build"
+            exit 0
+          fi
+
+          CHANGED="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "git diff failed - defaulting to relevant, not risking a false negative"
+            exit 0
+          }
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|prepare_assets\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|src/|build/|icons/|\.github/workflows/ci-build-windows\.yml)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "a build-relevant path changed"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "nothing build-relevant changed - skipping the real build"
+          fi
+
   compile:
     # Explicit name: Windows and Linux each have their own job literally
     # named "compile" - without a display name they'd both report an
     # identically-named check, which is exactly the kind of ambiguity that
     # makes required-status-check matching in branch protection unreliable.
     name: compile (windows)
+    needs: changes
+    if: needs.changes.outputs.build-relevant == 'true'
     runs-on: windows-2022
     defaults:
       run:
@@ -67,10 +108,10 @@ jobs:
     env:
       VSCODE_ARCH: 'x64'
     outputs:
-      BUILD_SOURCEVERSION: ${{ env.BUILD_SOURCEVERSION }}
-      MS_COMMIT: ${{ env.MS_COMMIT }}
-      MS_TAG: ${{ env.MS_TAG }}
-      RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+      BUILD_SOURCEVERSION: ${{ steps.build-info.outputs.BUILD_SOURCEVERSION }}
+      MS_COMMIT: ${{ steps.build-info.outputs.MS_COMMIT }}
+      MS_TAG: ${{ steps.build-info.outputs.MS_TAG }}
+      RELEASE_VERSION: ${{ steps.build-info.outputs.RELEASE_VERSION }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -102,13 +143,16 @@ jobs:
       # job (those lockfiles don't exist yet at that point). A cache-key miss
       # here just falls back to a normal full install/compile, never breaks
       # the build - so an imprecise hashFiles glob is a safe failure mode.
+      # Compile is x64-only (no matrix); the previous key used
+      # matrix.vscode_arch, which is empty here and split the cache from
+      # the pack job for no reason.
       - name: Cache npm downloads
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.1.0
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-${{ matrix.vscode_arch }}-npm-${{ hashFiles('vscode/**/package-lock.json') }}
+          key: ${{ runner.os }}-x64-npm-${{ hashFiles('vscode/**/package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.vscode_arch }}-npm-
+            ${{ runner.os }}-x64-npm-
 
       - name: Cache cargo registry and CLI build
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.1.0
@@ -117,9 +161,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             vscode/cli/target
-          key: ${{ runner.os }}-${{ matrix.vscode_arch }}-cargo-${{ hashFiles('vscode/cli/Cargo.lock') }}
+          key: ${{ runner.os }}-x64-cargo-${{ hashFiles('vscode/cli/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.vscode_arch }}-cargo-
+            ${{ runner.os }}-x64-cargo-
 
       - name: Build
         env:
@@ -127,6 +171,13 @@ jobs:
           SHOULD_BUILD_REH: no
           SHOULD_BUILD_REH_WEB: no
         run: ./build.sh
+
+      - id: build-info
+        run: |
+          echo "BUILD_SOURCEVERSION=${BUILD_SOURCEVERSION}" >> "$GITHUB_OUTPUT"
+          echo "MS_COMMIT=${MS_COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "MS_TAG=${MS_TAG}" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_VERSION=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Compress vscode artifact
         run: |
@@ -142,29 +193,34 @@ jobs:
           path: ./vscode.tar.gz
           retention-days: 1
 
+  # Named `build` (not `package`) because Windows compile does not gulp-pack
+  # the app — that happens here via package.sh. Always uploads the portable
+  # VSCode-win32-* tree so a PR has something a Windows tester can run.
+  # exe/msi still sit behind generate_assets.
   build:
+    name: pack (windows-${{ matrix.vscode_arch }})
     needs:
+      - changes
       - compile
+    if: needs.changes.outputs.build-relevant == 'true'
     runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
-        vscode_arch:
-          - x64
-          - arm64
+        vscode_arch: ${{ github.event.inputs.generate_assets == 'true' && fromJSON('["x64","arm64"]') || fromJSON('["x64"]') }}
     defaults:
       run:
         shell: bash
     env:
       BUILD_SOURCEVERSION: ${{ needs.compile.outputs.BUILD_SOURCEVERSION }}
-      MS_COMMIT: ${{ needs.check.outputs.MS_COMMIT }}
-      MS_TAG: ${{ needs.check.outputs.MS_TAG }}
-      RELEASE_VERSION: ${{ needs.check.outputs.RELEASE_VERSION }}
+      MS_COMMIT: ${{ needs.compile.outputs.MS_COMMIT }}
+      MS_TAG: ${{ needs.compile.outputs.MS_TAG }}
+      RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
       SHOULD_BUILD_REH: no
       SHOULD_BUILD_REH_WEB: no
       VSCODE_ARCH: ${{ matrix.vscode_arch }}
     outputs:
-      RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+      RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -199,6 +255,22 @@ jobs:
           npm_config_arch: ${{ matrix.vscode_arch }}
           npm_config_target_arch: ${{ matrix.vscode_arch }}
         run: ./build/windows/package.sh
+
+      # Same tar-then-upload pattern as macOS: a single file so
+      # upload-artifact cannot flatten the tree. Windows testers extract
+      # and run Boxcode.exe from VSCode-win32-<arch>.
+      - name: Archive compiled build output
+        run: |
+          tar -czf compiled.tar.gz \
+            "VSCode-win32-${VSCODE_ARCH}" \
+            vscode/product.json
+
+      - name: Upload compiled build output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compiled-win32-${{ matrix.vscode_arch }}
+          path: compiled.tar.gz
+          retention-days: 1
 
       - name: Prepare assets
         run: ./prepare_assets.sh
