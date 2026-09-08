@@ -37,6 +37,7 @@ import {
 	PERMISSION_COMMAND,
 } from './chatPermission';
 import { isFreshChat } from './freshChat';
+import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
 import { findLocalhostUrl, findMatchingBrowserTab, canonicalizeLocalhostUrl } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
@@ -358,10 +359,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		// have no label at all. Scoped to one turn, not the whole session:
 		// a fresh Map per requestHandler call, same lifetime as `stream`.
 		const toolCallTitles = new Map<string, string>();
+		const shownBrowserPreviews = new Set<string>();
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews);
 			}
 		};
 		const onPermissionRequest = (
@@ -640,12 +642,18 @@ function autoOpenDevServerUrl(update: SessionUpdate, title: string | undefined, 
 	void checkInBrowser(url);
 }
 
-function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, toolCallTitles: Map<string, string>, openedDevServerUrls: Set<string>): void {
+function renderUpdate(
+	update: SessionUpdate,
+	stream: vscode.ChatResponseStream,
+	toolCallTitles: Map<string, string>,
+	openedDevServerUrls: Set<string>,
+	shownBrowserPreviews: Set<string>,
+): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
 			const content = update.content;
 			if (content?.type === 'text') {
-				stream.markdown(content.text);
+				stream.markdown(stripOversizedDataUris(content.text));
 			}
 			break;
 		}
@@ -667,13 +675,19 @@ function renderUpdate(update: SessionUpdate, stream: vscode.ChatResponseStream, 
 				line.appendMarkdown('\n\n');
 				stream.markdown(line);
 			}
-			// check_in_browser's own result: rendered inline as an image for
-			// the human. Also fed to the model as real vision input when
-			// `config.tools.attach_browser_screenshots` is on -- see
-			// headless.rs's own doc comment on why that's a separate path
-			// from this one, which exists purely for the human.
+			// check_in_browser's screenshot is for the model (ACP image
+			// block). Putting it in chat as a data URI used to flood the
+			// panel with raw base64 -- the renderer does not treat a
+			// hundreds-of-KB data URI as an image. The live page is already
+			// in the Integrated Browser; tell the human that once per tool.
 			if (update.content?.type === 'image') {
-				stream.markdown(`![screenshot](data:${update.content.mimeType};base64,${update.content.data})`);
+				const previewKey = update.toolCallId ?? 'browser-preview';
+				if (!shownBrowserPreviews.has(previewKey)) {
+					shownBrowserPreviews.add(previewKey);
+					const line = new vscode.MarkdownString(undefined, true);
+					line.appendMarkdown(`$(globe) ${describeBrowserPreview()}\n\n`);
+					stream.markdown(line);
+				}
 			}
 			autoOpenDevServerUrl(update, title, openedDevServerUrls);
 			break;
