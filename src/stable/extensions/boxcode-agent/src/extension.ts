@@ -38,7 +38,7 @@ import {
 } from './chatPermission';
 import { isFreshChat } from './freshChat';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
-import { findLocalhostUrl, findMatchingBrowserTab, canonicalizeLocalhostUrl } from './localhostUrl';
+import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import {
@@ -623,9 +623,9 @@ function appendTitleSafely(line: vscode.MarkdownString, title: string): void {
  * - Each URL only triggers this once per extension-host lifetime
  *   (`openedDevServerUrls`), not once per line of matching output -- a dev
  *   server's own log output often repeats its own "Local:" URL, and
- *   `checkInBrowser` itself already reuses an existing tab for the same
- *   URL rather than opening a second one, but there's no reason to redo
- *   the CDP round trip every time.
+ *   `ensureBrowserTab` reuses the Integrated Browser pane rather than
+ *   opening a second one, but there's no reason to redo that work every
+ *   time the server reprints its Local: line.
  * - Fire-and-forget, failure swallowed: this is a convenience layered on
  *   top of whatever the command's own result already is, never something
  *   that should turn a successful command into a failed turn.
@@ -639,7 +639,10 @@ function autoOpenDevServerUrl(update: SessionUpdate, title: string | undefined, 
 		return;
 	}
 	openedDevServerUrls.add(url);
-	void checkInBrowser(url);
+	// Reveal only. `checkInBrowser` used to run here too, which opened a
+	// second editor group beside the one `LocalhostLinkOpenerContribution`
+	// already created from the same terminal "Local:" line.
+	void ensureBrowserTab(url);
 }
 
 function renderUpdate(
@@ -1213,58 +1216,78 @@ async function interactInBrowser(url: string, interaction: BrowserInteraction): 
 }
 
 /**
- * The visible half of `check_in_browser`: the CDP tab `checkInBrowser`
- * drives starts as a background tab, so a human watching chat would
- * otherwise never see the live page -- `workbench.action.browser.open`
- * reveals it as a real Integrated Browser editor. `openToSide` only on
- * the first open for a URL: a later `check_in_browser` (or a second
- * "Local:" log line with a different slash/`127.0.0.1` spelling) used to
- * stack another editor group beside the first. `reuseUrlFilter` uses the
- * tab's own URL when we already have one, so core can match it exactly.
+ * The visible half of `check_in_browser`. Terminal output already opens a
+ * pane via `workbench.browser.openLocalhostLinks`. Do not open a second
+ * editor beside it, and do not call `openBrowserTab` (that is what created
+ * the extra `about:blank` tab). Wait for the first pane, then reuse it.
  */
 const PANE_OPEN_TIMEOUT_MS = 5_000;
+const TAB_APPEAR_WAIT_MS = 1_200;
+const TAB_APPEAR_STEP_MS = 80;
 const openingBrowserTabs = new Map<string, Promise<void>>();
 
 async function ensureBrowserTab(url: string) {
-	const existing = findMatchingBrowserTab(vscode.window.browserTabs, url);
-	if (existing) {
-		await openBrowserPaneBeside(existing.url, false);
-		return existing;
-	}
-
-	const key = canonicalizeLocalhostUrl(url);
+	const key = localhostOrigin(url);
 	let opening = openingBrowserTabs.get(key);
 	if (!opening) {
-		opening = (async () => {
-			await vscode.window.openBrowserTab(url, { preserveFocus: true, background: true });
-			await openBrowserPaneBeside(url, true);
-		})().finally(() => {
+		opening = revealOrOpenBrowserTab(url).finally(() => {
 			openingBrowserTabs.delete(key);
 		});
 		openingBrowserTabs.set(key, opening);
 	}
 	await opening;
 
-	const tab = findMatchingBrowserTab(vscode.window.browserTabs, url);
+	const tab = findReusableBrowserTab(vscode.window.browserTabs, url);
 	if (!tab) {
 		throw new Error('Browser tab did not open.');
 	}
 	return tab;
 }
 
-async function openBrowserPaneBeside(url: string, toSide: boolean): Promise<void> {
+async function revealOrOpenBrowserTab(url: string): Promise<void> {
+	if (await waitForReusableTab(url, TAB_APPEAR_WAIT_MS)) {
+		await openBrowserPane(url);
+		return;
+	}
+	await openBrowserPane(url);
+	await waitForReusableTab(url, TAB_APPEAR_WAIT_MS);
+}
+
+async function waitForReusableTab(url: string, ms: number) {
+	const deadline = Date.now() + ms;
+	for (;;) {
+		const existing = findReusableBrowserTab(vscode.window.browserTabs, url);
+		if (existing) {
+			return existing;
+		}
+		if (Date.now() >= deadline) {
+			return undefined;
+		}
+		await delay(TAB_APPEAR_STEP_MS);
+	}
+}
+
+function browserReuseFilter(url: string): string {
+	return localhostOrigin(url);
+}
+
+async function openBrowserPane(url: string): Promise<void> {
 	try {
 		await Promise.race([
 			vscode.commands.executeCommand('workbench.action.browser.open', {
 				url,
-				openToSide: toSide,
-				reuseUrlFilter: url,
+				openToSide: false,
+				reuseUrlFilter: browserReuseFilter(url),
 			}),
 			new Promise<void>(resolve => setTimeout(resolve, PANE_OPEN_TIMEOUT_MS)),
 		]);
 	} catch {
-		// See doc comment above -- not worth surfacing.
+		// See ensureBrowserTab -- not worth surfacing.
 	}
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 export function deactivate(): void {
