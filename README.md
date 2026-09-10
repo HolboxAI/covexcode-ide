@@ -2,7 +2,16 @@
 
 A Code-OSS-based editor for boxcode, aimed at frontend engineers. This repo owns the editor surface only — the agent brain stays in [`HolboxAI/boxcode`](https://github.com/HolboxAI/boxcode) and is reused over a protocol, not reimplemented here.
 
-**Status: P1 in progress.** Build tooling (adapted from [VSCodium](https://github.com/VSCodium/vscodium)'s MIT-licensed scripts — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)) has landed: a pinned `microsoft/vscode` checkout, a patch set for de-branding/Open VSX/telemetry, and boxcode's own product identity (`utils.sh`, `prepare_vscode.sh`). See [`docs/howto-build.md`](docs/howto-build.md) to build locally.
+**Status: P1 in progress.** Build tooling (adapted from [VSCodium](https://github.com/VSCodium/vscodium)'s MIT-licensed scripts — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)) has landed: a pinned `microsoft/vscode` checkout, a patch set for de-branding/Open VSX/telemetry, and boxcode's own product identity (`utils.sh`, `prepare_vscode.sh`). The boxcode chat participant and boxcode's own themes ship in-tree, and macOS/Windows/Linux builds compile in CI. See [`docs/howto-build.md`](docs/howto-build.md) to build locally.
+
+## What ships today
+
+Two boxcode-specific extensions are bundled under `src/stable/extensions/`:
+
+- **`boxcode-agent`** — the chat participant. Registers `boxcode` as the default chat participant (ask/edit/agent modes) and drives the `boxcode` binary over its ACP stdio interface. Ships commands for undoing a session's file changes, switching provider/model/API key, responding to a permission prompt, and trusting the open folder.
+- **`boxcode-theme`** — boxcode's own color themes ("Boxcode Dark" and "Boxcode Light"), an amber/orange accent on top of Dark Modern / Light Modern.
+
+On top of the fork, the patch set adds a chat-first landing page, an Integrated Browser pane (with `check_in_browser`), auto-open of localhost dev servers, and the rebrand. What's done vs. planned lives in [`docs/BACKLOG.md`](docs/BACKLOG.md), not here.
 
 ## Install
 
@@ -13,16 +22,55 @@ curl -fsSL https://boxcode.sh/install.sh | bash      # macOS/Linux
 irm https://boxcode.sh/install.ps1 | iex              # Windows (PowerShell)
 ```
 
-Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist from using the CLI directly.
+Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist (from using the CLI directly).
 
 ## Architecture
 
 Two repos, one brain:
 
-- **`HolboxAI/boxcode`** (existing) — the daemon. Agent loop, tool execution, approval gating, all in Rust. Exposes a JSON-RPC-style protocol once the in-progress `upgrade-plan.md` Phase 3/4 work lands.
+- **`HolboxAI/boxcode`** (existing) — the daemon. Agent loop, tool execution, approval gating, all in Rust. Exposes a JSON-RPC-over-NDJSON protocol (`src/protocol.rs`) consumed over stdio.
 - **`boxcode-ide`** (this repo) — the face. A Code-OSS fork with a thin TypeScript extension that talks to the daemon. No agent logic lives here.
 
+The `boxcode-agent` extension launches `boxcode --acp` and speaks to it over stdio — the same pattern OpenAI's Codex app-server proves across CLI, Desktop, IDE, and Cloud from one backend.
+
 Full plan: [`docs/PLAN.md`](docs/PLAN.md). Current priority (Tier 1 baseline-IDE verification, Tier 2 on deck, small parallel-track items): [`docs/BACKLOG.md`](docs/BACKLOG.md).
+
+## Repository layout
+
+| path | what it is |
+|---|---|
+| `src/stable/extensions/` | bundled boxcode extensions (`boxcode-agent`, `boxcode-theme`) |
+| `patches/` | VSCodium-style build-time patch set (de-branding, Open VSX, telemetry, UI) |
+| `docs/` | `PLAN.md`, `BACKLOG.md`, and the how-to/usage guides |
+| `build/` | platform packaging (linux/osx/windows/alpine) |
+| `dev/` | dev build helpers (`build.sh`, `patch.sh`, `update_patches.sh`) |
+| `stores/` | snapcraft + winget packaging metadata |
+| `upstream/` | pinned `microsoft/vscode` tag/commit |
+| `product.json` | boxcode product identity (name, quality, marketplace wiring) |
+
+## Building
+
+The fork tracks a pinned upstream and patches it at build time — VSCodium's model, so there's no permanently-diverged VS Code history to merge:
+
+- **Upstream pin:** `microsoft/vscode` `1.126.0` @ `7e7950df89d055b5a378379db9ee14290772148a` (`upstream/stable.json`)
+- **Node:** `24.15.0` (`.nvmrc`); plus `jq`, `git`, `python3` 3.11, and `rustup`
+
+```sh
+./dev/build.sh          # dev build (Linux/macOS; Git Bash on Windows)
+./dev/build.sh -p       # also generate packages/installers
+```
+
+Full dependency lists (including Windows WiX/MSI and Linux dpkg/rpm/snap) and the CI/downstream flow are in [`docs/howto-build.md`](docs/howto-build.md); the no-packaging dev loop is in [`docs/iterate-locally.md`](docs/iterate-locally.md). CI compiles macOS and Windows x64 on PRs; Linux stays workflow-dispatch-only.
+
+## Documentation
+
+- [`docs/PLAN.md`](docs/PLAN.md) — the phases and the reasoning behind them
+- [`docs/BACKLOG.md`](docs/BACKLOG.md) — Tier 1 → Tier 4, with `[ ]`/`[x]`/`[~]` status markers
+- [`docs/howto-build.md`](docs/howto-build.md) — building locally (all platforms)
+- [`docs/iterate-locally.md`](docs/iterate-locally.md) — dev loop without packaging a `.dmg`
+- [`docs/usage.md`](docs/usage.md) / [`docs/troubleshooting.md`](docs/troubleshooting.md) — using + debugging a build
+- [`docs/extensions.md`](docs/extensions.md) / [`docs/extensions-compatibility.md`](docs/extensions-compatibility.md) — marketplace + extension compatibility
+- [`docs/telemetry.md`](docs/telemetry.md) — what's disabled and how to verify it
 
 ## Open decisions — do not assume, ask before proceeding
 

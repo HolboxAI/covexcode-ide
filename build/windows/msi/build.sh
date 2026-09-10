@@ -34,10 +34,13 @@ BINARY_DIR="..\\..\\..\\VSCode-win32-${VSCODE_ARCH}"
 LICENSE_DIR="..\\..\\..\\vscode"
 PROGRAM_FILES_86=$( env | sed -n 's/^ProgramFiles(x86)=//p' )
 
+# Keep the WiX templates named vscodium.wxs / vscodium.xsl — build.sh
+# references those filenames. Only the output MSI name has to match
+# prepare_assets.sh, which moves ${APP_NAME}-${arch}-${version}.msi.
 if [[ -z "${1}" ]]; then
-	OUTPUT_BASE_FILENAME="VSCodium-${VSCODE_ARCH}-${RELEASE_VERSION}"
+	OUTPUT_BASE_FILENAME="${APP_NAME}-${VSCODE_ARCH}-${RELEASE_VERSION}"
 else
-	OUTPUT_BASE_FILENAME="VSCodium-${VSCODE_ARCH}-${1}-${RELEASE_VERSION}"
+	OUTPUT_BASE_FILENAME="${APP_NAME}-${VSCODE_ARCH}-${1}-${RELEASE_VERSION}"
 fi
 
 if [[ "${VSCODE_ARCH}" == "ia32" ]]; then

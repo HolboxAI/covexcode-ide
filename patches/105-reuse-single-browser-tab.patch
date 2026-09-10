@@ -1,0 +1,113 @@
+diff --git a/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts b/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts
+--- a/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts
++++ b/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts
+@@ -291,29 +291,9 @@
+ 		const group = options.openToSide ? SIDE_GROUP : ACTIVE_GROUP;
+ 
+ 		if (options.reuseUrlFilter) {
+-			const filterUri = URI.parse(options.reuseUrlFilter);
+-			const matchingEditor = [...browserViewService.getContextualBrowserViews().values()].find((e) => {
+-				const editorUri = URI.parse(e.url || '');
+-				// URIs default to putting "file" scheme. Check that the scheme is really in the filter.
+-				if (filterUri.scheme && options.reuseUrlFilter!.startsWith(`${filterUri.scheme}:`) && filterUri.scheme !== editorUri.scheme) {
+-					return false;
+-				}
+-				if (filterUri.authority && !match(filterUri.authority, editorUri.authority)) {
+-					return false;
+-				}
+-				if (filterUri.path && !match(filterUri.path, editorUri.path)) {
+-					return false;
+-				}
+-				if (filterUri.query) {
+-					const filterParams = new URLSearchParams(filterUri.query);
+-					const editorParams = new URLSearchParams(editorUri.query);
+-					if (![...filterParams].every(([key, value]) => match(value, editorParams.get(key) ?? ''))) {
+-						return false;
+-					}
+-				}
+-
+-				return true;
+-			});
++			const views = [...browserViewService.getContextualBrowserViews().values()];
++			const matchingEditor = views.find((e) => editorMatchesReuseFilter(e.url, options.reuseUrlFilter!))
++				?? views.find((e) => isIdleBrowserHref(e.url));
+ 			if (matchingEditor) {
+ 				if (options.url) {
+ 					matchingEditor.navigate(options.url);
+@@ -615,6 +595,17 @@
+ 
+ 		logBrowserOpen(this.telemetryService, 'localhostLinkOpener');
+ 
++		const views = [...this.browserViewWorkbenchService.getContextualBrowserViews().values()];
++		const existing = views.find(editor => !!editor.url && !isIdleBrowserHref(editor.url) && localhostOriginsMatch(editor.url, href))
++			?? views.find(editor => isIdleBrowserHref(editor.url));
++		if (existing) {
++			if (isIdleBrowserHref(existing.url)) {
++				existing.navigate(href);
++			}
++			await this.editorService.openEditor(existing);
++			return true;
++		}
++
+ 		// Check whether the setting was explicitly set by the user or is still at its default value.
+ 		// When it is a default, tag the viewState so that the hint pill can be shown.
+ 		const isDefaultLinkOpen = !isConfigured(this.configurationService.inspect('workbench.browser.openLocalhostLinks'));
+@@ -627,6 +618,58 @@
+ 
+ registerWorkbenchContribution2(LocalhostLinkOpenerContribution.ID, LocalhostLinkOpenerContribution, WorkbenchPhase.BlockStartup);
+ 
++function isIdleBrowserHref(href: string | undefined): boolean {
++	return !href || href === 'about:blank';
++}
++
++function localhostOriginsMatch(left: string, right: string): boolean {
++	try {
++		const a = new URL(canonicalizeLoopbackHref(left));
++		const b = new URL(canonicalizeLoopbackHref(right));
++		return a.protocol === b.protocol && a.host === b.host;
++	} catch {
++		return false;
++	}
++}
++
++function canonicalizeLoopbackHref(href: string): string {
++	const parsed = new URL(href);
++	if (parsed.hostname === '127.0.0.1' || parsed.hostname === '0.0.0.0' || parsed.hostname.toLowerCase() === 'localhost') {
++		parsed.hostname = 'localhost';
++	}
++	const path = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
++	return `${parsed.protocol}//${parsed.host}${path}${parsed.search}${parsed.hash}`;
++}
++
++function editorMatchesReuseFilter(editorUrl: string | undefined, reuseUrlFilter: string): boolean {
++	if (isIdleBrowserHref(editorUrl)) {
++		return false;
++	}
++	const filterUri = URI.parse(reuseUrlFilter);
++	const editorUri = URI.parse(editorUrl!);
++	// URIs default to putting "file" scheme. Check that the scheme is really in the filter.
++	if (filterUri.scheme && reuseUrlFilter.startsWith(`${filterUri.scheme}:`) && filterUri.scheme !== editorUri.scheme) {
++		return false;
++	}
++	if (filterUri.authority && !match(filterUri.authority, editorUri.authority)) {
++		return false;
++	}
++	// An origin-only filter (`http://localhost:5173`) parses with path `/`.
++	// That must still match `/menu`, otherwise the agent and the localhost
++	// link opener stack a second tab for the same preview.
++	if (filterUri.path && filterUri.path !== '/' && !match(filterUri.path, editorUri.path)) {
++		return false;
++	}
++	if (filterUri.query) {
++		const filterParams = new URLSearchParams(filterUri.query);
++		const editorParams = new URLSearchParams(editorUri.query);
++		if (![...filterParams].every(([key, value]) => match(value, editorParams.get(key) ?? ''))) {
++			return false;
++		}
++	}
++	return true;
++}
++
+ // ---- Link opened hint pill (URL bar widget) --------------------------------
+ 
+ const LOCALHOST_HINT_DISMISSED_KEY = 'workbench.browser.linkOpenedHintDismissed';
