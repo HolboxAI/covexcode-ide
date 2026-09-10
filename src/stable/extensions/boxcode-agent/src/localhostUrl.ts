@@ -47,8 +47,36 @@ export function urlsAreSameLocalPage(left: string, right: string): boolean {
 	return canonicalizeLocalhostUrl(left) === canonicalizeLocalhostUrl(right);
 }
 
+/** `http://localhost:5173` — one Integrated Browser pane per local server. */
+export function localhostOrigin(raw: string): string {
+	try {
+		const parsed = new URL(canonicalizeLocalhostUrl(raw));
+		return `${parsed.protocol}//${parsed.host}`;
+	} catch {
+		return raw;
+	}
+}
+
+export function urlsAreSameLocalOrigin(left: string, right: string): boolean {
+	return localhostOrigin(left) === localhostOrigin(right);
+}
+
+export function isIdleBrowserUrl(url: string | undefined): boolean {
+	return !url || url === 'about:blank';
+}
+
 export function findMatchingBrowserTab<T extends { url: string }>(tabs: readonly T[], url: string): T | undefined {
 	return tabs.find(tab => urlsAreSameLocalPage(tab.url, url));
+}
+
+/**
+ * Prefer the same page, then any tab already on that local origin, then an
+ * unused `about:blank` pane — never a second editor for the same preview.
+ */
+export function findReusableBrowserTab<T extends { url: string }>(tabs: readonly T[], url: string): T | undefined {
+	return findMatchingBrowserTab(tabs, url)
+		?? tabs.find(tab => !isIdleBrowserUrl(tab.url) && urlsAreSameLocalOrigin(tab.url, url))
+		?? tabs.find(tab => isIdleBrowserUrl(tab.url));
 }
 
 /**

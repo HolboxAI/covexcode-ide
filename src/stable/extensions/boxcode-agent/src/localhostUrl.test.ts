@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canonicalizeLocalhostUrl, findLocalhostUrl, findMatchingBrowserTab, urlsAreSameLocalPage } from './localhostUrl';
+import { canonicalizeLocalhostUrl, findLocalhostUrl, findMatchingBrowserTab, findReusableBrowserTab, isIdleBrowserUrl, localhostOrigin, urlsAreSameLocalPage } from './localhostUrl';
 
 test('findLocalhostUrl() finds a Vite-style "Local:" line inside real dev-server output', () => {
 	const output = [
@@ -64,4 +64,19 @@ test('findMatchingBrowserTab() reuses a tab whose URL is a loopback spelling of 
 	const tabs = [{ url: 'http://127.0.0.1:5173/' }, { url: 'http://localhost:3000' }];
 	assert.equal(findMatchingBrowserTab(tabs, 'http://localhost:5173')?.url, 'http://127.0.0.1:5173/');
 	assert.equal(findMatchingBrowserTab(tabs, 'http://localhost:8080'), undefined);
+});
+
+test('localhostOrigin() is one key per local server, ignoring path', () => {
+	assert.equal(localhostOrigin('http://127.0.0.1:5173/menu'), 'http://localhost:5173');
+	assert.equal(localhostOrigin('http://localhost:5173/'), 'http://localhost:5173');
+});
+
+test('findReusableBrowserTab() prefers the same origin, then an idle about:blank pane', () => {
+	const originTabs = [{ url: 'http://localhost:5173/menu' }, { url: 'about:blank' }];
+	assert.equal(findReusableBrowserTab(originTabs, 'http://localhost:5173/')?.url, 'http://localhost:5173/menu');
+
+	const idleTabs = [{ url: 'about:blank' }, { url: 'http://localhost:3000' }];
+	assert.equal(findReusableBrowserTab(idleTabs, 'http://localhost:5173')?.url, 'about:blank');
+	assert.equal(isIdleBrowserUrl('about:blank'), true);
+	assert.equal(findReusableBrowserTab([{ url: 'http://localhost:3000' }], 'http://localhost:5173'), undefined);
 });
