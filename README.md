@@ -22,7 +22,7 @@ curl -fsSL https://boxcode.sh/install.sh | bash      # macOS/Linux
 irm https://boxcode.sh/install.ps1 | iex              # Windows (PowerShell)
 ```
 
-Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist from using the CLI directly.
+Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist (from using the CLI directly).
 
 ## Architecture
 
