@@ -75,7 +75,7 @@ generateJson() {
 
   # check that nothing is blank (blank indicates something awry with build)
   for key in url name version productVersion sha1hash timestamp sha256hash; do
-    if [[ -z "${key}" ]]; then
+    if [[ -z "${!key}" ]]; then
       echo "Variable '${key}' is empty; exiting..."
       exit 1
     fi
