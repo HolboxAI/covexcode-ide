@@ -11,6 +11,7 @@
 - [Build for Development](#build-dev)
 - [Build for CI/Downstream](#build-ci)
 - [Build Snap](#build-snap)
+- [Build Flatpak](#build-flatpak)
 - [Patch Update Process](#patch-update-process)
   - [Semi-Automated](#patch-update-process-semiauto)
   - [Manual](#patch-update-process-manual)
@@ -39,6 +40,7 @@
 - dpkg
 - imagemagick (for AppImage)
 - snapcraft
+- flatpak + flatpak-builder (for the `.flatpak` bundle; optional locally, CI builds it on `generate_assets`)
 
 ### <a id="dependencies-macos"></a>MacOS
 
@@ -183,6 +185,21 @@ snapcraft --use-lxd
 # verify the snap
 review-tools.snap-review --allow-classic codium*.snap
 ```
+
+## <a id="build-flatpak"></a>Build Flatpak
+
+Produces a sideloadable bundle (`assets/Boxcode-x86_64.flatpak`) from the amd64 `.deb`. This is not a Flathub upload — Flathub needs a public `.deb` URL and its own review.
+
+```
+# after ./dev/build.sh -p (or any tree that already has assets/boxcode-ide_*_amd64.deb)
+./stores/flatpak/build.sh
+
+flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user assets/Boxcode-x86_64.flatpak
+flatpak run ai.holbox.Boxcode
+```
+
+CI does the same wrap when `CI - Build - Linux` is dispatched with `generate_assets: true`. Download the `flatpak-x86_64` artifact from that run. x86_64 only for now, same as AppImage.
 
 ## <a id="patch-update-process"></a>Patch Update Process
 
