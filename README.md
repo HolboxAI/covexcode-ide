@@ -22,6 +22,16 @@ curl -fsSL https://boxcode.sh/install.sh | bash      # macOS/Linux
 irm https://boxcode.sh/install.ps1 | iex              # Windows (PowerShell)
 ```
 
+### Install the IDE itself (macOS dev builds)
+
+Download the latest `.dmg` from the [rolling dev release](https://github.com/HolboxAI/boxcode-ide/releases/tag/macos-dev-latest) and drag **Boxcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
+
+```sh
+xattr -cr "/Applications/Boxcode IDE.app"
+```
+
+(Alternative: right-click the app → Open, and confirm the Gatekeeper prompt.) After that, launch Boxcode IDE normally.
+
 Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist (from using the CLI directly).
 
 ## Architecture
