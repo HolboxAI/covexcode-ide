@@ -41,6 +41,7 @@ import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
 import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
+import { createTurnUsage, TurnUsage } from './turnUsage';
 import {
 	describeRestrictedMode,
 	folderTrustKey,
@@ -360,10 +361,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		// a fresh Map per requestHandler call, same lifetime as `stream`.
 		const toolCallTitles = new Map<string, string>();
 		const shownBrowserPreviews = new Set<string>();
+		const turnUsage = createTurnUsage();
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage);
 			}
 		};
 		const onPermissionRequest = (
@@ -411,6 +413,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		const content = await attachReferencesToPrompt(request, workspace);
 		try {
 			await activeClient.prompt(activeSessionId, content);
+			// Rendered only on a clean turn end, never after an error -- a
+			// failed turn's partial usage would be a misleading number. One
+			// line regardless of how many `usage_update`s arrived, since a
+			// multi-response turn emits one per LLM response.
+			const footnote = turnUsage.footnote();
+			if (footnote) {
+				stream.markdown(`\n\n*${footnote}*\n`);
+			}
 		} catch (error) {
 			stream.markdown(`boxcode stopped responding: ${describeError(error)}`);
 		} finally {
@@ -651,6 +661,7 @@ function renderUpdate(
 	toolCallTitles: Map<string, string>,
 	openedDevServerUrls: Set<string>,
 	shownBrowserPreviews: Set<string>,
+	turnUsage: TurnUsage,
 ): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -695,6 +706,13 @@ function renderUpdate(
 			autoOpenDevServerUrl(update, title, openedDevServerUrls);
 			break;
 		}
+		case 'usage_update':
+			// Consumed, not rendered: one footnote at end of turn (see
+			// createTurnUsage) rather than a line per update, because a
+			// multi-response turn would otherwise print several counts
+			// mid-stream.
+			turnUsage.record(update);
+			break;
 		default:
 			// Every other legal ACP v1 variant boxcode doesn't emit yet --
 			// see protocol.rs's own doc comment on SessionUpdate. Nothing to

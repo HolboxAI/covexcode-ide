@@ -68,11 +68,13 @@ export interface AcpToolCall {
 /**
  * Deliberately flat rather than a discriminated union keyed on
  * `sessionUpdate`: boxcode's own ACP schema has more variants (11 in v1,
- * see `protocol.rs`'s own doc comment) than the three this client actually
- * renders, and a union with a catch-all `string`-tagged member for "every
- * other legal variant" defeats TypeScript's own discriminated-union
- * narrowing (the tag stops being a set of literals once one member's tag is
- * plain `string`). Every field here is read defensively in `renderUpdate`
+ * see `protocol.rs`'s own doc comment) than the three this client renders
+ * inline (`usage_update`, a fourth, is consumed into the turn's token
+ * footnote rather than rendered), and a union with a catch-all
+ * `string`-tagged member for "every other legal variant" defeats
+ * TypeScript's own discriminated-union narrowing (the tag stops being a
+ * set of literals once one member's tag is plain `string`). Every field
+ * here is read defensively in `renderUpdate`/`createTurnUsage`
  * (typeof/optional-chaining checks, not a trusted cast), which is the
  * actually-safe way to consume a schema wider than what this reads.
  *
@@ -91,6 +93,12 @@ export interface SessionUpdate {
 	toolCallId?: string;
 	kind?: string;
 	status?: ToolCallStatus;
+	/** `usage_update`'s flattened fields (`used` = token spend of one LLM
+	 * response, `size` = context-window occupancy, `0` while boxcode
+	 * doesn't track the context limit) -- see `turnUsage.ts` for how one
+	 * turn's updates combine. */
+	used?: number;
+	size?: number;
 	[key: string]: unknown;
 }
 
