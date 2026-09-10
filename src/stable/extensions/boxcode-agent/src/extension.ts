@@ -266,6 +266,11 @@ export function activate(context: vscode.ExtensionContext): void {
 				const envOverrides = await ensureCredentials(context, boxcodeCommand);
 				const acp = new AcpClient(boxcodeCommand, cwd, envOverrides);
 				client = acp;
+				// A crash mid-session must not leave the participant dead until
+				// the window reloads. AcpClient already emits 'exit' when the
+				// subprocess dies; tear the session down so the next message
+				// re-launches (ensureReady re-runs because `ready` is cleared).
+				acp.on('exit', () => discardSession());
 				await acp.initialize();
 				sessionId = await acp.newSession(cwd);
 				sessionCwd = cwd;
