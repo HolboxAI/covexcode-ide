@@ -248,6 +248,68 @@ jobs:
           retention-days: 3
         if: env.DISABLED != 'yes' && github.event.inputs.generate_assets == 'true'
 
+  # The focal build-agent image cannot run flatpak-builder. Wrap the x64
+  # .deb after bin-x64 is uploaded. x86_64 only — same limit as AppImage.
+  # Do not use a Flatpak container image: download-artifact/checkout need
+  # the hosted runner's Node, and `needs: build` is a matrix that fails
+  # when riscv/loong fail even if amd64 succeeded.
+  flatpak:
+    name: flatpak (x86_64)
+    needs:
+      - compile
+      - build
+    if: ${{ always() && github.event.inputs.generate_assets == 'true' && !cancelled() && needs.compile.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      APP_NAME: Boxcode
+      FLATPAK_ARCH: x86_64
+      RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Switch to relevant branch
+        env:
+          PULL_REQUEST_ID: ${{ github.event.inputs.checkout_pr }}
+        run: ./get_pr.sh
+
+      - name: Download amd64 packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bin-x64
+          path: assets
+
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder elfutils
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --noninteractive --user \
+            flathub \
+            org.freedesktop.Platform/x86_64/24.08 \
+            org.freedesktop.Sdk/x86_64/24.08
+
+      - name: Build Flatpak bundle
+        run: |
+          chmod +x stores/flatpak/build.sh stores/flatpak/apply.sh stores/flatpak/boxcode-ide.sh
+          ls -la assets
+          shopt -s nullglob
+          debs=( assets/boxcode-ide_*_amd64.deb assets/*_amd64.deb )
+          if [[ ${#debs[@]} -eq 0 ]]; then
+            echo "bin-x64 did not contain an amd64 .deb — x64 package job probably failed" >&2
+            exit 1
+          fi
+          ./stores/flatpak/build.sh
+
+      - name: Upload Flatpak
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flatpak-x86_64
+          path: assets/*.flatpak
+          retention-days: 3
+
   reh_linux:
     needs:
       - compile
