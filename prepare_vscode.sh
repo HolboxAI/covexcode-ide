@@ -111,6 +111,7 @@ else
   setpath "product" "nameShort" "Boxcode"
   setpath "product" "nameLong" "Boxcode IDE"
   setpath "product" "applicationName" "boxcode-ide"
+  setpath "product" "dataFolderName" ".boxcode-ide"
   setpath "product" "linuxIconName" "boxcode-ide"
   setpath "product" "quality" "stable"
   setpath "product" "urlProtocol" "boxcode"
