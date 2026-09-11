@@ -81,10 +81,10 @@ export function workspacePromptPrefix(context: WorkspaceContext): string {
 		`Working directory (use this for relative paths and shell commands): ${context.cwd}`,
 	];
 	if (context.framework) {
-		// The model can't read the project's package.json on its own; telling
-		// it the stack saves it re-discovering (and sometimes mis-guessing)
-		// the framework from a lone tsconfig or a stray import. Hidden
-		// context, same reason as the cwd line above.
+		// The model *can* read package.json, but a lone tsconfig or a stray
+		// import is enough for it to guess the wrong stack. Naming the
+		// framework we already detected keeps that guess from happening.
+		// Hidden context, same reason as the cwd line above.
 		lines.push(`Frontend framework (already detected from the project's package.json): ${FRAMEWORK_LABELS[context.framework]}.`);
 	}
 	if (context.folderPaths.length > 1) {
