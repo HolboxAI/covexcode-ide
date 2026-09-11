@@ -27,6 +27,11 @@ export type Framework = 'next' | 'nuxt' | 'astro' | 'svelte' | 'vue' | 'react' |
  * `svelte` -- so the most specific signal has to win. Co-present build tools
  * (`vite`, `webpack`) are deliberately not matched: they don't tell you what
  * framework a project uses.
+ *
+ * Keep the welcome-page detector in
+ * `patches/100-ui-framework-detect-example-prompts.patch` on this same order
+ * -- it cannot import this module (core vs extension), so a Vite+React
+ * project must not show Vite chips while this module reports React.
  */
 const FRAMEWORK_DEPS: ReadonlyArray<readonly [Framework, ReadonlyArray<string>]> = [
 	['next', ['next']],

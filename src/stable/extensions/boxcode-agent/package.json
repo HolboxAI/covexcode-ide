@@ -2,7 +2,7 @@
   "name": "boxcode-agent",
   "displayName": "boxcode",
   "description": "Chat with boxcode, driven over its ACP stdio interface.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "boxcode",
   "license": "MIT",
   "engines": {

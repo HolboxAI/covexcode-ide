@@ -35,6 +35,10 @@ test('a build tool alone (vite) is not a framework', () => {
 	assert.equal(detectFramework({ vite: '5.0.0' }), undefined);
 });
 
+test('a Vite+React project is React, not an unmatched build tool', () => {
+	assert.equal(detectFramework({ vite: '5.0.0', react: '18.0.0' }), 'react');
+});
+
 test('a Map input works the same as a plain object', () => {
 	assert.equal(detectFramework(new Map([['react', '18.0.0']])), 'react');
 	assert.equal(detectFramework(new Map([['vite', '5.0.0']])), undefined);

@@ -38,7 +38,12 @@ import {
 } from './chatPermission';
 import { isFreshChat } from './freshChat';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
-import { detectWorkspaceFramework, FRAMEWORK_LABELS } from './frameworkDetector';
+import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
+import {
+	missingRecommendedExtensions,
+	recommendationPrompt,
+	recommendationSkipKey,
+} from './frameworkRecommendations';
 import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
@@ -189,17 +194,24 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.lm.registerLanguageModelChatProvider('boxcode', new StubLanguageModelProvider()),
 	);
 
-	// A lightweight "what framework is this project" badge, based on the
-	// landed-open-folder package.json detection (see frameworkDetector.ts and
-	// docs/BACKLOG.md). Shown only when a known framework is detected, so an
-	// empty or non-JS workspace doesn't accumulate status-bar clutter. Part of
-	// the framework-aware-scaffolding item; the prompt-set tailoring that
-	// detection is meant to feed stays a documented follow-up.
+	// Detected once per cwd and reused by both the status-bar badge and the
+	// agent's hidden context, so the two can't disagree about what framework
+	// the workspace is and we don't re-read package.json every turn.
+	// Invalidated when package.json changes -- a cache that never expires
+	// would keep showing React after the user added `next`.
+	const frameworkCache = new Map<string, Framework | undefined>();
+	const frameworkFor = async (cwd: string): Promise<Framework | undefined> => {
+		if (!frameworkCache.has(cwd)) {
+			frameworkCache.set(cwd, await detectWorkspaceFramework(cwd));
+		}
+		return frameworkCache.get(cwd);
+	};
+
 	const frameworkIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	frameworkIndicator.name = 'boxcode: framework';
 	context.subscriptions.push(frameworkIndicator);
 	const updateFrameworkIndicator = async (workspace: WorkspaceContext): Promise<void> => {
-		const framework = await detectWorkspaceFramework(workspace.cwd);
+		const framework = workspace.hasFolder ? await frameworkFor(workspace.cwd) : undefined;
 		if (framework) {
 			const label = FRAMEWORK_LABELS[framework];
 			frameworkIndicator.text = `$(package) ${label}`;
@@ -209,6 +221,77 @@ export function activate(context: vscode.ExtensionContext): void {
 			frameworkIndicator.hide();
 		}
 	};
+
+	const RECS_SKIP_STATE = 'boxcode.frameworkRecommendationSkips';
+	const INSTALL_RECS_ACTION = 'Install';
+	const LATER_RECS_ACTION = 'Later';
+
+	async function promptFrameworkRecommendations(workspace: WorkspaceContext): Promise<void> {
+		if (!workspace.hasFolder) {
+			return;
+		}
+		const framework = await frameworkFor(workspace.cwd);
+		if (!framework) {
+			return;
+		}
+		const skipKey = recommendationSkipKey(workspace.cwd, framework);
+		const skipped = context.workspaceState.get<string[]>(RECS_SKIP_STATE, []);
+		if (skipped.includes(skipKey)) {
+			return;
+		}
+		const installed = vscode.extensions.all.map(ext => ext.id);
+		const missing = missingRecommendedExtensions(installed, framework);
+		if (missing.length === 0) {
+			return;
+		}
+		const choice = await vscode.window.showInformationMessage(
+			recommendationPrompt(framework, missing),
+			INSTALL_RECS_ACTION,
+			LATER_RECS_ACTION,
+		);
+		if (choice !== INSTALL_RECS_ACTION) {
+			await context.workspaceState.update(RECS_SKIP_STATE, [...skipped, skipKey]);
+			return;
+		}
+		for (const id of missing) {
+			try {
+				await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+			} catch {
+				// Gallery miss or the user cancelled one id -- keep going.
+			}
+		}
+		await context.workspaceState.update(RECS_SKIP_STATE, [...skipped, skipKey]);
+	}
+
+	async function refreshFrameworkSurfaces(invalidate = false): Promise<void> {
+		const workspace = currentWorkspace();
+		if (invalidate && workspace.hasFolder) {
+			frameworkCache.delete(workspace.cwd);
+		}
+		await updateFrameworkIndicator(workspace);
+		await promptFrameworkRecommendations(workspace);
+	}
+
+	let packageJsonWatchers: vscode.Disposable[] = [];
+	function watchPackageJsonFiles(): void {
+		for (const watcher of packageJsonWatchers) {
+			watcher.dispose();
+		}
+		packageJsonWatchers = [];
+		for (const folder of vscode.workspace.workspaceFolders ?? []) {
+			const watcher = vscode.workspace.createFileSystemWatcher(
+				new vscode.RelativePattern(folder, 'package.json'),
+			);
+			const onPackageJson = () => {
+				frameworkCache.delete(folder.uri.fsPath);
+				void refreshFrameworkSurfaces();
+			};
+			watcher.onDidChange(onPackageJson);
+			watcher.onDidCreate(onPackageJson);
+			watcher.onDidDelete(onPackageJson);
+			packageJsonWatchers.push(watcher);
+		}
+	}
 
 	function currentWorkspace(): WorkspaceContext {
 		const folders = vscode.workspace.workspaceFolders?.map(folder => ({ fsPath: folder.uri.fsPath }));
@@ -313,9 +396,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeWorkspaceFolders(() => {
 			discardSession();
-	void promptTrustIfNeeded();
-	void updateFrameworkIndicator(currentWorkspace());
-			void updateFrameworkIndicator(currentWorkspace());
+			watchPackageJsonFiles();
+			void promptTrustIfNeeded();
+			void refreshFrameworkSurfaces(true);
 		}),
 		vscode.commands.registerCommand(PERMISSION_COMMAND, (...args: unknown[]) => {
 			const parsed = parsePermissionCommandArgs(args);
@@ -331,8 +414,17 @@ export function activate(context: vscode.ExtensionContext): void {
 			void vscode.commands.executeCommand('workbench.action.chat.open');
 			void vscode.window.showInformationMessage('This folder is trusted. Chat can read, write, and run here now.');
 		}),
+		{ dispose: () => {
+			for (const watcher of packageJsonWatchers) {
+				watcher.dispose();
+			}
+		} },
 	);
+	watchPackageJsonFiles();
 	void promptTrustIfNeeded();
+	// The badge used to refresh only on folder change, so a window that
+	// launched already inside a project never showed it.
+	void refreshFrameworkSurfaces();
 
 	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
 		// A confirmation-card click is a new ChatRequest, not a new turn.
@@ -358,6 +450,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			discardSession();
 		}
 		const workspace = currentWorkspace();
+		// Attach the detected framework so workspacePromptPrefix() hides the
+		// stack in the model's own context (see that function's comment on the
+		// framework line). Memoized per cwd by frameworkFor() above, so this is
+		// one package.json read per workspace, not per turn.
+		const workspaceWithFramework = { ...workspace, framework: await frameworkFor(workspace.cwd) };
 		if (sessionCwd !== undefined && sessionCwd !== workspace.cwd) {
 			discardSession();
 		}
@@ -439,7 +536,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		const onCancel = token.onCancellationRequested(() => {
 			permissionGate.cancelAll();
 		});
-		const content = await attachReferencesToPrompt(request, workspace);
+		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
 		try {
 			await activeClient.prompt(activeSessionId, content);
 			// Rendered only on a clean turn end, never after an error -- a

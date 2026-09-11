@@ -144,19 +144,18 @@ index 0000000..0000000 100644
  
  		// Sessions or walkthroughs
  		const sessionsSection = append(this.contentContainer, $('.agentSessionsWelcome-sessionsSection'));
-@@ -530,14 +642,70 @@
+@@ -530,14 +642,69 @@
  	}
  
  	/**
 +	 * boxcode-ide: best-effort framework detection for the open-workspace
-+	 * example prompts, so the seeded chips name what's actually in the folder
-+	 * instead of a generic set for every project. Reads package.json at the
-+	 * workspace root only - deliberately checks meta-frameworks (next, svelte,
-+	 * vue, angular) before the bare build-tool/library signals (vite, react),
-+	 * since e.g. a SvelteKit or Vue+Vite project also lists `vite` as a
-+	 * dependency and would otherwise be misclassified as generic Vite. Never
-+	 * throws - any failure (no folder, missing/invalid package.json, no match)
-+	 * returns undefined and the caller falls back to OPEN_WORKSPACE_EXAMPLE_PROMPTS.
++	 * example prompts. Keep this order in lockstep with frameworkDetector.ts
++	 * (the agent overlay) -- that module cannot be imported from core, and a
++	 * Vite+React app used to show Vite chips here while the status bar said
++	 * React. Meta-frameworks first; `vite` is a build tool, not a framework.
++	 * Nuxt reuses Vue chips; Astro has no dedicated set yet so it falls
++	 * through to the generic prompts. `node` is extra for this page only
++	 * (express/fastify/koa). Never throws.
 +	 */
 +	private async detectFramework(): Promise<WelcomeFrameworkId | undefined> {
 +		const root = this.workspaceContextService.getWorkspace().folders[0]?.uri;
@@ -167,10 +166,13 @@ index 0000000..0000000 100644
 +		try {
 +			const content = await this.fileService.readFile(URI.joinPath(root, 'package.json'));
 +			const pkg = JSON.parse(content.value.toString());
-+			const deps: Record<string, unknown> = { ...pkg?.dependencies, ...pkg?.devDependencies };
++			const deps: Record<string, unknown> = { ...pkg?.dependencies, ...pkg?.devDependencies, ...pkg?.peerDependencies };
 +
 +			if ('next' in deps) {
 +				return 'next';
++			}
++			if ('nuxt' in deps || '@nuxt/kit' in deps) {
++				return 'vue';
 +			}
 +			if ('@sveltejs/kit' in deps || 'svelte' in deps) {
 +				return 'svelte';
@@ -178,14 +180,11 @@ index 0000000..0000000 100644
 +			if ('vue' in deps) {
 +				return 'vue';
 +			}
++			if ('react' in deps || 'react-dom' in deps) {
++				return 'react';
++			}
 +			if ('@angular/core' in deps) {
 +				return 'angular';
-+			}
-+			if ('vite' in deps) {
-+				return 'vite';
-+			}
-+			if ('react' in deps) {
-+				return 'react';
 +			}
 +			if ('express' in deps || 'fastify' in deps || 'koa' in deps) {
 +				return 'node';
