@@ -639,6 +639,38 @@ function appendTitleSafely(line: vscode.MarkdownString, title: string): void {
 }
 
 /**
+ * Renders one tool call as a native `ChatToolInvocationPart` instead of a
+ * markdown line. This is the fix for the spinner/check duplication:
+ * `stream.markdown` only ever *appends* a new part, so the in-progress
+ * `$(loading~spin)` line stayed visible underneath the `$(check)` line once
+ * the tool completed. A tool-invocation part carrying `enablePartialUpdate`
+ * is matched by `toolCallId` on the model side
+ * (`ChatModel._handleExternalToolInvocationUpdate`), which flips the *same*
+ * row from its running spinner to a check in place rather than pushing a
+ * second row.
+ *
+ * The spinner/check icons are drawn by the chat renderer itself (see
+ * `BaseChatToolInvocationSubPart.getIcon`), so the message is just the title
+ * -- no manual `$(...)` codicon, unlike the old markdown path. `toolName` is
+ * only used to key/name the invocation and is not shown for a generic
+ * (non-terminal, non-MCP) tool; `toolCallId` is the field that correlates the
+ * completion update back to this row.
+ */
+function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
+	const message = new vscode.MarkdownString(undefined, true);
+	appendTitleSafely(message, title);
+
+	const part = new vscode.ChatToolInvocationPart(update.kind ?? 'boxcode', update.toolCallId!);
+	part.enablePartialUpdate = true;
+	part.isComplete = update.status === 'completed' || update.status === 'failed';
+	part.invocationMessage = message;
+	if (part.isComplete) {
+		part.pastTenseMessage = message;
+	}
+	stream.push(part);
+}
+
+/**
  * Auto-opens the Integrated Browser the moment a shell command's own output
  * mentions a dev server it just started (a "Local: http://localhost:5173/"
  * line, the same shape `npm run dev`/`vite`/`python3 -m http.server` all
@@ -706,12 +738,13 @@ function renderUpdate(
 				toolCallTitles.set(update.toolCallId, update.title);
 			}
 			const title = update.title ?? (update.toolCallId ? toolCallTitles.get(update.toolCallId) : undefined);
-			if (title) {
-				// appendText(), not raw interpolation: a tool title is
-				// arbitrary text boxcode chose (a shell command, a file
-				// path), never something safe to splice into markdown
-				// source. This alone turned out not to be enough for one
-				// specific case -- see appendTitleSafely's own doc comment.
+			if (title && update.toolCallId) {
+				renderToolCallInvocation(update, title, stream);
+			} else if (title) {
+				// Fallback for a tool call that arrived without a toolCallId
+				// (nothing to correlate a completion against): the old
+				// markdown line, which still renders a status icon but cannot
+				// replace itself in place.
 				const line = new vscode.MarkdownString(undefined, true);
 				line.appendMarkdown(`${toolCallStatusIcon(update.status)} `);
 				appendTitleSafely(line, title);
