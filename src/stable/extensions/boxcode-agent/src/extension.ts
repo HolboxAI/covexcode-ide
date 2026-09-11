@@ -38,7 +38,7 @@ import {
 } from './chatPermission';
 import { isFreshChat } from './freshChat';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
-import { detectWorkspaceFramework, FRAMEWORK_LABELS } from './frameworkDetector';
+import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
 import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
