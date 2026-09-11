@@ -22,7 +22,29 @@ curl -fsSL https://boxcode.sh/install.sh | bash      # macOS/Linux
 irm https://boxcode.sh/install.ps1 | iex              # Windows (PowerShell)
 ```
 
+### Install the IDE itself (macOS dev builds)
+
+Download the latest `.dmg` from the [rolling dev release](https://github.com/HolboxAI/boxcode-ide/releases/tag/macos-dev-latest) and drag **Boxcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
+
+```sh
+xattr -cr "/Applications/Boxcode IDE.app"
+```
+
+(Alternative: right-click the app → Open, and confirm the Gatekeeper prompt.) After that, launch Boxcode IDE normally.
+
 Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist (from using the CLI directly).
+
+### Linux (Flatpak)
+
+Linux packages are not on the rolling GitHub Release yet. Dispatch `CI - Build - Linux` with `generate_assets: true`, then from that run download **`flatpak-x86_64`** (or **`bin-x64`** for `.deb` / `.rpm` / AppImage):
+
+```sh
+flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./Boxcode-x86_64.flatpak
+flatpak run ai.holbox.Boxcode
+```
+
+The sandbox can see the host home directory so the CLI in `~/.local/bin` still works. There is no Flathub listing yet — this is a sideloaded bundle.
 
 ## Architecture
 
@@ -44,7 +66,7 @@ Full plan: [`docs/PLAN.md`](docs/PLAN.md). Current priority (Tier 1 baseline-IDE
 | `docs/` | `PLAN.md`, `BACKLOG.md`, and the how-to/usage guides |
 | `build/` | platform packaging (linux/osx/windows/alpine) |
 | `dev/` | dev build helpers (`build.sh`, `patch.sh`, `update_patches.sh`) |
-| `stores/` | snapcraft + winget packaging metadata |
+| `stores/` | snapcraft, winget, and Flatpak packaging metadata |
 | `upstream/` | pinned `microsoft/vscode` tag/commit |
 | `product.json` | boxcode product identity (name, quality, marketplace wiring) |
 
@@ -60,7 +82,7 @@ The fork tracks a pinned upstream and patches it at build time — VSCodium's mo
 ./dev/build.sh -p       # also generate packages/installers
 ```
 
-Full dependency lists (including Windows WiX/MSI and Linux dpkg/rpm/snap) and the CI/downstream flow are in [`docs/howto-build.md`](docs/howto-build.md); the no-packaging dev loop is in [`docs/iterate-locally.md`](docs/iterate-locally.md). CI compiles macOS and Windows x64 on PRs; Linux stays workflow-dispatch-only.
+Full dependency lists (including Windows WiX/MSI and Linux dpkg/rpm/snap/flatpak) and the CI/downstream flow are in [`docs/howto-build.md`](docs/howto-build.md); the no-packaging dev loop is in [`docs/iterate-locally.md`](docs/iterate-locally.md). CI compiles macOS and Windows x64 on PRs; Linux stays workflow-dispatch-only.
 
 ## Documentation
 

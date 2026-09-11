@@ -50,23 +50,17 @@ Credits: [Gerson](https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/-/issues/
 
 ### <a id="linux-flatpak-most-common-issues"></a>_Flatpak most common issues_
 
-- blurry screen with HiDPI on wayland run:
+The bundle id is `ai.holbox.Boxcode`. Chat still needs the host `boxcode` CLI (`curl -fsSL https://boxcode.sh/install.sh | bash`); the wrapper adds `~/.local/bin` to `PATH` so that install is found.
+
+- blurry screen with HiDPI on Wayland:
   ```bash
-  flatpak override --user --nosocket=wayland com.vscodium.codium
+  flatpak override --user --nosocket=wayland ai.holbox.Boxcode
   ```
-- To execute commands on the host system, run inside the sandbox
+- To run a command on the host (Docker, a distro package the sandbox cannot see):
   ```bash
   flatpak-spawn --host <COMMAND>
-  # or
-  host-spawn <COMMAND>
   ```
-- Where is my X extension? AKA modify product.json
-  TL;DR: use https://open-vsx.org/extension/zokugun/vsix-manager
-
-- SDKs
-  see [this](https://github.com/flathub/com.vscodium.codium?tab=readme-ov-file#sdks)
-
-- If you have any other problems with the flatpak package try to look on the [FAQ](https://github.com/flathub/com.vscodium.codium?tab=readme-ov-file#faq) maybe the solution is already there or open an [issue](https://github.com/flathub/com.vscodium.codium/issues).
+- Integrated terminal / git / language servers that expect host `/usr` binaries may need `flatpak-spawn --host`, because `/usr` inside the sandbox is the Freedesktop runtime.
 
 ### <a id="linux-remote-ssh"></a>_Remote SSH doesn't work_
 

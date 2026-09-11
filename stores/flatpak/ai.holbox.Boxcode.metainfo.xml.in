@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ai.holbox.Boxcode</id>
+  <name>Boxcode IDE</name>
+  <summary>Code editing for frontend engineers</summary>
+  <developer_name>HolboxAI</developer_name>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <url type="homepage">https://github.com/HolboxAI/boxcode-ide</url>
+  <url type="bugtracker">https://github.com/HolboxAI/boxcode-ide/issues</url>
+  <launchable type="desktop-id">ai.holbox.Boxcode.desktop</launchable>
+  <description>
+    <p>
+      Boxcode IDE is a HolboxAI distribution of the open-source Code-OSS editor.
+      Chat is driven by the separate boxcode CLI over ACP. Install that CLI from
+      https://boxcode.sh as well — the editor will not work without it.
+    </p>
+  </description>
+  <categories>
+    <category>Development</category>
+    <category>IDE</category>
+    <category>TextEditor</category>
+  </categories>
+  <provides>
+    <binary>boxcode-ide</binary>
+  </provides>
+  <releases>
+    <release version="@@VERSION@@" date="@@DATE@@"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -65,3 +65,17 @@ if [[ "${SHOULD_BUILD_APPIMAGE}" != "no" ]]; then
 
   find assets -name '*.AppImage*' -exec bash -c 'mv $0 ${0/_-_/-}' {} \;
 fi
+
+# Flatpak needs Freedesktop SDK + bubblewrap, which the focal Linux
+# build-agent container does not have. CI wraps the .deb in a follow-up
+# job; locally, build the bundle when flatpak-builder is on PATH.
+if [[ "${SHOULD_BUILD_FLATPAK}" != "no" && "${VSCODE_ARCH}" == "x64" ]]; then
+  if [[ "${CI_BUILD}" == "yes" ]]; then
+    echo "Skipping Flatpak in the Linux build agent; see the workflow flatpak job"
+  elif command -v flatpak-builder >/dev/null 2>&1; then
+    echo "Building Flatpak"
+    ./stores/flatpak/build.sh
+  else
+    echo "Skipping Flatpak (install flatpak-builder to wrap the .deb)"
+  fi
+fi

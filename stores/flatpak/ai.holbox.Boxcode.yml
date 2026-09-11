@@ -1,0 +1,55 @@
+# Bundles the Linux .deb into a Flatpak. Not a Flathub submission:
+# that needs a public .deb URL and a separate review. Until then, CI
+# (generate_assets) and stores/flatpak/build.sh produce a .flatpak users
+# install with `flatpak install --user`.
+#
+# App id matches prepare_vscode.sh's darwinBundleIdentifier.
+id: ai.holbox.Boxcode
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: boxcode-ide
+separate-locales: false
+finish-args:
+  # Coding IDE: open any folder, talk to the host CLI, and run tools.
+  # --filesystem=host is the same trade-off the VS Code / VSCodium
+  # Flatpaks make; without it chat cannot see the project or ~/.boxcode.
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --socket=ssh-auth
+  - --device=all
+  - --allow=devel
+  - --filesystem=host
+  - --filesystem=xdg-run/gnupg:ro
+  - --filesystem=xdg-config/kdeglobals:ro
+  - --persist=.vscode-oss
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.freedesktop.Flatpak
+  - --talk-name=org.kde.kwalletd5
+  - --talk-name=com.canonical.AppMenu.Registrar
+  - --system-talk-name=org.freedesktop.login1
+  - --env=XCURSOR_PATH=/run/host/user-share/icons:/run/host/share/icons
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/gtk-doc
+  - '*.la'
+modules:
+  - name: boxcode-ide
+    buildsystem: simple
+    build-commands:
+      - bash apply.sh
+    sources:
+      - type: file
+        path: boxcode.deb
+      - type: file
+        path: apply.sh
+      - type: file
+        path: boxcode-ide.sh
+      - type: file
+        path: code.svg
+      - type: file
+        path: ai.holbox.Boxcode.metainfo.xml

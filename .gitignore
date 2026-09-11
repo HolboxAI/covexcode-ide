@@ -25,6 +25,8 @@ extensions/**/dist/
 *.zip
 *.dmg
 *.AppImage
+*.flatpak
+stores/flatpak/.work/
 
 # Env / secrets
 .env

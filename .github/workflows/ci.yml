@@ -41,3 +41,14 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # Unpacks a Code-OSS-shaped .deb the same way the Flatpak module does.
+  # No vscode checkout and no flatpak-builder — those stay on generate_assets.
+  flatpak-apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: unpack a synthetic amd64 .deb
+        run: |
+          chmod +x stores/flatpak/apply.test.sh stores/flatpak/apply.sh stores/flatpak/build.sh
+          ./stores/flatpak/apply.test.sh
+
