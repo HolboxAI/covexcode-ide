@@ -15,6 +15,15 @@ on:
     paths-ignore:
       - "**/*.md"
 
+# One Linux run per ref+event. A second push to main (stacked merges)
+# used to start a second full arch matrix while the first was still
+# apt-get'ing; Ubuntu then dropped connections and the workflow went red
+# even though compile had already passed. Dispatch stays in its own group
+# so a generate_assets run is not cancelled by a later push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
 # Deliberately manual-only again (workflow_dispatch, not pull_request) - not
 # the same mistake as before. This is a real, stated scope decision: Linux
 # is not being tested right now, only macOS is, while Windows/Linux get

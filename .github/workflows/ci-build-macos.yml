@@ -20,6 +20,10 @@ on:
     paths-ignore:
       - "**/*.md"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
 # Correction to an earlier version of this comment: this workflow was made
 # manual-only to cut CI noise/cost during P1 debugging, but that also meant
 # NO automatic signal at all on whether the app actually builds - a PR could

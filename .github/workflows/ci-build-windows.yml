@@ -20,6 +20,10 @@ on:
     paths-ignore:
       - "**/*.md"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
 # Windows x64 is back on automatic PRs so testers can download a runnable
 # tree (same idea as macOS compile uploading compiled.tar.gz). Installers
 # (exe/msi) stay behind generate_assets, which only exists on
