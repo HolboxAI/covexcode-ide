@@ -73,6 +73,27 @@ test('workspacePromptPrefix() names the working directory when a folder is open'
 	assert.doesNotMatch(prefix, /No workspace folder/);
 });
 
+test('workspacePromptPrefix() names the detected framework when one is known', () => {
+	const prefix = workspacePromptPrefix({
+		cwd: '/Users/dev/app',
+		hasFolder: true,
+		folderPaths: ['/Users/dev/app'],
+		activeFolderPath: '/Users/dev/app',
+		framework: 'next',
+	});
+	assert.match(prefix, /Frontend framework.*Next\.js/);
+});
+
+test('workspacePromptPrefix() omits the framework line when none is detected', () => {
+	const prefix = workspacePromptPrefix({
+		cwd: '/Users/dev/app',
+		hasFolder: true,
+		folderPaths: ['/Users/dev/app'],
+		activeFolderPath: '/Users/dev/app',
+	});
+	assert.doesNotMatch(prefix, /Frontend framework/);
+});
+
 test('workspacePromptPrefix() lists every folder in a multi-root window', () => {
 	const prefix = workspacePromptPrefix({
 		cwd: '/Users/dev/beta',

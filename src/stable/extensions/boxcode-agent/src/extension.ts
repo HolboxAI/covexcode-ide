@@ -189,17 +189,22 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.lm.registerLanguageModelChatProvider('boxcode', new StubLanguageModelProvider()),
 	);
 
-	// A lightweight "what framework is this project" badge, based on the
-	// landed-open-folder package.json detection (see frameworkDetector.ts and
-	// docs/BACKLOG.md). Shown only when a known framework is detected, so an
-	// empty or non-JS workspace doesn't accumulate status-bar clutter. Part of
-	// the framework-aware-scaffolding item; the prompt-set tailoring that
-	// detection is meant to feed stays a documented follow-up.
+	// Detected once per cwd and reused by both the status-bar badge and the
+	// agent's hidden context, so the two can't disagree about what framework
+	// the workspace is and we don't re-read package.json every turn.
+	const frameworkCache = new Map<string, Framework | undefined>();
+	const frameworkFor = async (cwd: string): Promise<Framework | undefined> => {
+		if (!frameworkCache.has(cwd)) {
+			frameworkCache.set(cwd, await detectWorkspaceFramework(cwd));
+		}
+		return frameworkCache.get(cwd);
+	};
+
 	const frameworkIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	frameworkIndicator.name = 'boxcode: framework';
 	context.subscriptions.push(frameworkIndicator);
 	const updateFrameworkIndicator = async (workspace: WorkspaceContext): Promise<void> => {
-		const framework = await detectWorkspaceFramework(workspace.cwd);
+		const framework = await frameworkFor(workspace.cwd);
 		if (framework) {
 			const label = FRAMEWORK_LABELS[framework];
 			frameworkIndicator.text = `$(package) ${label}`;
@@ -358,6 +363,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			discardSession();
 		}
 		const workspace = currentWorkspace();
+		// Attach the detected framework so workspacePromptPrefix() hides the
+		// stack in the model's own context (see that function's comment on the
+		// framework line). Memoized per cwd by frameworkFor() above, so this is
+		// one package.json read per workspace, not per turn.
+		const workspaceWithFramework = { ...workspace, framework: await frameworkFor(workspace.cwd) };
 		if (sessionCwd !== undefined && sessionCwd !== workspace.cwd) {
 			discardSession();
 		}
@@ -439,7 +449,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		const onCancel = token.onCancellationRequested(() => {
 			permissionGate.cancelAll();
 		});
-		const content = await attachReferencesToPrompt(request, workspace);
+		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
 		try {
 			await activeClient.prompt(activeSessionId, content);
 			// Rendered only on a clean turn end, never after an error -- a

@@ -3,6 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as path from 'node:path';
+import { type Framework, FRAMEWORK_LABELS } from './frameworkDetector';
 
 /**
  * No `vscode` import on purpose -- same posture as `localhostUrl.ts` /
@@ -31,6 +32,8 @@ export interface WorkspaceContext {
 	folderPaths: string[];
 	/** Longest open folder that contains the active file, if any. */
 	activeFolderPath: string | undefined;
+	/** Detected frontend framework, when one is known -- see `frameworkDetector.ts`. */
+	framework?: Framework;
 }
 
 export function isPathInsideFolder(filePath: string, folder: string): boolean {
@@ -77,6 +80,13 @@ export function workspacePromptPrefix(context: WorkspaceContext): string {
 		'The user is working in this IDE workspace.',
 		`Working directory (use this for relative paths and shell commands): ${context.cwd}`,
 	];
+	if (context.framework) {
+		// The model can't read the project's package.json on its own; telling
+		// it the stack saves it re-discovering (and sometimes mis-guessing)
+		// the framework from a lone tsconfig or a stray import. Hidden
+		// context, same reason as the cwd line above.
+		lines.push(`Frontend framework (already detected from the project's package.json): ${FRAMEWORK_LABELS[context.framework]}.`);
+	}
 	if (context.folderPaths.length > 1) {
 		lines.push('Open folders:');
 		for (const folder of context.folderPaths) {
