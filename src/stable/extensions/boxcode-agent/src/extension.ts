@@ -38,6 +38,7 @@ import {
 } from './chatPermission';
 import { isFreshChat } from './freshChat';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
+import { detectWorkspaceFramework, FRAMEWORK_LABELS } from './frameworkDetector';
 import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
@@ -188,6 +189,27 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.lm.registerLanguageModelChatProvider('boxcode', new StubLanguageModelProvider()),
 	);
 
+	// A lightweight "what framework is this project" badge, based on the
+	// landed-open-folder package.json detection (see frameworkDetector.ts and
+	// docs/BACKLOG.md). Shown only when a known framework is detected, so an
+	// empty or non-JS workspace doesn't accumulate status-bar clutter. Part of
+	// the framework-aware-scaffolding item; the prompt-set tailoring that
+	// detection is meant to feed stays a documented follow-up.
+	const frameworkIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+	frameworkIndicator.name = 'boxcode: framework';
+	context.subscriptions.push(frameworkIndicator);
+	const updateFrameworkIndicator = async (workspace: WorkspaceContext): Promise<void> => {
+		const framework = await detectWorkspaceFramework(workspace.cwd);
+		if (framework) {
+			const label = FRAMEWORK_LABELS[framework];
+			frameworkIndicator.text = `$(package) ${label}`;
+			frameworkIndicator.tooltip = `boxcode detected ${label}`;
+			frameworkIndicator.show();
+		} else {
+			frameworkIndicator.hide();
+		}
+	};
+
 	function currentWorkspace(): WorkspaceContext {
 		const folders = vscode.workspace.workspaceFolders?.map(folder => ({ fsPath: folder.uri.fsPath }));
 		const activeUri = vscode.window.activeTextEditor?.document.uri;
@@ -291,7 +313,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeWorkspaceFolders(() => {
 			discardSession();
-			void promptTrustIfNeeded();
+	void promptTrustIfNeeded();
+	void updateFrameworkIndicator(currentWorkspace());
+			void updateFrameworkIndicator(currentWorkspace());
 		}),
 		vscode.commands.registerCommand(PERMISSION_COMMAND, (...args: unknown[]) => {
 			const parsed = parsePermissionCommandArgs(args);
