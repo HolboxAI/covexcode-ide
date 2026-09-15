@@ -319,6 +319,78 @@ jobs:
           path: assets/*.flatpak
           retention-days: 3
 
+  # The macOS workflow already has this job (named "package" there). Linux
+  # never did: `build` and `flatpak` only uploaded artifacts with a 3-day
+  # retention and nothing published a release, so a user had no way to get a
+  # Linux package at all. This publishes a rolling `linux-dev-latest`
+  # prerelease - one stable, bookmarkable link - mirroring `macos-dev-latest`.
+  #
+  # Tolerate a partial arch matrix. If riscv64/loong64 fail but x64 + arm64
+  # succeed, still publish the arches that built. `always()` runs this job
+  # even when a `build` leg failed; `download-artifact` with `pattern: bin-*`
+  # + `merge-multiple` then skips the missing arch instead of erroring. The
+  # Flatpak download is continue-on-error for the same reason: its follow-up
+  # job fails when x64 failed, or when flatpak-builder failed, and the
+  # .deb/.rpm/AppImage still publish without it.
+  #
+  # Only meaningful on workflow_dispatch: generate_assets is a dispatch-only
+  # input, so on push this `if` is false by construction (same as macOS).
+  release:
+    name: release (linux)
+    needs:
+      - compile
+      - build
+      - flatpak
+    if: ${{ always() && github.event.inputs.generate_assets == 'true' && !cancelled() && needs.compile.result == 'success' }}
+    runs-on: ubuntu-latest
+    # Job-level permissions override the workflow-level `contents: read`
+    # above (which exists so actions/checkout can fetch this private repo).
+    # Creating a release needs `contents: write` - the exact fix the macOS
+    # workflow needed (its `gh release create` failed 403 under the read-only
+    # default).
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # merge-multiple flattens every bin-* artifact into one assets/ dir.
+      # Filenames never collide across arches: each .deb/.rpm/.tar.gz name
+      # carries its arch, and the AppImage is x64-only.
+      - name: Download packages (all arches)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bin-*
+          merge-multiple: true
+          path: assets
+
+      - name: Download Flatpak bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: flatpak-x86_64
+          path: assets
+        continue-on-error: true
+
+      - name: Publish to the rolling Linux dev-build release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          shopt -s nullglob
+          TAG="linux-dev-latest"
+          gh release create "$TAG" --repo "${{ github.repository }}" \
+            --title "Linux dev build (rolling)" \
+            --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution. Formats: .deb and .rpm (x64/arm64/riscv64/loong64/ppc64le), AppImage and Flatpak (x64), the .tar.gz archive, and SHA-256/SHA-1 checksums." \
+            --prerelease 2>/dev/null || true
+          files=( assets/*.deb assets/*.rpm assets/*.AppImage assets/*.AppImage.zsync assets/*.tar.gz assets/*.flatpak assets/*.sha256 assets/*.sha1 )
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No assets to publish - every build leg produced nothing" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${files[@]}"
+
   reh_linux:
     needs:
       - compile
