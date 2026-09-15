@@ -52,8 +52,8 @@ sudo dnf install ./boxcode-ide-<version>.x86_64.rpm   # Fedora / RHEL
 Download the AppImage, make it executable, and run it. The AppImage updates itself with zsync:
 
 ```sh
-chmod +x Boxcode-linux-x64-<version>.AppImage
-./Boxcode-linux-x64-<version>.AppImage
+chmod +x Boxcode_IDE-<version>.glibc2.34-x86_64.AppImage
+./Boxcode_IDE-<version>.glibc2.34-x86_64.AppImage
 ```
 
 #### Flatpak
