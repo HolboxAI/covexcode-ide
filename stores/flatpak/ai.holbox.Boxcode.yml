@@ -25,7 +25,7 @@ finish-args:
   - --filesystem=host
   - --filesystem=xdg-run/gnupg:ro
   - --filesystem=xdg-config/kdeglobals:ro
-  - --persist=.vscode-oss
+  - --persist=.boxcode-ide
   - --talk-name=org.freedesktop.secrets
   - --talk-name=org.freedesktop.Flatpak
   - --talk-name=org.kde.kwalletd5
