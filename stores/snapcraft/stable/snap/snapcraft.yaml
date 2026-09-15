@@ -1,8 +1,9 @@
-name: codium
-adopt-info: codium
+name: boxcode-ide
+adopt-info: boxcode-ide
 summary: Code editing. Redefined.
 description: |
-  Binary releases of Visual Studio Code without branding/telemetry/licensing
+  Binary releases of boxcode-ide, a Code-OSS based editor for boxcode,
+  without Microsoft branding, telemetry, or licensing.
 
 base: core20
 grade: stable
@@ -10,32 +11,32 @@ confinement: classic
 compression: lzo
 
 parts:
-  codium:
+  boxcode-ide:
     plugin: nil
     override-build: |
       set -eu
-      # Get .deb url
-      wget --quiet https://api.github.com/repos/VSCodium/vscodium/releases -O latest.json
-      VERSION=$( jq -r 'sort_by(.tag_name|split(".")|map(tonumber))|last.tag_name' latest.json )
-      DEB_URL=$( jq -r 'map(select(.tag_name == "'"${VERSION}"'"))|first.assets[].browser_download_url|select(endswith("'"_${SNAPCRAFT_TARGET_ARCH}.deb"'"))' latest.json )
+      # Get .deb url from the rolling linux-dev-latest release
+      wget --quiet https://api.github.com/repos/HolboxAI/boxcode-ide/releases/tags/linux-dev-latest -O release.json
+      DEB_URL=$( jq -r '.assets[].browser_download_url|select(endswith("'"_${SNAPCRAFT_TARGET_ARCH}.deb"'"))' release.json )
       DEB_NAME=$( basename "${DEB_URL}" )
+      # Set version from the .deb filename (the release tag is not a version)
+      VERSION=$( printf '%s' "${DEB_NAME}" | sed -n 's/^boxcode-ide_\(.*\)_'"${SNAPCRAFT_TARGET_ARCH}"'\.deb$/\1/p' )
+      snapcraftctl set-version "${VERSION}"
       # Downloading .deb
       wget "${DEB_URL}" -O "${SNAPCRAFT_PART_INSTALL}/${DEB_NAME}"
       # Unpacking .deb
       dpkg -x "${SNAPCRAFT_PART_INSTALL}/${DEB_NAME}" "${SNAPCRAFT_PART_INSTALL}"
       # Clean up
-      rm -f latest.json
+      rm -f release.json
       rm -f "${SNAPCRAFT_PART_INSTALL}/${DEB_NAME}"
-      # Set version
-      snapcraftctl set-version "${VERSION}"
       # Prepare GUI
       mkdir -p "${SNAPCRAFT_PART_INSTALL}/meta/gui"
-      cp "${SNAPCRAFT_PART_INSTALL}/usr/share/codium/resources/app/resources/linux/code.png" "${SNAPCRAFT_PART_INSTALL}/meta/gui/codium.png"
+      cp "${SNAPCRAFT_PART_INSTALL}/usr/share/boxcode-ide/resources/app/resources/linux/code.png" "${SNAPCRAFT_PART_INSTALL}/meta/gui/boxcode-ide.png"
       # Update paths
-      sed -i 's|Exec=/usr/share/codium/codium|Exec=codium --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium.desktop"
-      sed -i 's|Exec=/usr/share/codium/codium|Exec=codium --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-url-handler.desktop"
-      sed -i 's|Icon=vscodium|Icon=${SNAP}/meta/gui/codium.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium.desktop"
-      sed -i 's|Icon=vscodium|Icon=${SNAP}/meta/gui/codium.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-url-handler.desktop"
+      sed -i 's|Exec=/usr/share/boxcode-ide/boxcode-ide|Exec=boxcode-ide --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide.desktop"
+      sed -i 's|Exec=/usr/share/boxcode-ide/boxcode-ide|Exec=boxcode-ide --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide-url-handler.desktop"
+      sed -i 's|Icon=boxcode-ide|Icon=${SNAP}/meta/gui/boxcode-ide.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide.desktop"
+      sed -i 's|Icon=boxcode-ide|Icon=${SNAP}/meta/gui/boxcode-ide.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide-url-handler.desktop"
     build-packages:
       - wget
       - jq
@@ -76,7 +77,7 @@ parts:
       - -usr/share/icons
       - -usr/share/lintian
       - -usr/share/man
-      - -usr/share/codium/chrome-sandbox
+      - -usr/share/boxcode-ide/chrome-sandbox
     build-attributes:
       - enable-patchelf
     override-prime: |
@@ -89,16 +90,16 @@ parts:
 
   electron-launch:
     after:
-      - codium
+      - boxcode-ide
     plugin: dump
     source: snap/local/bin
 
 apps:
-  codium:
-    command: electron-launch $SNAP/usr/share/codium/bin/codium --no-sandbox
-    desktop: usr/share/applications/codium.desktop
-    common-id: codium.desktop
+  boxcode-ide:
+    command: electron-launch $SNAP/usr/share/boxcode-ide/bin/boxcode-ide --no-sandbox
+    desktop: usr/share/applications/boxcode-ide.desktop
+    common-id: boxcode-ide.desktop
 
   url-handler:
-    command: electron-launch $SNAP/usr/share/codium/bin/codium --open-url --no-sandbox
-    desktop: usr/share/applications/codium-url-handler.desktop
+    command: electron-launch $SNAP/usr/share/boxcode-ide/bin/boxcode-ide --open-url --no-sandbox
+    desktop: usr/share/applications/boxcode-ide-url-handler.desktop

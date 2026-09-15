@@ -1,8 +1,14 @@
-name: codium-insiders
-adopt-info: codium-insiders
+# boxcode-ide has no insider channel yet. This file is a template kept in
+# sync with the stable snap. It renames VSCodium's insider snap, but the
+# download below still points at the only boxcode release (linux-dev-latest)
+# because no insider tag exists. Do not build this snap until an insider
+# release ships; then point the download at that tag and re-verify the paths.
+name: boxcode-ide-insiders
+adopt-info: boxcode-ide-insiders
 summary: Code editing. Redefined.
 description: |
-  Binary releases of Visual Studio Code - Insiders without branding/telemetry/licensing
+  Binary releases of boxcode-ide - Insiders, a Code-OSS based editor for
+  boxcode, without Microsoft branding, telemetry, or licensing.
 
 base: core20
 grade: stable
@@ -10,32 +16,32 @@ confinement: classic
 compression: lzo
 
 parts:
-  codium-insiders:
+  boxcode-ide-insiders:
     plugin: nil
     override-build: |
       set -eu
-      # Get .deb url
-      wget --quiet https://api.github.com/repos/VSCodium/vscodium-insiders/releases -O latest.json
-      VERSION=$( jq -r 'sort_by(.tag_name|split("-")[0]|split(".")|map(tonumber))|last.tag_name' latest.json )
-      DEB_URL=$( jq -r 'map(select(.tag_name == "'"${VERSION}"'"))|first.assets[].browser_download_url|select(endswith("'"_${SNAPCRAFT_TARGET_ARCH}.deb"'"))' latest.json )
+      # Get .deb url from the rolling linux-dev-latest release
+      wget --quiet https://api.github.com/repos/HolboxAI/boxcode-ide/releases/tags/linux-dev-latest -O release.json
+      DEB_URL=$( jq -r '.assets[].browser_download_url|select(endswith("'"_${SNAPCRAFT_TARGET_ARCH}.deb"'"))' release.json )
       DEB_NAME=$( basename "${DEB_URL}" )
+      # Set version from the .deb filename (the release tag is not a version)
+      VERSION=$( printf '%s' "${DEB_NAME}" | sed -n 's/^boxcode-ide_\(.*\)_'"${SNAPCRAFT_TARGET_ARCH}"'\.deb$/\1/p' )
+      snapcraftctl set-version "${VERSION}"
       # Downloading .deb
       wget "${DEB_URL}" -O "${SNAPCRAFT_PART_INSTALL}/${DEB_NAME}"
       # Unpacking .deb
       dpkg -x "${SNAPCRAFT_PART_INSTALL}/${DEB_NAME}" "${SNAPCRAFT_PART_INSTALL}"
       # Clean up
-      rm -f latest.json
+      rm -f release.json
       rm -f "${SNAPCRAFT_PART_INSTALL}/${DEB_NAME}"
-      # Set version
-      snapcraftctl set-version "${VERSION/-*/}"
       # Prepare GUI
       mkdir -p "${SNAPCRAFT_PART_INSTALL}/meta/gui"
-      cp "${SNAPCRAFT_PART_INSTALL}/usr/share/codium-insiders/resources/app/resources/linux/code.png" "${SNAPCRAFT_PART_INSTALL}/meta/gui/codium-insiders.png"
+      cp "${SNAPCRAFT_PART_INSTALL}/usr/share/boxcode-ide-insiders/resources/app/resources/linux/code.png" "${SNAPCRAFT_PART_INSTALL}/meta/gui/boxcode-ide-insiders.png"
       # Update paths
-      sed -i 's|Exec=/usr/share/codium/codium-insiders|Exec=codium-insiders --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders.desktop"
-      sed -i 's|Exec=/usr/share/codium/codium-insiders|Exec=codium-insiders --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders-url-handler.desktop"
-      sed -i 's|Icon=vscodium-insiders|Icon=${SNAP}/meta/gui/codium-insiders.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders.desktop"
-      sed -i 's|Icon=vscodium-insiders|Icon=${SNAP}/meta/gui/codium-insiders.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders-url-handler.desktop"
+      sed -i 's|Exec=/usr/share/boxcode-ide-insiders/boxcode-ide-insiders|Exec=boxcode-ide-insiders --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide-insiders.desktop"
+      sed -i 's|Exec=/usr/share/boxcode-ide-insiders/boxcode-ide-insiders|Exec=boxcode-ide-insiders --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide-insiders-url-handler.desktop"
+      sed -i 's|Icon=boxcode-ide-insiders|Icon=${SNAP}/meta/gui/boxcode-ide-insiders.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide-insiders.desktop"
+      sed -i 's|Icon=boxcode-ide-insiders|Icon=${SNAP}/meta/gui/boxcode-ide-insiders.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide-insiders-url-handler.desktop"
     build-packages:
       - wget
       - jq
@@ -76,7 +82,7 @@ parts:
       - -usr/share/icons
       - -usr/share/lintian
       - -usr/share/man
-      - -usr/share/codium-insiders/chrome-sandbox
+      - -usr/share/boxcode-ide-insiders/chrome-sandbox
     build-attributes:
       - enable-patchelf
     override-prime: |
@@ -89,16 +95,16 @@ parts:
 
   electron-launch:
     after:
-      - codium-insiders
+      - boxcode-ide-insiders
     plugin: dump
     source: snap/local/bin
 
 apps:
-  codium:
-    command: electron-launch $SNAP/usr/share/codium-insiders/bin/codium-insiders --no-sandbox
-    desktop: usr/share/applications/codium-insiders.desktop
-    common-id: codium-insiders.desktop
+  boxcode-ide-insiders:
+    command: electron-launch $SNAP/usr/share/boxcode-ide-insiders/bin/boxcode-ide-insiders --no-sandbox
+    desktop: usr/share/applications/boxcode-ide-insiders.desktop
+    common-id: boxcode-ide-insiders.desktop
 
   url-handler:
-    command: electron-launch $SNAP/usr/share/codium-insiders/bin/codium-insiders --open-url --no-sandbox
-    desktop: usr/share/applications/codium-insiders-url-handler.desktop
+    command: electron-launch $SNAP/usr/share/boxcode-ide-insiders/bin/boxcode-ide-insiders --open-url --no-sandbox
+    desktop: usr/share/applications/boxcode-ide-insiders-url-handler.desktop

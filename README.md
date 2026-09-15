@@ -34,9 +34,31 @@ xattr -cr "/Applications/Boxcode IDE.app"
 
 Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist (from using the CLI directly).
 
-### Linux (Flatpak)
+### Linux
 
-Linux packages are not on the rolling GitHub Release yet. Dispatch `CI - Build - Linux` with `generate_assets: true`, then from that run download **`flatpak-x86_64`** (or **`bin-x64`** for `.deb` / `.rpm` / AppImage):
+The `.deb`, `.rpm`, AppImage, Flatpak, and `.tar.gz` packages ship on the [rolling dev release](https://github.com/HolboxAI/boxcode-ide/releases/tag/linux-dev-latest). The tag updates in place on every release run. See the Release model section for how each format updates.
+
+#### .deb / .rpm
+
+Download the package for your architecture and install it. The package manager handles updates:
+
+```sh
+sudo apt install ./boxcode-ide_<version>_amd64.deb   # Debian / Ubuntu
+sudo dnf install ./boxcode-ide-<version>.x86_64.rpm   # Fedora / RHEL
+```
+
+#### AppImage
+
+Download the AppImage, make it executable, and run it. The AppImage updates itself with zsync:
+
+```sh
+chmod +x Boxcode-linux-x64-<version>.AppImage
+./Boxcode-linux-x64-<version>.AppImage
+```
+
+#### Flatpak
+
+The Flatpak is a sideloaded bundle. There is no Flathub listing yet:
 
 ```sh
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
@@ -44,7 +66,55 @@ flatpak install --user ./Boxcode-x86_64.flatpak
 flatpak run ai.holbox.Boxcode
 ```
 
-The sandbox can see the host home directory so the CLI in `~/.local/bin` still works. There is no Flathub listing yet — this is a sideloaded bundle.
+The sandbox can see the host home directory, so the CLI in `~/.local/bin` still works.
+
+#### Snap
+
+CI does not build the Snap. Build it locally with `snapcraft` and install it with `--dangerous`. There is no Snap Store listing yet:
+
+```sh
+cd stores/snapcraft/stable
+snapcraft
+sudo snap install --dangerous boxcode-ide_<version>_amd64.snap
+```
+
+The Snap is a classic-confinement bundle. It downloads the `.deb` from `linux-dev-latest` and wraps it.
+
+## Release model
+
+boxcode-ide ships as a rolling build. One bookmarkable tag per platform. CI updates the tag in place on every release run.
+
+### Rolling tags
+
+- **`macos-dev-latest`** — the macOS `.dmg` (and its `.zip` for the built-in updater).
+- **`linux-dev-latest`** — the Linux `.deb`, `.rpm`, AppImage, Flatpak, and `.tar.gz`.
+
+The tag never moves to a new name. CI runs `gh release create ... || true` and then `gh release upload --clobber`. A new build replaces the old assets at the same link.
+
+### Version scheme
+
+Each build gets a version like `1.126.06109`:
+
+- The prefix is the pinned upstream tag, `1.126.0`.
+- CI appends a time patch to the prefix.
+- The time patch is the day of the year times 24, plus the hour. It is four digits.
+
+So `1.126.06109` means upstream `1.126.0`, day 254, hour 13 (`254 × 24 + 13 = 6109`). Two builds in the same hour share a version.
+
+### Update feed
+
+The built-in updater reads a JSON feed. `updateUrl` in `product.json` points at `https://raw.githubusercontent.com/HolboxAI/boxcode-ide/update-feed`. The app fetches `${updateUrl}/${quality}/${platform}/${arch}/latest.json`. CI writes that file on every release run.
+
+Only two formats use the built-in updater:
+
+| Format | Update path |
+|---|---|
+| macOS `.zip` | built-in updater |
+| Linux `.tar.gz` | built-in updater |
+| Linux `.deb` / `.rpm` | package manager |
+| Linux AppImage | zsync |
+| Linux Flatpak | sideloaded bundle (no store yet) |
+| Linux Snap | classic bundle (no store yet) |
 
 ## Architecture
 
