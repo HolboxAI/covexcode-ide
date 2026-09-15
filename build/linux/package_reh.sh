@@ -24,6 +24,8 @@ export VSCODE_NODEJS_URLROOT='/download/release'
 export VSCODE_NODEJS_URLSUFFIX=''
 
 if [[ "${VSCODE_ARCH}" == "x64" ]]; then
+  # setupenv is skipped, so native modules compile on ubuntu-22.04 (glibc 2.35)
+  EXPECTED_GLIBC_VERSION="2.35"
   VSCODE_REMOTE_DEPENDENCIES_CONTAINER_NAME="vscodium/vscodium-linux-build-agent:focal-devtoolset-x64"
 
   export VSCODE_SKIP_SETUPENV=1
@@ -35,10 +37,14 @@ elif [[ "${VSCODE_ARCH}" == "arm64" ]]; then
   export VSCODE_SKIP_SYSROOT=1
   export USE_GNUPP2A=1
 elif [[ "${VSCODE_ARCH}" == "ppc64le" ]]; then
+  # sqlite3/parcel watcher from this sysroot need at least 2.30; floor at runner glibc
+  EXPECTED_GLIBC_VERSION="2.35"
   VSCODE_REMOTE_DEPENDENCIES_CONTAINER_NAME="vscodium/vscodium-linux-build-agent:focal-devtoolset-ppc64le"
   export VSCODE_SYSROOT_REPOSITORY='VSCodium/vscode-linux-build-agent'
   export VSCODE_SYSROOT_VERSION='20260706'
 elif [[ "${VSCODE_ARCH}" == "riscv64" ]]; then
+  # skip setupenv: riscv-forks node needs 2.33, native modules can need up to 2.35
+  EXPECTED_GLIBC_VERSION="2.35"
   VSCODE_REMOTE_DEPENDENCIES_CONTAINER_NAME="vscodium/vscodium-linux-build-agent:jammy-devtoolset-riscv64"
   NODE_VERSION="24.18.0"
   NODEJS_RELEASE_TAG="v${NODE_VERSION}-riscv64.1"
@@ -49,6 +55,8 @@ elif [[ "${VSCODE_ARCH}" == "riscv64" ]]; then
   export VSCODE_NODEJS_TAG="${NODEJS_RELEASE_TAG}"
   export VSCODE_NODEJS_NAME="${NODEJS_ASSET_NAME}"
 elif [[ "${VSCODE_ARCH}" == "loong64" ]]; then
+  # unofficial-builds node is built against glibc 2.38
+  EXPECTED_GLIBC_VERSION="2.38"
   VSCODE_REMOTE_DEPENDENCIES_CONTAINER_NAME="vscodium/vscodium-linux-build-agent:beige-devtoolset-loong64"
 
   export VSCODE_SKIP_SETUPENV=1
