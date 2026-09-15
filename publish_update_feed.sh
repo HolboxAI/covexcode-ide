@@ -19,19 +19,36 @@ fi
 
 GITHUB_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN}}"
 REPO="${GITHUB_REPOSITORY:-HolboxAI/boxcode-ide}"
-TAG="${UPDATE_RELEASE_TAG:-macos-dev-latest}"
 FEED_BRANCH="${UPDATE_FEED_BRANCH:-update-feed}"
 APP_NAME="${APP_NAME:-Boxcode}"
 OS_NAME="${OS_NAME:-osx}"
 GH_HOST="${GH_HOST:-github.com}"
 
-if [[ "${OS_NAME}" != "osx" ]]; then
-  echo "publish_update_feed.sh currently only writes the macOS darwin feed"
-  exit 0
-fi
+# Map the build OS to the VS Code update-feed platform + payload extension
+# and the rolling release tag that hosts the payload. Only the .zip (macOS)
+# and .tar.gz (Linux) ship the built-in updater; the .deb/.rpm update through
+# the package manager and AppImage/Flatpak/Snap use their own update paths,
+# so those formats never read this feed.
+case "${OS_NAME}" in
+  osx)
+    PLATFORM="darwin"
+    ASSET_EXT="zip"
+    DEFAULT_TAG="macos-dev-latest"
+    ;;
+  linux)
+    PLATFORM="linux"
+    ASSET_EXT="tar.gz"
+    DEFAULT_TAG="linux-dev-latest"
+    ;;
+  *)
+    echo "publish_update_feed.sh does not support OS_NAME=${OS_NAME}"
+    exit 0
+    ;;
+esac
+TAG="${UPDATE_RELEASE_TAG:-${DEFAULT_TAG}}"
 
-ASSET_NAME="${APP_NAME}-darwin-${VSCODE_ARCH}-${RELEASE_VERSION}.zip"
-VERSION_PATH="${VSCODE_QUALITY}/darwin/${VSCODE_ARCH}"
+ASSET_NAME="${APP_NAME}-${PLATFORM}-${VSCODE_ARCH}-${RELEASE_VERSION}.${ASSET_EXT}"
+VERSION_PATH="${VSCODE_QUALITY}/${PLATFORM}/${VSCODE_ARCH}"
 URL="https://${GH_HOST}/${REPO}/releases/download/${TAG}/${ASSET_NAME}"
 
 if [[ ! -f "assets/${ASSET_NAME}" ]]; then

@@ -50,7 +50,13 @@ env:
   APP_NAME: Boxcode
   ASSETS_REPOSITORY: ${{ github.repository }}
   BINARY_NAME: boxcode-ide
-  DISABLE_UPDATE: yes
+  # DISABLE_UPDATE=no bakes updateUrl into product.json so a shipped .tar.gz
+  # build can notice a newer rolling build (via the update-feed branch, see
+  # publish_update_feed.sh). The app still asks before downloading; it never
+  # silent-installs. Only the .tar.gz uses this: the .deb/.rpm update through
+  # the package manager and AppImage/Flatpak/Snap use their own update paths.
+  # Local ./dev/build.sh keeps DISABLE_UPDATE=yes.
+  DISABLE_UPDATE: no
   GH_REPO_PATH: ${{ github.repository }}
   GITHUB_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.head }}
   ORG_NAME: ${{ github.repository_owner }}
@@ -390,6 +396,29 @@ jobs:
             exit 1
           fi
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${files[@]}"
+
+      # The .tar.gz is the only Linux format with the built-in updater, so it
+      # is the only one that needs an update-feed entry. x64 only for now -
+      # mirror the macOS workflow's single-arch feed; repeat this step with a
+      # different VSCODE_ARCH to add arm64/etc. Skip (rather than fail) when
+      # x64 did not build, since the release job tolerates a partial arch
+      # matrix.
+      - name: Publish update feed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_NAME: Boxcode
+          OS_NAME: linux
+          VSCODE_QUALITY: stable
+          VSCODE_ARCH: x64
+          RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
+          UPDATE_RELEASE_TAG: linux-dev-latest
+        run: |
+          ASSET="Boxcode-linux-x64-${RELEASE_VERSION}.tar.gz"
+          if [[ ! -f "assets/${ASSET}" ]]; then
+            echo "Skipping update feed: assets/${ASSET} missing (x64 build failed)"
+            exit 0
+          fi
+          ./publish_update_feed.sh
 
   reh_linux:
     needs:
