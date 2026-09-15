@@ -29,9 +29,7 @@ import { CdpClient } from './cdpClient';
 import { boxcodeBinaryCandidates } from './boxcodeBinary';
 import {
 	parsePermissionCommandArgs,
-	permissionChoiceFromConfirmation,
 	permissionCommandUri,
-	permissionConfirmationData,
 	permissionOutcomeFromGate,
 	PermissionGate,
 	PERMISSION_COMMAND,
@@ -427,17 +425,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	void refreshFrameworkSurfaces();
 
 	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
-		// A confirmation-card click is a new ChatRequest, not a new turn.
-		// Resolve the in-flight ACP waiter and return -- starting another
-		// `session/prompt` here would interleave two agent turns.
-		const confirmation = permissionChoiceFromConfirmation(
-			request.acceptedConfirmationData,
-			request.rejectedConfirmationData,
-		);
-		if (confirmation) {
-			permissionGate.respond(confirmation.id, confirmation.choice);
-			return;
-		}
 		if (!vscode.workspace.isTrusted) {
 			stream.markdown(restrictedModeMarkdown());
 			return;
@@ -1109,19 +1096,12 @@ async function askPermission(
 	}
 
 	const { id, wait } = permissionGate.create();
-	// Native in-chat confirmation card when the proposed API is present.
-	// Clicks arrive as a follow-up ChatRequest (`acceptedConfirmationData`)
-	// and are consumed at the top of requestHandler. Command links below
-	// are the path that cannot deadlock: `session/prompt` is still awaiting
-	// this turn, so Send is disabled until it finishes.
-	if (typeof stream.confirmation === 'function') {
-		stream.confirmation(
-			`boxcode wants to ${action}`,
-			'Allow or reject this in chat to continue.',
-			permissionConfirmationData(id),
-			[allowLabel, rejectLabel],
-		);
-	}
+	// The Allow/Reject choice is the in-chat markdown command links below.
+	// A `stream.confirmation()` card would deadlock here: its click arrives
+	// as a follow-up ChatRequest while `session/prompt` is still awaiting, so
+	// VS Code keeps Send disabled until this handler settles (see
+	// `chatPermission.ts`'s own doc comment). The links instead invoke
+	// `boxcode.permission.respond` and resolve the gate on the same turn.
 	stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id));
 	const choice = await wait;
 	return permissionOutcomeFromGate(choice, allow, reject);

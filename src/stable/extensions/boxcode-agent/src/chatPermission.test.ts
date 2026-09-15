@@ -6,9 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
 	parsePermissionCommandArgs,
-	permissionChoiceFromConfirmation,
 	permissionCommandUri,
-	permissionConfirmationData,
 	permissionOutcomeFromGate,
 	PermissionGate,
 	PERMISSION_COMMAND,
@@ -52,14 +50,6 @@ test('parsePermissionCommandArgs() accepts only allow/reject with a string id', 
 	assert.equal(parsePermissionCommandArgs(['7', 'cancelled']), undefined);
 	assert.equal(parsePermissionCommandArgs([7, 'allow']), undefined);
 	assert.equal(parsePermissionCommandArgs([]), undefined);
-});
-
-test('permissionChoiceFromConfirmation() maps accepted/rejected payloads onto the gate', () => {
-	const data = permissionConfirmationData('3');
-	assert.deepEqual(permissionChoiceFromConfirmation([data], undefined), { id: '3', choice: 'allow' });
-	assert.deepEqual(permissionChoiceFromConfirmation(undefined, [data]), { id: '3', choice: 'reject' });
-	assert.equal(permissionChoiceFromConfirmation([{ kind: 'other' }], undefined), undefined);
-	assert.equal(permissionChoiceFromConfirmation(undefined, undefined), undefined);
 });
 
 test('permissionOutcomeFromGate() selects the ACP option instead of cancelled', () => {
