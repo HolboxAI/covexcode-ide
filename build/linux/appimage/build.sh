@@ -32,14 +32,26 @@ if [[ "${VSCODE_ARCH}" == "x64" ]]; then
 
   APP_NAME_LC="$( echo "${APP_NAME}" | awk '{print tolower($0)}' )"
 
+  # The .deb names its desktop icon after product.json's linuxIconName
+  # ("boxcode-ide"), not APP_NAME_LC ("boxcode") -- see prepare_vscode.sh.
+  # Substituting the icon from APP_NAME_LC produced a path the .deb never
+  # installs, so the recipe's `cp usr/share/pixmaps/<icon>.png` aborted the
+  # whole prepare_assets run and no .deb/.rpm/AppImage ever got uploaded.
+  # Read the same source of truth the .deb uses so the recipe finds the file
+  # that is actually there. CALLER_DIR is the vscode/ checkout this script is
+  # sourced from (see build/linux/prepare_assets.sh).
+  LINUX_ICON_NAME="$( jq -r '.linuxIconName' "${CALLER_DIR}/product.json" )"
+  if [[ -z "${LINUX_ICON_NAME}" || "${LINUX_ICON_NAME}" == "null" ]]; then
+    LINUX_ICON_NAME="${BINARY_NAME}"
+  fi
+  sed -i "s|@@ICON@@|${LINUX_ICON_NAME}|g" recipe.yml
+
   if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
     sed -i "s|@@APP_NAME@@|${APP_NAME}-Insiders|g" recipe.yml
     sed -i "s|@@BINARY_NAME@@|${BINARY_NAME}|g" recipe.yml
-    sed -i "s|@@ICON@@|${APP_NAME_LC}-insiders|g" recipe.yml
   else
     sed -i "s|@@APP_NAME@@|${APP_NAME}|g" recipe.yml
     sed -i "s|@@BINARY_NAME@@|${BINARY_NAME}|g" recipe.yml
-    sed -i "s|@@ICON@@|${APP_NAME_LC}|g" recipe.yml
   fi
 
   # workaround that enforces x86 ARCH for pkg2appimage having /__w/vscodium/vscodium/build/linux/appimage/VSCodium/VSCodium.AppDir/usr/share/codium/resources/app/node_modules/rc/index.js is of architecture armhf
