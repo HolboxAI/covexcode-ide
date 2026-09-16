@@ -22,11 +22,6 @@ export const PERMISSION_COMMAND = 'boxcode.permission.respond';
 
 export type PermissionChoice = 'allow' | 'reject' | 'cancelled';
 
-export interface PermissionConfirmationData {
-	kind: 'boxcode.permission';
-	id: string;
-}
-
 export class PermissionGate {
 	private nextId = 1;
 	private readonly pending = new Map<string, (choice: PermissionChoice) => void>();
@@ -79,36 +74,6 @@ export function parsePermissionCommandArgs(args: unknown[]): { id: string; choic
 		return undefined;
 	}
 	return { id, choice };
-}
-
-export function permissionConfirmationData(id: string): PermissionConfirmationData {
-	return { kind: 'boxcode.permission', id };
-}
-
-function isPermissionConfirmation(value: unknown): value is PermissionConfirmationData {
-	return typeof value === 'object' && value !== null
-		&& (value as { kind?: unknown }).kind === 'boxcode.permission'
-		&& typeof (value as { id?: unknown }).id === 'string';
-}
-
-/**
- * A `stream.confirmation()` click, if VS Code delivers it as a follow-up
- * ChatRequest instead of deadlocking, still has to resolve the in-flight
- * waiter rather than start a second `session/prompt`.
- */
-export function permissionChoiceFromConfirmation(
-	accepted: unknown[] | undefined,
-	rejected: unknown[] | undefined,
-): { id: string; choice: PermissionChoice } | undefined {
-	const acceptedHit = accepted?.find(isPermissionConfirmation);
-	if (acceptedHit) {
-		return { id: acceptedHit.id, choice: 'allow' };
-	}
-	const rejectedHit = rejected?.find(isPermissionConfirmation);
-	if (rejectedHit) {
-		return { id: rejectedHit.id, choice: 'reject' };
-	}
-	return undefined;
 }
 
 export function permissionOutcomeFromGate(
