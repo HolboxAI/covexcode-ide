@@ -8,7 +8,7 @@ The build scripts, patch set, GitHub Actions workflows, and source overlay under
 `check_cron_or_pr.sh`, `check_tags.sh`, `get_pr.sh`, `get_repo.sh`, `npmrc`,
 `prepare_assets.sh`, `prepare_checksums.sh`, `prepare_src.sh`,
 `prepare_vscode.sh`, `undo_telemetry.sh`, `update_upstream.sh`,
-`update_version.sh`, `upload_sourcemaps.sh`, `utils.sh`, and `version.sh` are
+`upload_sourcemaps.sh`, `utils.sh`, and `version.sh` are
 adapted from [VSCodium](https://github.com/VSCodium/vscodium), used and
 modified under the terms of its MIT license:
 
