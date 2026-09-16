@@ -1,0 +1,102 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsActions.ts b/src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsActions.ts
+index c729992b..8f736d31 100644
+--- a/src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsActions.ts
++++ b/src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsActions.ts
+@@ -476,7 +476,7 @@ export class ArchiveAgentSessionAction extends BaseAgentSessionAction {
+ 		super({
+ 			id: 'agentSession.archive',
+ 			title: localize2('archive', "Archive"),
+-			icon: Codicon.check,
++			icon: Codicon.archive,
+ 			keybinding: {
+ 				primary: KeyCode.Delete,
+ 				mac: { primary: KeyMod.CtrlCmd | KeyCode.Backspace },
+@@ -637,6 +637,16 @@ const renameSupportedSessionTypes = ContextKeyExpr.or(
+ 	ChatContextKeyExprs.isAgentHostSessionItem,
+ );
+ 
++const agentSessionItemSubmenu = new MenuId('chatAgentSessionItemSubmenu');
++MenuRegistry.appendMenuItem(MenuId.AgentSessionItemToolbar, {
++	submenu: agentSessionItemSubmenu,
++	title: localize2('moreActions', "More Actions..."),
++	icon: Codicon.kebabVertical,
++	group: 'navigation',
++	order: 10,
++	when: renameSupportedSessionTypes
++});
++
+ export class RenameAgentSessionAction extends BaseAgentSessionAction {
+ 
+ 	constructor() {
+@@ -655,12 +665,17 @@ export class RenameAgentSessionAction extends BaseAgentSessionAction {
+ 					renameSupportedSessionTypes
+ 				),
+ 			},
+-			menu: {
++			menu: [{
+ 				id: MenuId.AgentSessionsContext,
+ 				group: '1_edit',
+ 				order: 3,
+ 				when: renameSupportedSessionTypes
+-			}
++			}, {
++				id: agentSessionItemSubmenu,
++				group: 'navigation',
++				order: 1,
++				when: renameSupportedSessionTypes
++			}]
+ 		});
+ 	}
+ 
+@@ -680,6 +695,11 @@ export class RenameAgentSessionAction extends BaseAgentSessionAction {
+ 				await chatSessionsService.renameChatSession(session.resource, title, CancellationToken.None);
+ 			} else {
+ 				chatService.setChatSessionTitle(session.resource, title);
++
++				// Refresh the local sessions list so the updated title is reflected
++				// immediately. History sessions have no live chat model to emit a
++				// change event, so without this the title only updates on next refresh.
++				await chatSessionsService.refreshChatSessionItems([AgentSessionProviders.Local], CancellationToken.None);
+ 			}
+ 		}
+ 	}
+@@ -691,7 +711,7 @@ export class DeleteAgentSessionAction extends BaseAgentSessionAction {
+ 		super({
+ 			id: AGENT_SESSION_DELETE_ACTION_ID,
+ 			title: localize2('delete', "Delete..."),
+-			menu: {
++			menu: [{
+ 				id: MenuId.AgentSessionsContext,
+ 				group: '1_edit',
+ 				order: 4,
+@@ -699,7 +719,15 @@ export class DeleteAgentSessionAction extends BaseAgentSessionAction {
+ 					ChatContextKeys.agentSessionType.isEqualTo(AgentSessionProviders.Local),
+ 					ChatContextKeyExprs.isAgentHostSessionItem,
+ 				)
+-			}
++			}, {
++				id: agentSessionItemSubmenu,
++				group: 'navigation',
++				order: 2,
++				when: ContextKeyExpr.or(
++					ChatContextKeys.agentSessionType.isEqualTo(AgentSessionProviders.Local),
++					ChatContextKeyExprs.isAgentHostSessionItem,
++				)
++			}]
+ 		});
+ 	}
+ 
+diff --git a/src/vs/workbench/contrib/chat/browser/agentSessions/localAgentSessionsController.ts b/src/vs/workbench/contrib/chat/browser/agentSessions/localAgentSessionsController.ts
+index 1c774c1e..4a0cb14b 100644
+--- a/src/vs/workbench/contrib/chat/browser/agentSessions/localAgentSessionsController.ts
++++ b/src/vs/workbench/contrib/chat/browser/agentSessions/localAgentSessionsController.ts
+@@ -65,7 +65,8 @@ export class LocalAgentsSessionsController extends Disposable implements IChatSe
+ 		const removed: URI[] = [];
+ 
+ 		for (const item of newItems) {
+-			if (!this._items.has(item.resource)) {
++			const existing = this._items.get(item.resource);
++			if (!existing || !existing.isEqual(item)) {
+ 				addedOrUpdated.push(item);
+ 			}
+ 		}
