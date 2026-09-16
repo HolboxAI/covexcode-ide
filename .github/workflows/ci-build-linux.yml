@@ -51,7 +51,7 @@ env:
   ASSETS_REPOSITORY: ${{ github.repository }}
   BINARY_NAME: boxcode-ide
   # DISABLE_UPDATE=no bakes updateUrl into product.json so a shipped .tar.gz
-  # build can notice a newer rolling build (via the update-feed branch, see
+  # build can notice a newer versioned build (via the update-feed branch, see
   # publish_update_feed.sh). The app still asks before downloading; it never
   # silent-installs. Only the .tar.gz uses this: the .deb/.rpm update through
   # the package manager and AppImage/Flatpak/Snap use their own update paths.
@@ -89,6 +89,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ env.GITHUB_BRANCH }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Switch to relevant branch
@@ -150,6 +151,7 @@ jobs:
           SHOULD_BUILD: yes
           SHOULD_BUILD_REH: no
           SHOULD_BUILD_REH_WEB: no
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./build.sh
 
       - name: Compress vscode artifact
@@ -253,7 +255,7 @@ jobs:
           VSCODE_SYSROOT_VERSION: ${{ steps.build.outputs.VSCODE_SYSROOT_VERSION }}
           VSCODE_SYSROOT_PREFIX: ${{ steps.build.outputs.VSCODE_SYSROOT_PREFIX }}
         run: ./prepare_assets.sh
-        if: env.DISABLED != 'yes' && github.event.inputs.generate_assets == 'true'
+        if: env.DISABLED != 'yes' && (github.event.inputs.generate_assets == 'true' || github.event_name == 'push')
 
       - name: Upload assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -261,7 +263,7 @@ jobs:
           name: bin-${{ matrix.vscode_arch }}
           path: assets/
           retention-days: 3
-        if: env.DISABLED != 'yes' && github.event.inputs.generate_assets == 'true'
+        if: env.DISABLED != 'yes' && (github.event.inputs.generate_assets == 'true' || github.event_name == 'push')
 
   # The focal build-agent image cannot run flatpak-builder. Wrap the x64
   # .deb after bin-x64 is uploaded. x86_64 only — same limit as AppImage.
@@ -273,7 +275,7 @@ jobs:
     needs:
       - compile
       - build
-    if: ${{ always() && github.event.inputs.generate_assets == 'true' && !cancelled() && needs.compile.result == 'success' }}
+    if: ${{ always() && (github.event.inputs.generate_assets == 'true' || github.event_name == 'push') && !cancelled() && needs.compile.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       APP_NAME: Boxcode
@@ -328,8 +330,9 @@ jobs:
   # The macOS workflow already has this job (named "package" there). Linux
   # never did: `build` and `flatpak` only uploaded artifacts with a 3-day
   # retention and nothing published a release, so a user had no way to get a
-  # Linux package at all. This publishes a rolling `linux-dev-latest`
-  # prerelease - one stable, bookmarkable link - mirroring `macos-dev-latest`.
+  # Linux package at all. This publishes a versioned release per push to
+  # main (tag = RELEASE_VERSION) - mirroring the macOS `package` job - so
+  # every format for every arch lands under one immutable tag.
   #
   # Tolerate a partial arch matrix. If riscv64/loong64 fail but x64 + arm64
   # succeed, still publish the arches that built. `always()` runs this job
@@ -339,15 +342,14 @@ jobs:
   # job fails when x64 failed, or when flatpak-builder failed, and the
   # .deb/.rpm/AppImage still publish without it.
   #
-  # Only meaningful on workflow_dispatch: generate_assets is a dispatch-only
-  # input, so on push this `if` is false by construction (same as macOS).
+  # Runs on every push to main and on workflow_dispatch with generate_assets.
   release:
     name: release (linux)
     needs:
       - compile
       - build
       - flatpak
-    if: ${{ always() && github.event.inputs.generate_assets == 'true' && !cancelled() && needs.compile.result == 'success' }}
+    if: ${{ always() && (github.event.inputs.generate_assets == 'true' || github.event_name == 'push') && !cancelled() && needs.compile.result == 'success' }}
     runs-on: ubuntu-latest
     # Job-level permissions override the workflow-level `contents: read`
     # above (which exists so actions/checkout can fetch this private repo).
@@ -356,6 +358,8 @@ jobs:
     # default).
     permissions:
       contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -379,17 +383,17 @@ jobs:
           path: assets
         continue-on-error: true
 
-      - name: Publish to the rolling Linux dev-build release
+      - name: Publish the versioned Linux release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           shopt -s nullglob
-          TAG="linux-dev-latest"
+          TAG="${RELEASE_VERSION}"
           gh release create "$TAG" --repo "${{ github.repository }}" \
-            --title "Linux dev build (rolling)" \
-            --notes "Unsigned dev build, updated on every manual CI run with asset generation enabled. Not for public distribution. Formats: .deb and .rpm (x64/arm64/riscv64/loong64/ppc64le), AppImage and Flatpak (x64), the .tar.gz archive, and SHA-256/SHA-1 checksums." \
-            --prerelease 2>/dev/null || true
+            --title "boxcode-ide ${RELEASE_VERSION}" \
+            --notes "Unsigned dev build. Not for public distribution. Formats: .deb and .rpm (x64/arm64/riscv64/loong64/ppc64le), AppImage and Flatpak (x64), the .tar.gz archive, and SHA-256/SHA-1 checksums." \
+            --prerelease --generate-notes 2>/dev/null || true
           files=( assets/*.deb assets/*.rpm assets/*.AppImage assets/*.AppImage.zsync assets/*.tar.gz assets/*.flatpak assets/*.sha256 assets/*.sha1 )
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No assets to publish - every build leg produced nothing" >&2
@@ -411,7 +415,6 @@ jobs:
           VSCODE_QUALITY: stable
           VSCODE_ARCH: x64
           RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
-          UPDATE_RELEASE_TAG: linux-dev-latest
         run: |
           ASSET="Boxcode-linux-x64-${RELEASE_VERSION}.tar.gz"
           if [[ ! -f "assets/${ASSET}" ]]; then

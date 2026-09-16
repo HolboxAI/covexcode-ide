@@ -15,8 +15,8 @@ parts:
     plugin: nil
     override-build: |
       set -eu
-      # Get .deb url from the rolling linux-dev-latest release
-      wget --quiet https://api.github.com/repos/HolboxAI/boxcode-ide/releases/tags/linux-dev-latest -O release.json
+      # Get .deb url from the latest versioned release
+      wget --quiet https://api.github.com/repos/HolboxAI/boxcode-ide/releases/latest -O release.json
       DEB_URL=$( jq -r '.assets[].browser_download_url|select(endswith("'"_${SNAPCRAFT_TARGET_ARCH}.deb"'"))' release.json )
       DEB_NAME=$( basename "${DEB_URL}" )
       # Set version from the .deb filename (the release tag is not a version)

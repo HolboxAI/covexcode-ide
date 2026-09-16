@@ -15,7 +15,7 @@ export ORG_NAME=HolboxAI
 export OS_NAME=osx
 export VSCODE_ARCH=arm64
 export VSCODE_QUALITY=stable
-# Set DISABLE_UPDATE=no to bake in the rolling-build update feed
+# Set DISABLE_UPDATE=no to bake in the versioned-release update feed
 # (https://raw.githubusercontent.com/HolboxAI/boxcode-ide/update-feed).
 export DISABLE_UPDATE=yes
 export SHOULD_BUILD=yes
