@@ -61,8 +61,8 @@ fi
 # indicates they must be present" -- Gatekeeper never gets as far as its
 # unidentified-developer dialog. An ad-hoc re-sign is still not notarized
 # (right-click Open / xattr -d remains required), but it is a well-formed
-# signature, which is what actually lets a tester launch the rolling
-# macos-dev-latest zip. Skipped when a real Developer ID was already used
+# signature, which is what actually lets a tester launch the versioned
+# zip. Skipped when a real Developer ID was already used
 # above.
 if [[ -z "${CERTIFICATE_OSX_P12_DATA}" ]]; then
   echo "Ad-hoc signing unsigned .app so Finder launch works"

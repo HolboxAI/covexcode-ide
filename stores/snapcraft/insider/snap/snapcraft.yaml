@@ -1,8 +1,8 @@
 # boxcode-ide has no insider channel yet. This file is a template kept in
 # sync with the stable snap. It renames VSCodium's insider snap, but the
-# download below still points at the only boxcode release (linux-dev-latest)
-# because no insider tag exists. Do not build this snap until an insider
-# release ships; then point the download at that tag and re-verify the paths.
+# download below still points at the latest boxcode release because no
+# insider tag exists. Do not build this snap until an insider release ships;
+# then point the download at that tag and re-verify the paths.
 name: boxcode-ide-insiders
 adopt-info: boxcode-ide-insiders
 summary: Code editing. Redefined.
@@ -20,8 +20,8 @@ parts:
     plugin: nil
     override-build: |
       set -eu
-      # Get .deb url from the rolling linux-dev-latest release
-      wget --quiet https://api.github.com/repos/HolboxAI/boxcode-ide/releases/tags/linux-dev-latest -O release.json
+      # Get .deb url from the latest versioned release
+      wget --quiet https://api.github.com/repos/HolboxAI/boxcode-ide/releases/latest -O release.json
       DEB_URL=$( jq -r '.assets[].browser_download_url|select(endswith("'"_${SNAPCRAFT_TARGET_ARCH}.deb"'"))' release.json )
       DEB_NAME=$( basename "${DEB_URL}" )
       # Set version from the .deb filename (the release tag is not a version)

@@ -27,16 +27,26 @@ if [[ -z "${RELEASE_VERSION}" ]]; then
     fi
   fi
 
-  TIME_PATCH=$( printf "%04d" $(($(date +%-j) * 24 + $(date +%-H))) )
+  if [[ "${GITHUB_ACTIONS}" == "true" ]]; then
+    COMMIT_COUNT=$( git rev-list --count HEAD )
 
-  if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-    RELEASE_VERSION="${MS_TAG}${TIME_PATCH}-insider"
+    if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
+      RELEASE_VERSION="${MS_TAG}.${COMMIT_COUNT}-insider"
+    else
+      RELEASE_VERSION="${MS_TAG}.${COMMIT_COUNT}"
+    fi
   else
-    RELEASE_VERSION="${MS_TAG}${TIME_PATCH}"
+    TIME_PATCH=$( printf "%04d" $(($(date +%-j) * 24 + $(date +%-H))) )
+
+    if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
+      RELEASE_VERSION="${MS_TAG}${TIME_PATCH}-insider"
+    else
+      RELEASE_VERSION="${MS_TAG}${TIME_PATCH}"
+    fi
   fi
 else
   if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-    if [[ "${RELEASE_VERSION}" =~ ^([0-9]+\.[0-9]+\.[0-5])[0-9]+-insider$ ]];
+    if [[ "${RELEASE_VERSION}" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+-insider$ ]];
     then
       MS_TAG="${BASH_REMATCH[1]}"
     else
@@ -44,7 +54,7 @@ else
       exit 1
     fi
   else
-    if [[ "${RELEASE_VERSION}" =~ ^([0-9]+\.[0-9]+\.[0-5])[0-9]+$ ]];
+    if [[ "${RELEASE_VERSION}" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+$ ]];
     then
       MS_TAG="${BASH_REMATCH[1]}"
     else

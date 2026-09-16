@@ -24,7 +24,7 @@ irm https://boxcode.sh/install.ps1 | iex              # Windows (PowerShell)
 
 ### Install the IDE itself (macOS dev builds)
 
-Download the latest `.dmg` from the [rolling dev release](https://github.com/HolboxAI/boxcode-ide/releases/tag/macos-dev-latest) and drag **Boxcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
+Download the latest `.dmg` from the [latest release](https://github.com/HolboxAI/boxcode-ide/releases/latest) and drag **Boxcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
 
 ```sh
 xattr -cr "/Applications/Boxcode IDE.app"
@@ -36,7 +36,7 @@ Then open a folder in boxcode-ide and send a chat message — the first message 
 
 ### Linux
 
-The `.deb`, `.rpm`, AppImage, Flatpak, and `.tar.gz` packages ship on the [rolling dev release](https://github.com/HolboxAI/boxcode-ide/releases/tag/linux-dev-latest). The tag updates in place on every release run. See the Release model section for how each format updates.
+The `.deb`, `.rpm`, AppImage, Flatpak, and `.tar.gz` packages ship on the [latest release](https://github.com/HolboxAI/boxcode-ide/releases/latest). Every merge to `main` produces a new release with all formats. See the Release model section for how each format updates.
 
 #### .deb / .rpm
 
@@ -78,28 +78,30 @@ snapcraft
 sudo snap install --dangerous boxcode-ide_<version>_amd64.snap
 ```
 
-The Snap is a classic-confinement bundle. It downloads the `.deb` from `linux-dev-latest` and wraps it.
+The Snap is a classic-confinement bundle. It downloads the `.deb` from the latest release and wraps it.
 
 ## Release model
 
-boxcode-ide ships as a rolling build. One bookmarkable tag per platform. CI updates the tag in place on every release run.
+boxcode-ide ships versioned releases. Every merge to `main` produces one new release. The release is immutable. It carries every file format for every platform.
 
-### Rolling tags
-
-- **`macos-dev-latest`** — the macOS `.dmg` (and its `.zip` for the built-in updater).
-- **`linux-dev-latest`** — the Linux `.deb`, `.rpm`, AppImage, Flatpak, and `.tar.gz`.
-
-The tag never moves to a new name. CI runs `gh release create ... || true` and then `gh release upload --clobber`. A new build replaces the old assets at the same link.
+The latest release is always at [`/releases/latest`](https://github.com/HolboxAI/boxcode-ide/releases/latest). Older releases keep their own versioned tags.
 
 ### Version scheme
 
-Each build gets a version like `1.126.06109`:
+Each release gets a version like `1.126.0.233`:
 
-- The prefix is the pinned upstream tag, `1.126.0`.
-- CI appends a time patch to the prefix.
-- The time patch is the day of the year times 24, plus the hour. It is four digits.
+- The first three parts are the pinned upstream tag, `1.126.0`.
+- The fourth part is the build counter: the number of commits on `main`.
 
-So `1.126.06109` means upstream `1.126.0`, day 254, hour 13 (`254 × 24 + 13 = 6109`). Two builds in the same hour share a version.
+CI computes the counter with `git rev-list --count HEAD`. The counter is monotonic and identical across the Linux, macOS, and Windows workflows that run in parallel on the same push. So all three converge on one tag.
+
+### What one release holds
+
+| Platform | Formats |
+|---|---|
+| Linux | `.deb`, `.rpm`, AppImage, Flatpak, `.tar.gz`, and checksums |
+| macOS | `.dmg` and `.zip` |
+| Windows | `.zip`, `.exe`, `.msi`, and checksums |
 
 ### Update feed
 

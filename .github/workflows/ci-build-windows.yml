@@ -121,6 +121,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ env.GITHUB_BRANCH }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Switch to relevant branch
@@ -278,11 +279,11 @@ jobs:
 
       - name: Prepare assets
         run: ./prepare_assets.sh
-        if: github.event.inputs.generate_assets == 'true'
+        if: (github.event.inputs.generate_assets == 'true' || github.event_name == 'push')
 
       - name: Prepare checksums
         run: ./prepare_checksums.sh
-        if: github.event.inputs.generate_assets == 'true'
+        if: (github.event.inputs.generate_assets == 'true' || github.event_name == 'push')
 
       - name: Upload assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -290,4 +291,56 @@ jobs:
           name: bin-${{ matrix.vscode_arch }}
           path: assets/
           retention-days: 3
-        if: github.event.inputs.generate_assets == 'true'
+        if: (github.event.inputs.generate_assets == 'true' || github.event_name == 'push')
+
+  # Windows never published a release - `build` only uploaded artifacts with
+  # a 3-day retention, so a tester had no stable download link. This adds a
+  # versioned release per push to main (tag = RELEASE_VERSION), so every
+  # Windows format lands under the same immutable tag the Linux/macOS
+  # workflows create. `always()` + `pattern: bin-*` tolerate a partial arch
+  # matrix: if arm64 fails but x64 built, still publish x64.
+  release:
+    name: release (windows)
+    needs:
+      - changes
+      - compile
+      - build
+    if: ${{ always() && needs.changes.outputs.build-relevant == 'true' && (github.event.inputs.generate_assets == 'true' || github.event_name == 'push') && !cancelled() && needs.compile.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # merge-multiple flattens every bin-* artifact into one assets/ dir.
+      # Filenames never collide across arches: each .zip/.exe/.msi name
+      # carries its arch, and arm64 skips the .msi (msi is x64/ia32 only).
+      - name: Download packages (all arches)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bin-*
+          merge-multiple: true
+          path: assets
+
+      - name: Publish the versioned Windows release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          shopt -s nullglob
+          TAG="${RELEASE_VERSION}"
+          gh release create "$TAG" --repo "${{ github.repository }}" \
+            --title "boxcode-ide ${RELEASE_VERSION}" \
+            --notes "Unsigned dev build. Not for public distribution." \
+            --prerelease --generate-notes 2>/dev/null || true
+          files=( assets/*.zip assets/*.exe assets/*.msi assets/*.sha256 assets/*.sha1 )
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No assets to publish - every build leg produced nothing" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${files[@]}"
