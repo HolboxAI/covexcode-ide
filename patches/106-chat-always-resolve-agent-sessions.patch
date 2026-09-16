@@ -1,0 +1,23 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsModel.ts b/src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsModel.ts
+index bacacbac..cf7ea1cb 100644
+--- a/src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsModel.ts
++++ b/src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsModel.ts
+@@ -484,7 +484,6 @@ export class AgentSessionsModel extends Disposable implements IAgentSessionsMode
+ 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
+ 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+ 		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
+-		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
+ 	) {
+ 		super();
+ 
+@@ -586,10 +585,6 @@ export class AgentSessionsModel extends Disposable implements IAgentSessionsMode
+ 	}
+ 
+ 	private resolveProvider(provider: string, options: { refreshProvider: boolean }): Promise<void> {
+-		if (this.chatEntitlementService.sentiment.hidden) {
+-			return Promise.resolve(); // don't resolve if AI features are disabled
+-		}
+-
+ 		let resolver = this.resolvers.get(provider);
+ 		if (!resolver) {
+ 			resolver = new ThrottledDelayer<void>(500);
