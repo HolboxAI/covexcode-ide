@@ -70,6 +70,6 @@ export function createTurnUsage(): TurnUsage {
  * footnote goes through `stream.markdown()` as chat text, so the number
  * must render identically on every machine, not per the user's locale.
  */
-function groupDigits(value: number): string {
+export function groupDigits(value: number): string {
 	return Math.trunc(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }

@@ -101,6 +101,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Model name to request from the configured endpoint. Set automatically by the setup flow; run `boxcode: Change Provider / Model / API Key` to change it."
+        },
+        "boxcode.costPerMillionTokens": {
+          "type": "number",
+          "default": 0.35,
+          "markdownDescription": "Blended USD price per million tokens, used for the `~$` estimate in the chat usage footnote. Defaults to a blended DeepSeek input+output estimate; set to 0 to show token totals only. The authoritative per-model figure should come from boxcode itself (see `docs/BACKLOG.md`, cost/usage meter)."
         }
       }
     }
