@@ -31,7 +31,7 @@ TUNNEL_APPLICATION_NAME="$( node -p "require(\"../product.json\").tunnelApplicat
 NAME_LONG="$( node -p "require(\"../product.json\").nameLong" )"
 
 npm pack @vscode/openssl-prebuilt@0.0.11
-mkdir openssl
+mkdir -p openssl
 tar -xvzf vscode-openssl-prebuilt-0.0.11.tgz --strip-components=1 --directory=openssl
 
 if [[ "${OS_NAME}" == "osx" ]]; then
