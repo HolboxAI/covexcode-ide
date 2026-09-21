@@ -94,5 +94,19 @@ export function findLocalhostUrl(text: string): string | undefined {
 	// path class above does not stop at `.` / `,` / `;`, so
 	// "http://localhost:3000." would otherwise be opened as-is and miss.
 	const url = match[0].replace(/[.,;:]+$/, '');
+	// The pattern matches the loopback host as a *prefix* (no word boundary),
+	// so `http://localhost.evil.com` slips through it and
+	// `canonicalizeLocalhostUrl` returns that non-loopback URL unchanged --
+	// the exact thing this guard exists to prevent. Parse for real and reject
+	// anything whose actual hostname is not one of the three loopback names.
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return undefined;
+	}
+	if (!LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) {
+		return undefined;
+	}
 	return canonicalizeLocalhostUrl(url);
 }

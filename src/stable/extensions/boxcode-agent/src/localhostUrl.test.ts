@@ -38,6 +38,14 @@ test('findLocalhostUrl() returns undefined for a real, non-local URL', () => {
 	assert.equal(findLocalhostUrl('Deploying to https://myapp.example.com/dashboard'), undefined);
 });
 
+test('findLocalhostUrl() rejects a host that only *starts* with a loopback name', () => {
+	// `localhost.evil.com` matches the regex as a prefix of a longer hostname;
+	// it must not be treated as a local server worth opening.
+	assert.equal(findLocalhostUrl('check http://localhost.evil.com/phish'), undefined);
+	assert.equal(findLocalhostUrl('check http://127.0.0.1.evil.com/phish'), undefined);
+	assert.equal(findLocalhostUrl('check http://0.0.0.0.evil.com:80/x'), undefined);
+});
+
 test('findLocalhostUrl() returns undefined for plain text with no URL at all', () => {
 	assert.equal(findLocalhostUrl('node_modules present'), undefined);
 });
