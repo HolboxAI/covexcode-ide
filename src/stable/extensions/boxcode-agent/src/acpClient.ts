@@ -169,6 +169,27 @@ export type InteractInBrowserOutcome =
 	| { outcome: 'screenshot'; mimeType: string; data: string }
 	| { outcome: 'failed'; reason: string };
 
+/**
+ * One rollback-journal entry, mirroring `protocol.rs::ChangeEntry` exactly.
+ * `action` is the pre-planned undo for this file (`restore` = put the
+ * pre-session text back, `delete` = the file didn't exist before the
+ * session, `blocked` = boxcode only ran a shell command against it, so it
+ * has no before-state to restore and cannot be undone), and `reason` is
+ * only present when the entry is `blocked`.
+ */
+export interface ChangeEntry {
+	path: string;
+	turn: number;
+	touches: number;
+	action: 'restore' | 'delete' | 'blocked';
+	reason?: string;
+}
+
+export interface ListChangesResponse {
+	changes: ChangeEntry[];
+	shellWarning?: string;
+}
+
 interface PendingRequest {
 	resolve: (result: unknown) => void;
 	reject: (error: Error) => void;
@@ -356,13 +377,13 @@ export class AcpClient extends EventEmitter {
 	 * `text` stays available as a convenience for the common no-attachment
 	 * case.
 	 */
-	async prompt(sessionId: string, content: string | PromptContentBlock[]): Promise<StopReason> {
+	async prompt(sessionId: string, content: string | PromptContentBlock[]): Promise<{ stopReason: StopReason; turn: number }> {
 		const prompt: PromptContentBlock[] = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
 		const result = (await this.request('session/prompt', {
 			sessionId,
 			prompt,
-		})) as { stopReason: StopReason };
-		return result.stopReason;
+		})) as { stopReason: StopReason; turn: number };
+		return result;
 	}
 
 	/**
@@ -370,10 +391,28 @@ export class AcpClient extends EventEmitter {
 	 * on boxcode's own side (local disk I/O, never an LLM round trip), so
 	 * there's nothing to stream here; the returned summary is the whole
 	 * answer.
+	 *
+	 * `options` narrows the rollback to the journal entries boxcode selects:
+	 * `files` spends only the named paths (matched by display or resolved
+	 * path), `turn` spends only files first touched in that turn, and
+	 * `restoreBeforeTurn` puts every file touched at that turn or later back
+	 * to its state just before that turn began (the per-turn form of `turn`,
+	 * which undoes a file edited across turns without half-undoing it). Omit
+	 * all three for the pre-existing all-or-nothing undo. Every field maps
+	 * straight onto `protocol.rs::RollbackRequest`.
 	 */
-	async rollback(sessionId: string): Promise<string> {
-		const result = (await this.request('session/rollback', { sessionId })) as { summary: string };
+	async rollback(sessionId: string, options?: { files?: string[]; turn?: number; restoreBeforeTurn?: number }): Promise<string> {
+		const result = (await this.request('session/rollback', { sessionId, ...options })) as { summary: string };
 		return result.summary;
+	}
+
+	/**
+	 * `session/list_changes` -- reads the rollback journal without spending
+	 * anything, so the UI can offer a per-file/per-turn picker before it
+	 * commits to an undo. Synchronous like `rollback` (local journal read).
+	 */
+	async listChanges(sessionId: string): Promise<ListChangesResponse> {
+		return (await this.request('session/list_changes', { sessionId })) as ListChangesResponse;
 	}
 
 	dispose(): void {
