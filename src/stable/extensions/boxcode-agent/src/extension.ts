@@ -1123,7 +1123,9 @@ function permissionDecisionMarkdown(
 	line.appendText(action);
 	line.appendMarkdown('.\n\n');
 	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
-	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})\n\n`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(check-all) Always allow](${permissionCommandUri(id, 'allow-always')})`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(circle-slash) Always reject](${permissionCommandUri(id, 'deny-always')})\n\n`);
 	return line;
 }
 
