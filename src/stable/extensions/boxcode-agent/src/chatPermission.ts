@@ -20,7 +20,7 @@ import { permissionOutcomeFromChoice } from './permissionOutcome';
 
 export const PERMISSION_COMMAND = 'boxcode.permission.respond';
 
-export type PermissionChoice = 'allow' | 'reject' | 'cancelled';
+export type PermissionChoice = 'allow' | 'reject' | 'allow-always' | 'deny-always' | 'cancelled';
 
 export class PermissionGate {
 	private nextId = 1;
@@ -40,7 +40,13 @@ export class PermissionGate {
 		if (typeof id !== 'string') {
 			return false;
 		}
-		if (choice !== 'allow' && choice !== 'reject' && choice !== 'cancelled') {
+		if (
+			choice !== 'allow' &&
+			choice !== 'reject' &&
+			choice !== 'allow-always' &&
+			choice !== 'deny-always' &&
+			choice !== 'cancelled'
+		) {
 			return false;
 		}
 		const resolve = this.pending.get(id);
@@ -70,7 +76,12 @@ export function parsePermissionCommandArgs(args: unknown[]): { id: string; choic
 	if (typeof id !== 'string') {
 		return undefined;
 	}
-	if (choice !== 'allow' && choice !== 'reject') {
+	if (
+		choice !== 'allow' &&
+		choice !== 'reject' &&
+		choice !== 'allow-always' &&
+		choice !== 'deny-always'
+	) {
 		return undefined;
 	}
 	return { id, choice };
@@ -81,16 +92,19 @@ export function permissionOutcomeFromGate(
 	allow: PermissionOption | undefined,
 	reject: PermissionOption | undefined,
 ): RequestPermissionOutcome {
-	if (choice === 'allow') {
+	if (choice === 'allow' || choice === 'allow-always') {
 		return permissionOutcomeFromChoice(allow?.name ?? 'Allow', allow, reject);
 	}
-	if (choice === 'reject') {
+	if (choice === 'reject' || choice === 'deny-always') {
 		return permissionOutcomeFromChoice(reject?.name ?? 'Reject', allow, reject);
 	}
 	return { outcome: 'cancelled' };
 }
 
-export function permissionCommandUri(id: string, choice: 'allow' | 'reject'): string {
+export function permissionCommandUri(
+	id: string,
+	choice: 'allow' | 'reject' | 'allow-always' | 'deny-always',
+): string {
 	const encoded = encodeURIComponent(JSON.stringify([id, choice]));
 	return `command:${PERMISSION_COMMAND}?${encoded}`;
 }
