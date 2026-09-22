@@ -5,6 +5,12 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {
+	PERMISSION_STORE_RELATIVE_PATH,
+	PermissionStore,
+	parsePermissionStore,
+	serializePermissionStore,
+} from './permissionStore';
 import * as vscode from 'vscode';
 import {
 	AcpClient,
@@ -403,7 +409,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!parsed) {
 				return;
 			}
-			permissionGate.respond(parsed.id, parsed.choice);
+			if (permissionGate.respond(parsed.id, parsed.choice)) {
+				rememberPermissionChoice(parsed.id, parsed.choice);
+			}
 		}),
 		vscode.commands.registerCommand(TRUST_COMMAND, async () => {
 			await requestFolderTrust();
@@ -1077,6 +1085,62 @@ async function runCustomEndpointFlow(
  * (`stream.confirmation`) would deadlock behind VS Code's one-request-at-a-
  * time Send button.
  */
+/** Where a project's accumulated permission rules live. */
+function permissionStoreFile(cwd: string): string {
+	return path.join(cwd, PERMISSION_STORE_RELATIVE_PATH);
+}
+
+/**
+ * Reads the project's permission rules. A missing or unreadable file is not
+ * an error -- it just means nothing has been granted yet.
+ */
+function loadPermissionStore(cwd: string): PermissionStore {
+	try {
+		return new PermissionStore(
+			parsePermissionStore(fs.readFileSync(permissionStoreFile(cwd), 'utf8')).rules,
+		);
+	} catch {
+		return new PermissionStore([]);
+	}
+}
+
+/** Details a pending prompt needs so a later "always" choice can be stored. */
+const pendingPermissionContext = new Map<string, { cwd: string; action: string }>();
+
+/**
+ * Records an "Always allow" / "Deny always" choice against the project.
+ *
+ * Rules match the action exactly and never as a substring, so granting one
+ * command cannot silently authorise a different command that merely starts
+ * the same way.
+ */
+function rememberPermissionChoice(id: string, choice: string): void {
+	const context = pendingPermissionContext.get(id);
+	pendingPermissionContext.delete(id);
+	if (!context || (choice !== 'allow-always' && choice !== 'deny-always')) {
+		return;
+	}
+	try {
+		const store = loadPermissionStore(context.cwd);
+		const added = store.addRule({
+			kind: '',
+			match: 'exact',
+			pattern: context.action,
+			decision: choice === 'allow-always' ? 'allow' : 'deny',
+			createdAt: new Date().toISOString(),
+			source: 'user',
+		});
+		if (!added) {
+			return;
+		}
+		const file = permissionStoreFile(context.cwd);
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, serializePermissionStore(store.toFile()), 'utf8');
+	} catch {
+		// A permission file we cannot write must never break the tool call.
+	}
+}
+
 async function askPermission(
 	request: RequestPermissionRequest,
 	diffContentProvider: DiffContentProvider,
@@ -1095,7 +1159,18 @@ async function askPermission(
 		await showDiff(diff, diffContentProvider, cwd);
 	}
 
+	// Incremental permissions: if the user already granted (or refused) this
+	// exact action, answer from the stored rule instead of prompting again.
+	const remembered = loadPermissionStore(cwd).decide({ kind: '', action });
+	if (remembered === 'allow' && allow) {
+		return { outcome: 'selected', optionId: allow.optionId };
+	}
+	if (remembered === 'deny' && reject) {
+		return { outcome: 'selected', optionId: reject.optionId };
+	}
+
 	const { id, wait } = permissionGate.create();
+	pendingPermissionContext.set(id, { cwd, action });
 	// The Allow/Reject choice is the in-chat markdown command links below.
 	// A `stream.confirmation()` card would deadlock here: its click arrives
 	// as a follow-up ChatRequest while `session/prompt` is still awaiting, so
