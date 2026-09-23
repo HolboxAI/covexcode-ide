@@ -46,6 +46,7 @@ import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './loc
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import { createTurnUsage, TurnUsage } from './turnUsage';
+import { createSessionUsage, sessionUsageFootnote, SessionUsage } from './sessionUsage';
 import {
 	describeRestrictedMode,
 	folderTrustKey,
@@ -74,6 +75,19 @@ const DIFF_SCHEME = 'boxcode-diff';
  * even though a login shell sees it fine). */
 function configuredBoxcodePath(): string {
 	return vscode.workspace.getConfiguration('boxcode').get<string>('path', '').trim();
+}
+
+/** USD per 1M tokens for the cost half of the usage footer, or `undefined`
+ * when the setting is <= 0 so the footer falls back to tokens-only rather
+ * than fabricating a dollar figure. A blended estimate, not an invoice --
+ * the authoritative per-model figure should come from boxcode itself (see
+ * `docs/BACKLOG.md`, cost/usage meter). */
+function sessionCostRate(): number | undefined {
+	const value = vscode.workspace.getConfiguration('boxcode').get<number>('costPerMillionTokens', 0.35);
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+		return undefined;
+	}
+	return value;
 }
 
 /** Thrown by `ensureCredentials` when the user cancels the setup prompt -- distinguished from a real launch failure so the chat message shown for each reads correctly. */
@@ -174,6 +188,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	// actually starts a new ACP session instead of keeping the one spawned
 	// against `$HOME` on the chat-first landing page.
 	let sessionCwd: string | undefined;
+	// Running token total for the current ACP session -- the cumulative half
+	// of the end-of-turn usage footer, reset alongside the session in
+	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
+	const sessionUsage = createSessionUsage();
 	const permissionGate = new PermissionGate();
 	const promptedTrustFolders = new Set<string>();
 	// Persists for the life of the extension host, not just one turn -- a
@@ -305,6 +323,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessionId = undefined;
 		ready = undefined;
 		sessionCwd = undefined;
+		sessionUsage.reset();
 	}
 
 	async function requestFolderTrust(): Promise<void> {
@@ -478,7 +497,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage);
 			}
 		};
 		const onPermissionRequest = (
@@ -529,8 +548,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			// Rendered only on a clean turn end, never after an error -- a
 			// failed turn's partial usage would be a misleading number. One
 			// line regardless of how many `usage_update`s arrived, since a
-			// multi-response turn emits one per LLM response.
-			const footnote = turnUsage.footnote();
+			// multi-response turn emits one per LLM response. The session
+			// total is cumulative and includes partial spend from an earlier
+			// failed turn, which is the honest number for cost.
+			const footnote = [turnUsage.footnote(), sessionUsageFootnote(sessionUsage.total(), sessionCostRate())]
+				.filter((line): line is string => line !== undefined)
+				.join(' · ');
 			if (footnote) {
 				stream.markdown(`\n\n*${footnote}*\n`);
 			}
@@ -807,6 +830,7 @@ function renderUpdate(
 	openedDevServerUrls: Set<string>,
 	shownBrowserPreviews: Set<string>,
 	turnUsage: TurnUsage,
+	sessionUsage: SessionUsage,
 ): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -854,10 +878,11 @@ function renderUpdate(
 		}
 		case 'usage_update':
 			// Consumed, not rendered: one footnote at end of turn (see
-			// createTurnUsage) rather than a line per update, because a
-			// multi-response turn would otherwise print several counts
-			// mid-stream.
+			// createTurnUsage / sessionUsage) rather than a line per update,
+			// because a multi-response turn would otherwise print several
+			// counts mid-stream.
 			turnUsage.record(update);
+			sessionUsage.record(update);
 			break;
 		default:
 			// Every other legal ACP v1 variant boxcode doesn't emit yet --
