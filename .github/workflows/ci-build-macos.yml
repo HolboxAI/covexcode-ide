@@ -343,7 +343,16 @@ jobs:
       - name: Extract compiled build output
         run: tar -xzf compiled.tar.gz
 
+      # Developer ID + notarization: build/osx/prepare_assets.sh signs when
+      # CERTIFICATE_OSX_P12_DATA is set (repo Actions secrets). Without them
+      # it falls back to ad-hoc sign so the .app still launches.
       - name: Prepare assets
+        env:
+          CERTIFICATE_OSX_P12_DATA: ${{ secrets.CERTIFICATE_OSX_P12_DATA }}
+          CERTIFICATE_OSX_P12_PASSWORD: ${{ secrets.CERTIFICATE_OSX_P12_PASSWORD }}
+          CERTIFICATE_OSX_APPLE_ID: ${{ secrets.CERTIFICATE_OSX_APPLE_ID }}
+          CERTIFICATE_OSX_TEAM_ID: ${{ secrets.CERTIFICATE_OSX_TEAM_ID }}
+          CERTIFICATE_OSX_APP_PASSWORD: ${{ secrets.CERTIFICATE_OSX_APP_PASSWORD }}
         run: ./prepare_assets.sh
 
       - name: Upload assets
@@ -360,19 +369,20 @@ jobs:
       # harmless now with a single arm64 leg, left as-is since it's still
       # correct (idempotent create), just no longer load-bearing. Re-add a
       # second leg's worth of care here if x64 ever comes back into scope.
-      # No code-signing/notarization exists yet (open decision, see
-      # README.md), so this is explicitly labeled an unsigned dev build -
-      # macOS Gatekeeper will warn on first launch, which is expected until
-      # that's set up for real.
       - name: Publish the versioned macOS release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           TAG="${RELEASE_VERSION}"
+          if [[ -n "${{ secrets.CERTIFICATE_OSX_P12_DATA }}" ]]; then
+            NOTES="Developer ID–signed and notarized macOS build. Download the .zip or .dmg and open normally — Gatekeeper should accept it after Apple notarization stapling."
+          else
+            NOTES="Unsigned (ad-hoc) macOS build. Gatekeeper may warn on first launch (right-click → Open). Add CERTIFICATE_OSX_* repo secrets for Developer ID signing + notarization."
+          fi
           gh release create "$TAG" --repo "${{ github.repository }}" \
             --title "boxcode-ide ${RELEASE_VERSION}" \
-            --notes "Unsigned dev build. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`). The .app is ad-hoc signed so that warning is actually reachable; without it macOS refuses to launch at all." \
+            --notes "$NOTES" \
             --prerelease --generate-notes 2>/dev/null || true
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip assets/*.dmg
 
