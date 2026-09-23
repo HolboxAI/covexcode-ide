@@ -283,11 +283,23 @@ jobs:
       # script), and SHOULD_BUILD_REH/SHOULD_BUILD_REH_WEB above now stop
       # build.sh from even producing those directories, so archiving them
       # here would fail outright rather than just waste space.
+      # prepare_assets.sh Developer ID signing runs
+      # `node vscode/build/darwin/sign.ts`, which needs the script, entitlements,
+      # .npmrc (electron version), and product.json. The .app alone is not enough —
+      # confirmed by package failing with MODULE_NOT_FOUND for sign.ts after #107.
       - name: Archive compiled build output
         run: |
           tar -czf compiled.tar.gz \
             "VSCode-darwin-${VSCODE_ARCH}" \
-            vscode/product.json
+            vscode/product.json \
+            vscode/.npmrc \
+            vscode/build/darwin/sign.ts \
+            vscode/build/azure-pipelines/darwin/app-entitlements.plist \
+            vscode/build/azure-pipelines/darwin/helper-entitlements.plist \
+            vscode/build/azure-pipelines/darwin/helper-gpu-entitlements.plist \
+            vscode/build/azure-pipelines/darwin/helper-plugin-entitlements.plist \
+            vscode/build/azure-pipelines/darwin/helper-renderer-entitlements.plist \
+            vscode/build/package.json
 
       # Short retention: this is a same-run relay to the package job, not
       # meant as long-term storage.
@@ -330,6 +342,11 @@ jobs:
           ref: ${{ env.GITHUB_BRANCH }}
           persist-credentials: false
 
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+
       - name: Download compiled build output
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -342,6 +359,14 @@ jobs:
       # the executable bits tar preserved on the way in.
       - name: Extract compiled build output
         run: tar -xzf compiled.tar.gz
+
+      # sign.ts imports @electron/osx-sign from vscode/build; the package job
+      # never ran get_repo/build, so install just those deps here (only when
+      # we will actually Developer ID–sign).
+      - name: Install macOS signing dependencies
+        if: ${{ secrets.CERTIFICATE_OSX_P12_DATA != '' }}
+        working-directory: vscode/build
+        run: npm install --no-save --no-package-lock @electron/osx-sign @malept/cross-spawn-promise
 
       # Developer ID + notarization: build/osx/prepare_assets.sh signs when
       # CERTIFICATE_OSX_P12_DATA is set (repo Actions secrets). Without them
