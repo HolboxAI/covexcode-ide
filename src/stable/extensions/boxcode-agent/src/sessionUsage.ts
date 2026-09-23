@@ -76,6 +76,24 @@ export function sessionUsageFootnote(totalTokens: number, costPerMillionTokens?:
 }
 
 /**
+ * The compact status-bar label for the session total, or `undefined` when the
+ * session has recorded no usage yet (keeps the indicator hidden before the
+ * first real spend). Mirrors `sessionUsageFootnote` but drops the "this
+ * session" suffix so it reads naturally as a persistent meter.
+ */
+export function sessionUsageMeter(totalTokens: number, costPerMillionTokens?: number): string | undefined {
+	if (totalTokens <= 0) {
+		return undefined;
+	}
+	const tokens = `${groupDigits(totalTokens)} tokens`;
+	if (costPerMillionTokens === undefined) {
+		return tokens;
+	}
+	const cost = (totalTokens * costPerMillionTokens) / 1_000_000;
+	return `${tokens} · ~${formatDollars(cost)}`;
+}
+
+/**
  * A USD estimate rendered at a precision honest to its magnitude -- whole
  * dollars to cents, cents to four decimals, sub-cent to six -- `$1.25`,
  * `$0.035`, `$0.00035`, never a misleading `$0.00`.
