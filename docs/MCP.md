@@ -23,6 +23,26 @@ So MCP is not a new channel, a new subsystem, or a new protocol to invent. It is
 implementations joined at a field that both sides already agree on**. That is what makes
 this worth doing now rather than after a from-scratch connector framework.
 
+### Accepted is not the same as understood (proven, not assumed)
+
+Fact 2 above was read from source; it has since been **confirmed by execution**. The
+installed CLI was driven with a `session/new` whose `mcpServers` entry pointed at a marker
+command that writes a file when spawned:
+
+- `initialize` returned `agentCapabilities` with `promptCapabilities.image` and a `session`
+  key, and **no MCP capability of any kind**
+- `session/new` carried a real `mcpServers` entry and returned a session id, **with no error**
+- the marker file **was never created** — the server was not spawned
+
+This is the failure mode that matters. `mcpServers` is *required* by the v1 schema, so an
+agent that has no MCP support still **accepts the field, reports success, and connects
+nothing**. From the client side that is indistinguishable from working MCP. For a feature
+that spawns processes and grants lasting access, a silent no-op is the wrong failure.
+
+**Therefore: an explicit MCP capability in the `initialize` response is a requirement, not
+a nicety.** The extension must gate on it and refuse to send `mcpServers` when absent.
+See `docs/MCP-verification.md` for the raw exchange.
+
 ## The split: who owns what
 
 MCP is a *client* speaking to *servers*. The process split follows the sandbox and the
@@ -139,7 +159,9 @@ reconciliation with the CLI's existing `config.tools.approval` and PR #102's sto
 ## Open questions — decide before Phase 1
 
 1. **Which repo first?** The CLI is the load-bearing half, but it is a separate repo
-   (`HolboxAI/boxcode`) whose local clone here is ~135 commits stale. Doing the
+   (`HolboxAI/boxcode`) whose local clone here is stale. Note the two are different
+   things: the **installed binary** (`/usr/local/bin/boxcode`, `1.11.40`) is current and
+   does accept `--acp`, while the **local worktree** is the stale part. Doing the
    extension half alone produces config that silently does nothing.
 2. **Is `rmcp` acceptable as a dependency?** It is the fast path and the right call,
    but it is a real dependency decision for the CLI, not a detail.
@@ -160,3 +182,8 @@ reconciliation with the CLI's existing `config.tools.approval` and PR #102's sto
 - Do not auto-install presets that acquire credentials without an explicit step.
 - Do not build an abstraction over "connectors" before MCP proves the shape.
 - Do not start with Gmail. OAuth consent is the least representative first case.
+- **Do not ship the extension half before the CLI advertises an MCP capability.**
+  Accepting `mcpServers` proves nothing (see above); without the handshake the extension
+  will report MCP support while connecting nothing.
+- Do not rely on `--version` to decide MCP support. `--acp` itself is undocumented in
+  `--help`, which is exactly why capability probing is the existing convention.
