@@ -270,19 +270,9 @@ jobs:
       # permissions on) an Electron .app full of executables.
       #
       # Minimal set of paths prepare_assets.sh needs in the tarball: the app
-      # bundle plus vscode/product.json (the only vscode/ file
-      # prepare_assets.sh reads, for applicationName/nameLong/
-      # tunnelApplicationName - not the whole vscode/ tree, which would drag
-      # along node_modules and be enormous). Always created (not gated on
-      # generate_assets) - this is the actual fix for "why redo compile just
-      # to test a packaging fix".
-      #
-      # Previously also archived the REH/REH-web build outputs on an
-      # unverified claim that prepare_assets.sh needed them - it doesn't
-      # (confirmed by grep: neither "reh" string appears anywhere in that
-      # script), and SHOULD_BUILD_REH/SHOULD_BUILD_REH_WEB above now stop
-      # build.sh from even producing those directories, so archiving them
-      # here would fail outright rather than just waste space.
+      # bundle plus vscode/product.json (nameLong / applicationName). Signing
+      # no longer needs vscode/build/darwin/sign.ts — build/osx/sign-app.mjs
+      # ships in the repo and is checked out by the package job itself.
       - name: Archive compiled build output
         run: |
           tar -czf compiled.tar.gz \
@@ -330,6 +320,11 @@ jobs:
           ref: ${{ env.GITHUB_BRANCH }}
           persist-credentials: false
 
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+
       - name: Download compiled build output
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -343,7 +338,17 @@ jobs:
       - name: Extract compiled build output
         run: tar -xzf compiled.tar.gz
 
+      # Developer ID + notarization: build/osx/prepare_assets.sh installs
+      # @electron/osx-sign and runs build/osx/sign-app.mjs when secrets are set.
+      # Do NOT put `secrets.*` in a step `if:` — GitHub rejects that as a
+      # workflow-file error and the whole run fails with zero jobs (#109).
       - name: Prepare assets
+        env:
+          CERTIFICATE_OSX_P12_DATA: ${{ secrets.CERTIFICATE_OSX_P12_DATA }}
+          CERTIFICATE_OSX_P12_PASSWORD: ${{ secrets.CERTIFICATE_OSX_P12_PASSWORD }}
+          CERTIFICATE_OSX_APPLE_ID: ${{ secrets.CERTIFICATE_OSX_APPLE_ID }}
+          CERTIFICATE_OSX_TEAM_ID: ${{ secrets.CERTIFICATE_OSX_TEAM_ID }}
+          CERTIFICATE_OSX_APP_PASSWORD: ${{ secrets.CERTIFICATE_OSX_APP_PASSWORD }}
         run: ./prepare_assets.sh
 
       - name: Upload assets
@@ -353,26 +358,21 @@ jobs:
           path: assets/
           retention-days: 3
 
-      # Testers shouldn't have to dig through an Actions run page to find a
-      # zip - one stable, bookmarkable link instead. The `gh release create
-      # ... || true` pattern is a leftover safety net from when this ran on
-      # two parallel matrix legs racing to create the same release -
-      # harmless now with a single arm64 leg, left as-is since it's still
-      # correct (idempotent create), just no longer load-bearing. Re-add a
-      # second leg's worth of care here if x64 ever comes back into scope.
-      # No code-signing/notarization exists yet (open decision, see
-      # README.md), so this is explicitly labeled an unsigned dev build -
-      # macOS Gatekeeper will warn on first launch, which is expected until
-      # that's set up for real.
       - name: Publish the versioned macOS release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTIFICATE_OSX_P12_DATA: ${{ secrets.CERTIFICATE_OSX_P12_DATA }}
         run: |
           set -e
           TAG="${RELEASE_VERSION}"
+          if [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
+            NOTES="Developer ID–signed and notarized macOS build. Download the .zip or .dmg and open normally — Gatekeeper should accept it after Apple notarization stapling."
+          else
+            NOTES="Unsigned (ad-hoc) macOS build. Gatekeeper may warn on first launch (right-click → Open). Add CERTIFICATE_OSX_* repo secrets for Developer ID signing + notarization."
+          fi
           gh release create "$TAG" --repo "${{ github.repository }}" \
             --title "boxcode-ide ${RELEASE_VERSION}" \
-            --notes "Unsigned dev build. Not for public distribution - Gatekeeper will warn on first launch (right-click → Open, or \`xattr -d com.apple.quarantine\`). The .app is ad-hoc signed so that warning is actually reachable; without it macOS refuses to launch at all." \
+            --notes "$NOTES" \
             --prerelease --generate-notes 2>/dev/null || true
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip assets/*.dmg
 
