@@ -44,7 +44,7 @@ import {
 	recommendationSkipKey,
 } from './frameworkRecommendations';
 import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
-import { describeReferenceValue } from './referenceDescription';
+import { referenceContextSection } from './referenceContent';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import { createTurnUsage, TurnUsage } from './turnUsage';
 import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter, SessionUsage } from './sessionUsage';
@@ -799,30 +799,38 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 /**
- * Folds `request.references` -- context attached via the Integrated
- * Browser's own element-picker, console-log-to-chat, and screenshot
- * features (`browserEditorChatFeatures.ts`, upstream and unpatched in this
- * fork) -- into the content blocks `AcpClient.prompt` actually sends.
- * boxcode never had to build any of the attachment UI itself: clicking an
- * element or attaching console logs already lands here as an ordinary
- * `ChatPromptReference`, the same mechanism any chat participant gets, once
- * `boxcode.agent` is the active default agent (see `ChatContextKeys.enabled`
- * in VS Code's own `chatAgents.ts` -- it only needs *some* default agent
- * active, not anything browser-specific).
+ * Folds `request.references` -- context the user attached via `@`-mentions
+ * or the Integrated Browser's element-picker / console-log-to-chat /
+ * screenshot features (`browserEditorChatFeatures.ts`, upstream and
+ * unpatched in this fork) -- into the content blocks `AcpClient.prompt`
+ * actually sends. boxcode never built any attachment UI: every one of these
+ * arrives as an ordinary `ChatPromptReference`, the same mechanism any chat
+ * participant gets once `boxcode.agent` is the active default agent.
  *
- * Image attachments (element screenshots) are real `ContentBlock::Image`
- * blocks now, not dropped -- `ChatReferenceBinaryData.data()` is async
- * (returns the bytes as a `Thenable<Uint8Array>`), which is the whole
- * reason this function itself is `async`. A `Location` reference (e.g. a
- * console-log's source position) is stringified by hand rather than via a
- * bare `String(...)`, which on a `Location` object yields the useless
- * `"[object Object]"` -- `vscode.d.ts`'s own type for `.value` is
- * `string | Uri | Location | unknown`, so those are the two known non-string
- * shapes actually worth special-casing.
+ * Two reference shapes carry real content and are read from disk here: a
+ * `Uri` (a `#file`/`@`-mentioned file or doc) and a `Location` (a
+ * `#sym`-attached symbol). Both become a structured markdown section --
+ * path, language fence, and the file's text (or the symbol's line range) --
+ * rather than the bare path string an earlier version emitted, which is what
+ * makes `@file`/`@symbol` context actually useful to the model. Image
+ * attachments are `ContentBlock::Image` blocks (`ChatReferenceBinaryData`
+ * `.data()` is async, which is why this function is `async`); raw string
+ * references (console logs, CSS selectors) pass through unchanged, and
+ * anything `referenceContextSection` can't resolve is skipped rather than
+ * injected as a "[unrecognized]" marker.
  */
 async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: WorkspaceContext): Promise<PromptContentBlock[]> {
 	const sections: string[] = [];
 	const images: PromptContentBlock[] = [];
+	// Reads a workspace file's text for a `Uri`/`Location` reference. Only
+	// `file:` references reach this -- `referenceContextSection` filters on
+	// scheme before calling -- and an unreadable path (directory, deleted
+	// file) throws, which `referenceContextSection` turns into a path-only
+	// fallback rather than failing the whole prompt.
+	const readTextFile = async (fsPath: string): Promise<string> => {
+		const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(fsPath));
+		return new TextDecoder().decode(bytes);
+	};
 
 	for (const reference of request.references) {
 		if (reference.value instanceof vscode.ChatReferenceBinaryData) {
@@ -834,9 +842,10 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 			});
 			continue;
 		}
-		const heading = reference.modelDescription ?? reference.id;
-		const body = describeReferenceValue(reference.value);
-		sections.push(`### Attached: ${heading}\n\n${body}`);
+		const section = await referenceContextSection(reference, readTextFile);
+		if (section) {
+			sections.push(section);
+		}
 	}
 
 	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
