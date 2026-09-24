@@ -47,7 +47,7 @@ import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './loc
 import { describeReferenceValue } from './referenceDescription';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import { createTurnUsage, TurnUsage } from './turnUsage';
-import { createSessionUsage, sessionUsageFootnote, SessionUsage } from './sessionUsage';
+import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter, SessionUsage } from './sessionUsage';
 import {
 	describeRestrictedMode,
 	folderTrustKey,
@@ -315,6 +315,20 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	const usageIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 101);
+	usageIndicator.name = 'boxcode: usage';
+	context.subscriptions.push(usageIndicator);
+	const updateUsageIndicator = (): void => {
+		const label = sessionUsageMeter(sessionUsage.total(), sessionCostRate());
+		if (label) {
+			usageIndicator.text = `$(graph) ${label}`;
+			usageIndicator.tooltip = `boxcode usage this session — ${label}`;
+			usageIndicator.show();
+		} else {
+			usageIndicator.hide();
+		}
+	};
+
 	const RECS_SKIP_STATE = 'boxcode.frameworkRecommendationSkips';
 	const INSTALL_RECS_ACTION = 'Install';
 	const LATER_RECS_ACTION = 'Later';
@@ -401,6 +415,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		ready = undefined;
 		sessionCwd = undefined;
 		sessionUsage.reset();
+		updateUsageIndicator();
 	}
 
 	async function requestFolderTrust(): Promise<void> {
@@ -583,6 +598,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
 				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage);
+				updateUsageIndicator();
 			}
 		};
 		const onPermissionRequest = (

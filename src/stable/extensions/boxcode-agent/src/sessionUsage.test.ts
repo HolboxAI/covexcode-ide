@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createSessionUsage, sessionUsageFootnote } from './sessionUsage';
+import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter } from './sessionUsage';
 import type { SessionUpdate } from './acpClient';
 
 function usageUpdate(used: unknown, size?: unknown): SessionUpdate {
@@ -51,4 +51,22 @@ test('sub-cent estimates stay non-zero instead of rounding to $0.00', () => {
 
 test('whole-dollar estimates keep two decimals', () => {
 	assert.equal(sessionUsageFootnote(10_000_000, 0.35), '10,000,000 tokens this session · ~$3.50');
+});
+
+test('sessionUsageMeter is undefined for an empty session', () => {
+	assert.equal(sessionUsageMeter(0), undefined);
+	assert.equal(sessionUsageMeter(0, 0.35), undefined);
+});
+
+test('sessionUsageMeter renders tokens only when no cost rate is given', () => {
+	assert.equal(sessionUsageMeter(5678), '5,678 tokens');
+});
+
+test('sessionUsageMeter appends an estimated cost when a rate is given', () => {
+	assert.equal(sessionUsageMeter(1_000_000, 0.35), '1,000,000 tokens · ~$0.35');
+	assert.equal(sessionUsageMeter(100_000, 0.35), '100,000 tokens · ~$0.035');
+});
+
+test('sessionUsageMeter keeps sub-cent estimates non-zero', () => {
+	assert.equal(sessionUsageMeter(1000, 0.35), '1,000 tokens · ~$0.00035');
 });
