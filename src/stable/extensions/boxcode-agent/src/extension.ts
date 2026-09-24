@@ -479,6 +479,14 @@ export function activate(context: vscode.ExtensionContext): void {
 				// attempt so the next chat message gets a fresh try, not a
 				// permanently broken participant until the window reloads.
 				ready = undefined;
+				// `client` was assigned *before* the step that can fail
+				// (`acp.initialize()` / `acp.newSession()`), so by the time we
+				// get here the subprocess is running with no owner. Dispose it
+				// rather than orphan it: its later `exit` fires
+				// `discardSession()`, which would tear down whatever *healthy*
+				// session a later message establishes, and a second process
+				// would be spawned next turn.
+				client?.dispose();
 				client = undefined;
 				sessionCwd = undefined;
 				throw error;
@@ -608,6 +616,13 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		};
 
+		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
+		// Registered *after* the `await` above so a throw while reading an
+		// attachment (e.g. a binary reference whose bytes can't be loaded)
+		// can't leak these: they were previously added before any `try`, so
+		// that failure path skipped the `finally` that removes them, and each
+		// such turn piled another four listeners + `onCancel` onto the shared,
+		// long-lived `activeClient`.
 		activeClient.on('update', onUpdate);
 		activeClient.on('permissionRequest', onPermissionRequest);
 		activeClient.on('browserCheckRequest', onBrowserCheckRequest);
@@ -619,7 +634,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		const onCancel = token.onCancellationRequested(() => {
 			permissionGate.cancelAll();
 		});
-		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
 		try {
 			await activeClient.prompt(activeSessionId, content);
 			// Rendered only on a clean turn end, never after an error -- a
