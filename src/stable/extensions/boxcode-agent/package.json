@@ -71,6 +71,11 @@
         "category": "boxcode"
       },
       {
+        "command": "boxcode.permission.review",
+        "title": "boxcode: Review Permission Hunks",
+        "category": "boxcode"
+      },
+      {
         "command": "boxcode.trustWorkspace",
         "title": "boxcode: Trust This Folder",
         "category": "boxcode"

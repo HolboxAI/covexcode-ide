@@ -15,32 +15,43 @@ import { permissionOutcomeFromChoice } from './permissionOutcome';
  * request would deadlock.
  *
  * The way through is a command the in-chat markdown links invoke on the
- * same turn. This gate is the waiter those command clicks resolve.
+ * same turn. This gate is the waiter those command clicks resolve. A
+ * `partial` answer is the per-hunk review path: the review command resolves
+ * the same gate, but carries the merged file text back instead of a bare
+ * allow/reject, so boxcode writes the partially-accepted result (see
+ * `diffReview.ts`).
  */
 
 export const PERMISSION_COMMAND = 'boxcode.permission.respond';
+export const REVIEW_COMMAND = 'boxcode.permission.review';
 
-export type PermissionChoice = 'allow' | 'reject' | 'cancelled';
+export type PermissionChoice = 'allow' | 'reject' | 'cancelled' | 'partial';
+
+export interface PermissionAnswer {
+	choice: PermissionChoice;
+	/** Present only for a `partial` answer -- the merged file text. */
+	newText?: string;
+}
 
 export class PermissionGate {
 	private nextId = 1;
-	private readonly pending = new Map<string, (choice: PermissionChoice) => void>();
+	private readonly pending = new Map<string, (answer: PermissionAnswer) => void>();
 
-	create(): { id: string; wait: Promise<PermissionChoice> } {
+	create(): { id: string; wait: Promise<PermissionAnswer> } {
 		const id = String(this.nextId++);
-		let resolve!: (choice: PermissionChoice) => void;
-		const wait = new Promise<PermissionChoice>(r => {
+		let resolve!: (answer: PermissionAnswer) => void;
+		const wait = new Promise<PermissionAnswer>(r => {
 			resolve = r;
 		});
 		this.pending.set(id, resolve);
 		return { id, wait };
 	}
 
-	respond(id: unknown, choice: unknown): boolean {
+	respond(id: unknown, choice: unknown, newText?: unknown): boolean {
 		if (typeof id !== 'string') {
 			return false;
 		}
-		if (choice !== 'allow' && choice !== 'reject' && choice !== 'cancelled') {
+		if (choice !== 'allow' && choice !== 'reject' && choice !== 'cancelled' && choice !== 'partial') {
 			return false;
 		}
 		const resolve = this.pending.get(id);
@@ -48,14 +59,18 @@ export class PermissionGate {
 			return false;
 		}
 		this.pending.delete(id);
-		resolve(choice);
+		const answer: PermissionAnswer = { choice };
+		if (typeof newText === 'string') {
+			answer.newText = newText;
+		}
+		resolve(answer);
 		return true;
 	}
 
 	cancelAll(): void {
 		for (const [id, resolve] of this.pending) {
 			this.pending.delete(id);
-			resolve('cancelled');
+			resolve({ choice: 'cancelled' });
 		}
 	}
 
@@ -64,7 +79,7 @@ export class PermissionGate {
 	}
 }
 
-export function parsePermissionCommandArgs(args: unknown[]): { id: string; choice: PermissionChoice } | undefined {
+export function parsePermissionCommandArgs(args: unknown[]): { id: string; choice: 'allow' | 'reject' } | undefined {
 	const id = args[0];
 	const choice = args[1];
 	if (typeof id !== 'string') {
@@ -76,16 +91,28 @@ export function parsePermissionCommandArgs(args: unknown[]): { id: string; choic
 	return { id, choice };
 }
 
+/**
+ * Parses the review command's arguments -- just the gate id; the merged text
+ * comes from the QuickPick the command opens, not from the link itself.
+ */
+export function parseReviewCommandArgs(args: unknown[]): string | undefined {
+	const id = args[0];
+	return typeof id === 'string' ? id : undefined;
+}
+
 export function permissionOutcomeFromGate(
-	choice: PermissionChoice,
+	answer: PermissionAnswer,
 	allow: PermissionOption | undefined,
 	reject: PermissionOption | undefined,
 ): RequestPermissionOutcome {
-	if (choice === 'allow') {
+	if (answer.choice === 'allow') {
 		return permissionOutcomeFromChoice(allow?.name ?? 'Allow', allow, reject);
 	}
-	if (choice === 'reject') {
+	if (answer.choice === 'reject') {
 		return permissionOutcomeFromChoice(reject?.name ?? 'Reject', allow, reject);
+	}
+	if (answer.choice === 'partial' && answer.newText !== undefined) {
+		return { outcome: 'partial', newText: answer.newText };
 	}
 	return { outcome: 'cancelled' };
 }
@@ -93,4 +120,9 @@ export function permissionOutcomeFromGate(
 export function permissionCommandUri(id: string, choice: 'allow' | 'reject'): string {
 	const encoded = encodeURIComponent(JSON.stringify([id, choice]));
 	return `command:${PERMISSION_COMMAND}?${encoded}`;
+}
+
+export function reviewCommandUri(id: string): string {
+	const encoded = encodeURIComponent(JSON.stringify([id]));
+	return `command:${REVIEW_COMMAND}?${encoded}`;
 }

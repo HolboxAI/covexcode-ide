@@ -36,6 +36,27 @@ export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refu
 
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
+export type DiffLineChange = 'context' | 'added' | 'removed';
+
+/**
+ * Mirrors `protocol.rs`'s own `DiffHunkLine`/`DiffHunk`/`DiffLineChange`
+ * exactly -- the per-hunk split of a file change boxcode pre-computes so a
+ * client can offer per-hunk accept/reject without reimplementing its diff
+ * (see `headless.rs::diff_hunks_for_review`). Line numbers are 1-based;
+ * `oldNo` is absent on an added line and `newNo` absent on a removed line,
+ * matching the gutter of any two-column diff.
+ */
+export interface DiffHunkLine {
+	change: DiffLineChange;
+	oldNo?: number;
+	newNo?: number;
+	text: string;
+}
+
+export interface DiffHunk {
+	lines: DiffHunkLine[];
+}
+
 /**
  * Mirrors `protocol.rs`'s own `ToolCallContent` exactly -- the three
  * variants boxcode implements (`content`/`diff` are ACP v1's own; `image`
@@ -43,11 +64,14 @@ export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
  * reasoning as `session/checkInBrowser` not being part of ACP's schema
  * either). `Diff.oldText` is absent (not empty) for a brand-new file,
  * matching `preview_change_text`'s own before-is-`None` case rather than
- * boxcode sending an empty string for it.
+ * boxcode sending an empty string for it. `Diff.hunks` is absent either
+ * when the change has no hunkable diff (CRLF line endings, an oversized
+ * diff -- see `headless.rs::diff_hunks_for_review`) or from a boxcode that
+ * predates per-hunk review; its absence means "whole-file review only".
  */
 export type ToolCallContent =
 	| { type: 'content'; text: string }
-	| { type: 'diff'; path: string; oldText?: string; newText: string }
+	| { type: 'diff'; path: string; oldText?: string; newText: string; hunks?: DiffHunk[] }
 	| { type: 'image'; mimeType: string; data: string };
 
 export interface ToolCallUpdate {
@@ -121,7 +145,8 @@ export interface RequestPermissionRequest {
 
 export type RequestPermissionOutcome =
 	| { outcome: 'cancelled' }
-	| { outcome: 'selected'; optionId: string };
+	| { outcome: 'selected'; optionId: string }
+	| { outcome: 'partial'; newText: string };
 
 /**
  * `session/checkInBrowser` -- not part of ACP's own schema (the spec has no

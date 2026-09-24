@@ -12,6 +12,7 @@ import {
 	ChangeEntry,
 	CheckInBrowserOutcome,
 	CheckInBrowserRequest,
+	DiffHunk,
 	fetchProviders,
 	InteractInBrowserOutcome,
 	InteractInBrowserRequest,
@@ -30,12 +31,16 @@ import { CdpClient } from './cdpClient';
 import { boxcodeBinaryCandidates } from './boxcodeBinary';
 import {
 	parsePermissionCommandArgs,
+	parseReviewCommandArgs,
 	permissionCommandUri,
 	permissionOutcomeFromGate,
 	PermissionGate,
 	PERMISSION_COMMAND,
+	REVIEW_COMMAND,
+	reviewCommandUri,
 } from './chatPermission';
 import { isFreshChat } from './freshChat';
+import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
 import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
 import {
@@ -68,6 +73,16 @@ const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
 const SECRET_API_KEY = 'boxcode.apiKey';
 const DIFF_SCHEME = 'boxcode-diff';
+
+/**
+ * The per-hunk review state for an in-flight permission request, keyed by the
+ * gate id `askPermission` handed the review link. Lives at module scope (not
+ * inside `activate`) because both `askPermission` and the `REVIEW_COMMAND`
+ * handler -- one inside `activate`, one outside -- reach it, and a permission
+ * request can only ever be answered once, so entries are short-lived and
+ * cleared on the answer (or, defensively, on `discardSession`).
+ */
+const pendingReviews = new Map<string, { newText: string; hunks: DiffHunk[] }>();
 
 /** The configured `boxcode.path` setting if set, otherwise the bare command
  * name plus the locations `install.sh` writes to -- an escape hatch for a
@@ -409,6 +424,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	function discardSession(): void {
 		permissionGate.cancelAll();
+		pendingReviews.clear();
 		client?.dispose();
 		client = undefined;
 		sessionId = undefined;
@@ -523,6 +539,25 @@ export function activate(context: vscode.ExtensionContext): void {
 				return;
 			}
 			permissionGate.respond(parsed.id, parsed.choice);
+		}),
+		vscode.commands.registerCommand(REVIEW_COMMAND, async (...args: unknown[]) => {
+			const id = parseReviewCommandArgs(args);
+			if (id === undefined) {
+				return;
+			}
+			const review = pendingReviews.get(id);
+			if (!review) {
+				return;
+			}
+			pendingReviews.delete(id);
+			const merged = await pickHunks(review.newText, review.hunks);
+			if (merged === undefined) {
+				// QuickPick dismissed (Escape) -- the Allow/Reject links are
+				// still live, so re-register in case they open the picker again.
+				pendingReviews.set(id, review);
+				return;
+			}
+			permissionGate.respond(id, 'partial', merged);
 		}),
 		vscode.commands.registerCommand(TRUST_COMMAND, async () => {
 			await requestFolderTrust();
@@ -942,18 +977,28 @@ function appendTitleSafely(line: vscode.MarkdownString, title: string): void {
  * (non-terminal, non-MCP) tool; `toolCallId` is the field that correlates the
  * completion update back to this row.
  */
-function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
+function pushToolInvocation(
+	toolCallId: string,
+	title: string,
+	kind: string | undefined,
+	status: ToolCallStatus | undefined,
+	stream: vscode.ChatResponseStream,
+): void {
 	const message = new vscode.MarkdownString(undefined, true);
 	appendTitleSafely(message, title);
 
-	const part = new vscode.ChatToolInvocationPart(update.kind ?? 'boxcode', update.toolCallId!);
+	const part = new vscode.ChatToolInvocationPart(kind ?? 'boxcode', toolCallId);
 	part.enablePartialUpdate = true;
-	part.isComplete = update.status === 'completed' || update.status === 'failed';
+	part.isComplete = status === 'completed' || status === 'failed';
 	part.invocationMessage = message;
 	if (part.isComplete) {
 		part.pastTenseMessage = message;
 	}
 	stream.push(part);
+}
+
+function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
+	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream);
 }
 
 /**
@@ -1299,20 +1344,41 @@ async function askPermission(
 	const rejectLabel = reject?.name ?? 'Reject';
 
 	const diff = request.toolCall.content;
+	const hunks = diff?.type === 'diff' && diff.hunks && diff.hunks.length > 0 ? diff.hunks : undefined;
 	if (diff?.type === 'diff') {
 		await showDiff(diff, diffContentProvider, cwd);
 	}
 
 	const { id, wait } = permissionGate.create();
+	if (diff?.type === 'diff' && hunks) {
+		pendingReviews.set(id, { newText: diff.newText, hunks });
+	}
+	// The pending call is rendered as a `ChatToolInvocationPart` before the
+	// prompt. That part doubles as the anchor `clearToPreviousToolInvocation`
+	// below needs: it is the last tool invocation on the stream, so clearing
+	// "to the previous tool invocation" removes exactly the prompt markdown
+	// that follows it and nothing else, leaving the pending row in place for
+	// boxcode's later completed update to flip in place (same `toolCallId`).
+	const pending = request.toolCall;
+	if (pending.toolCallId && pending.title) {
+		pushToolInvocation(pending.toolCallId, pending.title, pending.kind, pending.status, stream);
+	}
 	// The Allow/Reject choice is the in-chat markdown command links below.
 	// A `stream.confirmation()` card would deadlock here: its click arrives
 	// as a follow-up ChatRequest while `session/prompt` is still awaiting, so
 	// VS Code keeps Send disabled until this handler settles (see
 	// `chatPermission.ts`'s own doc comment). The links instead invoke
-	// `boxcode.permission.respond` and resolve the gate on the same turn.
-	stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id));
-	const choice = await wait;
-	return permissionOutcomeFromGate(choice, allow, reject);
+	// `boxcode.permission.respond` (or `.review`) and resolve the gate on the
+	// same turn.
+	stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks));
+	const answer = await wait;
+	pendingReviews.delete(id);
+	// The user answered (Allow/Reject/Review). Remove the prompt from chat:
+	// `clearToPreviousToolInvocation` slices the response back to the pending
+	// row pushed above, so the question -- and its now-dead links -- vanish
+	// rather than lingering as an unclickable card for the rest of the turn.
+	stream.clearToPreviousToolInvocation(vscode.ChatResponseClearToPreviousToolInvocationReason.NoReason);
+	return permissionOutcomeFromGate(answer, allow, reject);
 }
 
 function escapeMarkdownLinkLabel(label: string): string {
@@ -1324,15 +1390,55 @@ function permissionDecisionMarkdown(
 	allowLabel: string,
 	rejectLabel: string,
 	id: string,
+	hunks?: DiffHunk[],
 ): vscode.MarkdownString {
 	const line = new vscode.MarkdownString(undefined, true);
-	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND] };
+	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND, REVIEW_COMMAND] };
 	line.appendMarkdown('$(warning) **boxcode needs permission**\n\nboxcode wants to ');
 	line.appendText(action);
 	line.appendMarkdown('.\n\n');
 	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
-	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})\n\n`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	if (hunks) {
+		line.appendMarkdown(`&nbsp;&nbsp;[$(list-selection) Review hunks…](${reviewCommandUri(id)})`);
+	}
+	line.appendMarkdown('\n\n');
+	if (hunks) {
+		line.appendMarkdown(renderHunksMarkdown(hunks));
+		line.appendMarkdown('\n');
+	}
 	return line;
+}
+
+/**
+ * The per-hunk accept/reject picker. Opens a multi-select QuickPick over the
+ * hunks -- all pre-selected, so "review" means choosing which to *drop*,
+ * matching how the whole-file Allow already accepts everything -- and returns
+ * the merged text, or `undefined` if the picker was dismissed (which the
+ * caller treats as "no answer yet", leaving the Allow/Reject links live).
+ *
+ * `showQuickPick` is safe where `stream.confirmation()` is not: it is a plain
+ * modal that resolves its own promise, not a follow-up ChatRequest, so it
+ * cannot deadlock behind VS Code's Send button while `session/prompt` is
+ * still awaiting (see `chatPermission.ts`'s own doc comment).
+ */
+async function pickHunks(newText: string, hunks: DiffHunk[]): Promise<string | undefined> {
+	const items = hunks.map((hunk, index): vscode.QuickPickItem & { hunkIndex: number } => ({
+		label: `$(diff) Hunk ${index + 1}`,
+		description: summarizeHunk(hunk),
+		picked: true,
+		hunkIndex: index,
+	}));
+	const selected = await vscode.window.showQuickPick(items, {
+		placeHolder: 'Choose which hunks to apply (unchecked hunks are reverted)',
+		canPickMany: true,
+		matchOnDescription: true,
+	});
+	if (selected === undefined) {
+		return undefined;
+	}
+	const accepted = hunks.map((_, index) => selected.some(item => item.hunkIndex === index));
+	return applyHunkSelection(newText, hunks, accepted);
 }
 
 /**
