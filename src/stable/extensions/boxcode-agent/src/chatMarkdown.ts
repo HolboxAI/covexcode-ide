@@ -11,7 +11,10 @@
  * unusable. The human already sees the live page in the Integrated Browser.
  */
 
-const DATA_URI_PATTERN = /data:(image\/[a-zA-Z0-9.+-]+);base64,[A-Za-z0-9+/=\s]+/gi;
+// Base64 is whitespace-free by definition; keeping `\s` out of the class means
+// the match stops at the first space/newline instead of greedily swallowing
+// whatever prose follows a bare (non-`(...)`-wrapped) data URI.
+const DATA_URI_PATTERN = /data:(image\/[a-zA-Z0-9.+-]+);base64,[A-Za-z0-9+/=]+/gi;
 
 export const BROWSER_PREVIEW_NOTICE = 'Preview is in the Integrated Browser.';
 
