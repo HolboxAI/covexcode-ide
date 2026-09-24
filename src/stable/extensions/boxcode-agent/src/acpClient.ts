@@ -281,12 +281,27 @@ export class AcpClient extends EventEmitter {
 		} catch {
 			return; // malformed line -- not this client's job to crash over, mirrors transport.rs's own read loop
 		}
+		if (!isObject(value)) {
+			return; // a JSON-RPC message is always an object; anything else is not for us
+		}
 
 		if (value.method === 'session/update') {
-			this.emit('update', value.params as SessionNotification);
+			// Guard the shape before emitting: `onUpdate` (extension.ts) hands
+			// `notification.update` straight to `renderUpdate`, which switches
+			// on `update.sessionUpdate` -- a `session/update` with a missing or
+			// non-object `params.update` would throw there instead of being
+			// ignored as an unrecognized notification.
+			const params = value.params;
+			const update = isObject(params) ? params.update : undefined;
+			if (isObject(update) && typeof update.sessionUpdate === 'string') {
+				this.emit('update', params as SessionNotification);
+			}
 			return;
 		}
 		if (value.method === 'session/request_permission') {
+			if (!isObject(value.params)) {
+				return;
+			}
 			const respond: RespondToPermission = outcome => {
 				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
 			};
@@ -294,6 +309,9 @@ export class AcpClient extends EventEmitter {
 			return;
 		}
 		if (value.method === 'session/checkInBrowser') {
+			if (!isObject(value.params)) {
+				return;
+			}
 			const respond: RespondToBrowserCheck = outcome => {
 				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
 			};
@@ -301,6 +319,9 @@ export class AcpClient extends EventEmitter {
 			return;
 		}
 		if (value.method === 'session/interactInBrowser') {
+			if (!isObject(value.params)) {
+				return;
+			}
 			const respond: RespondToBrowserInteract = outcome => {
 				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
 			};
@@ -587,4 +608,11 @@ export function fetchProviders(boxcodeCommand: string, args: string[] = ['--prov
 
 function describeErrorLocal(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+// Plain `boolean` on purpose, not a type predicate: `value`/`params` in
+// `handleLine` are `any`, and a predicate would narrow them to
+// `Record<string, unknown>`, breaking the `as` casts the dispatcher relies on.
+function isObject(value: unknown): boolean {
+	return typeof value === 'object' && value !== null;
 }

@@ -63,5 +63,9 @@ function isAcpUnsupported(error: unknown): boolean {
 		return true;
 	}
 	const message = describeError(error);
-	return /unknown argument:\s*--acp/i.test(message) || /exited \(code 2\b/.test(message);
+	// Anchor the exit-2 fallback to the `boxcode --acp` spawn specifically:
+	// exit code 2 only means "unknown argument" when it was `boxcode --acp`
+	// that exited 2 -- the same "exited (code 2)" phrasing from any other
+	// subprocess must not read as "your boxcode CLI is too old".
+	return /unknown argument:\s*--acp/i.test(message) || /boxcode --acp exited \(code 2\b/.test(message);
 }
