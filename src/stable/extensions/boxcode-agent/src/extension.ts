@@ -9,6 +9,7 @@ import * as vscode from 'vscode';
 import {
 	AcpClient,
 	BrowserInteraction,
+	ChangeEntry,
 	CheckInBrowserOutcome,
 	CheckInBrowserRequest,
 	fetchProviders,
@@ -179,6 +180,82 @@ class StubLanguageModelProvider implements vscode.LanguageModelChatProvider {
  * already configured `boxcode` from the CLI must not be nagged to repeat
  * that inside the IDE.
  */
+interface RollbackPickItem extends vscode.QuickPickItem {
+	/** What picking this item means, so the command never has to guess
+	 * between "undo everything" (no filter) and a blocked file (no undo). */
+	scope: RollbackScope;
+}
+
+type RollbackScope =
+	| { kind: 'all' }
+	| { kind: 'turn'; turn: number }
+	| { kind: 'files'; files: string[] }
+	| { kind: 'blocked'; reason?: string };
+
+function rollbackActionVerb(action: ChangeEntry['action']): string {
+	switch (action) {
+		case 'restore': return 'restore pre-session text';
+		case 'delete': return 'delete (new file)';
+		case 'blocked': return 'blocked (shell only)';
+	}
+}
+
+/**
+ * Turns a `session/list_changes` result into the one-shot `showQuickPick`
+ * that makes per-file/per-turn undo work: an "undo everything" item, one
+ * per-turn grouping, then the individual files. Blocked entries (boxcode
+ * only ran a shell command against the path, so there is no before-state to
+ * restore) stay listed so the "why" is visible, but map to a `blocked` scope
+ * the caller turns into a no-op. Returns the selection's scope, or
+ * `undefined` when the picker is dismissed.
+ */
+async function pickRollbackScope(changes: ChangeEntry[]): Promise<RollbackScope | undefined> {
+	const undoable = changes.filter(c => c.action !== 'blocked');
+	const items: RollbackPickItem[] = [];
+
+	items.push({
+		label: '$(undo) Undo everything boxcode wrote',
+		description: `${undoable.length} file${undoable.length === 1 ? '' : 's'}`,
+		scope: { kind: 'all' },
+	});
+
+	const turns = [...new Set(changes.map(c => c.turn))].sort((a, b) => a - b);
+	for (const turn of turns) {
+		const count = changes.filter(c => c.turn === turn && c.action !== 'blocked').length;
+		if (count > 0) {
+			items.push({
+				label: `Undo turn ${turn}`,
+				description: `${count} file${count === 1 ? '' : 's'}`,
+				scope: { kind: 'turn', turn },
+			});
+		}
+	}
+
+	for (const entry of changes) {
+		if (entry.action === 'blocked') {
+			items.push({
+				label: entry.path,
+				description: `turn ${entry.turn} · ${rollbackActionVerb(entry.action)}`,
+				detail: entry.reason,
+				scope: { kind: 'blocked', reason: entry.reason },
+			});
+		} else {
+			items.push({
+				label: entry.path,
+				description: `turn ${entry.turn} · ${rollbackActionVerb(entry.action)}`,
+				scope: { kind: 'files', files: [entry.path] },
+			});
+		}
+	}
+
+	const picked = await vscode.window.showQuickPick(items, {
+		title: 'boxcode: choose what to undo',
+		ignoreFocusOut: true,
+		matchOnDescription: true,
+	});
+	return picked?.scope;
+}
+
 export function activate(context: vscode.ExtensionContext): void {
 	let client: AcpClient | undefined;
 	let sessionId: string | undefined;
@@ -583,22 +660,85 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			const activeClient = client;
 			const activeSessionId = sessionId;
-			// Same posture as the TUI's own /rollback: confirm before
-			// touching disk, not after.
-			const choice = await vscode.window.showWarningMessage(
-				'Undo every file boxcode has written this session? Files it only ran commands ' +
-					'against, not wrote, are not covered by this.',
-				{ modal: true },
-				'Undo',
-			);
-			if (choice !== 'Undo') {
-				return;
-			}
 			try {
-				const summary = await activeClient.rollback(activeSessionId);
+				// Peek at the journal first so the picker reflects exactly what
+				// an undo would touch, then confirm by *choosing* the scope --
+				// same posture as the TUI's own /rollback: decide before
+				// touching disk, not after.
+				const { changes, shellWarning } = await activeClient.listChanges(activeSessionId);
+				if (!changes.some(c => c.action !== 'blocked')) {
+					const hint = shellWarning ? ` ${shellWarning}` : '';
+					void vscode.window.showInformationMessage(`boxcode: nothing to undo.${hint}`);
+					return;
+				}
+				const scope = await pickRollbackScope(changes);
+				if (!scope) {
+					return;
+				}
+				if (scope.kind === 'blocked') {
+					const why = scope.reason ? ` ${scope.reason}` : '';
+					void vscode.window.showInformationMessage(`boxcode: can't undo that file.${why}`);
+					return;
+				}
+				const options = scope.kind === 'all'
+					? undefined
+					: scope.kind === 'turn'
+						? { turn: scope.turn }
+						: { files: scope.files };
+				const summary = await activeClient.rollback(activeSessionId, options);
 				void vscode.window.showInformationMessage(`boxcode: ${summary}`);
 			} catch (error) {
 				void vscode.window.showErrorMessage(`boxcode: couldn't roll back (${describeError(error)})`);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		// Invoked by the native "Restore Checkpoint" button rendered above each
+		// user message (MenuId.ChatMessageCheckpoint). VS Code's own restore path
+		// is a no-op for boxcode chat -- there's no IChatEditingSession -- so the
+		// core patch 108-chat-restore-checkpoint-boxcode.patch detects a boxcode
+		// request and delegates here with its 1-based turn number.
+		//
+		// "Restore to before `turn`" = put every file touched at this turn or
+		// later back to the state it held just before this turn began, so an
+		// edit in turn 2 is undone while turn 1's edit survives. boxcode's
+		// journal keeps the per-turn before-state for exactly this; the request
+		// uses `restoreBeforeTurn`, not the first-touch `turn` filter.
+		vscode.commands.registerCommand('boxcode.restoreCheckpoint', async (turn?: number) => {
+			if (!client || !sessionId) {
+				void vscode.window.showInformationMessage("boxcode: no session yet -- send a message first.");
+				return;
+			}
+			// No turn argument (e.g. invoked from the command palette) means
+			// there's no checkpoint to scope to -- defer to the full picker.
+			if (turn === undefined) {
+				await vscode.commands.executeCommand('boxcode.rollback');
+				return;
+			}
+			const activeClient = client;
+			const activeSessionId = sessionId;
+			try {
+				// The journal records files, not chat messages, so this restores
+				// workspace content only -- same limitation as the picker's own
+				// "undo turn N" entries.
+				const summary = await activeClient.rollback(activeSessionId, { restoreBeforeTurn: turn });
+				if (!summary.startsWith("Rolled back nothing")) {
+					void vscode.window.showInformationMessage(`boxcode: [turn ${turn}] ${summary}`);
+					return;
+				}
+				// A "nothing" here is ambiguous: the turn made no file edits, or it
+				// changed files through a shell command (`run_command`), which the
+				// journal tracks by name but cannot undo. Surface that context so
+				// the message explains itself instead of leaving the user guessing.
+				try {
+					const { shellWarning } = await activeClient.listChanges(activeSessionId);
+					void vscode.window.showWarningMessage(`boxcode: [turn ${turn}] ${summary}${shellWarning ? ` ${shellWarning}` : ''}`);
+				} catch {
+					void vscode.window.showWarningMessage(`boxcode: [turn ${turn}] ${summary}`);
+				}
+			} catch (error) {
+				void vscode.window.showErrorMessage(`boxcode: couldn't restore checkpoint (${describeError(error)})`);
 			}
 		}),
 	);
