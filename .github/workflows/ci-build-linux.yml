@@ -392,7 +392,7 @@ jobs:
           TAG="${RELEASE_VERSION}"
           gh release create "$TAG" --repo "${{ github.repository }}" \
             --title "boxcode-ide ${RELEASE_VERSION}" \
-            --notes "Unsigned dev build. Not for public distribution. Formats: .deb and .rpm (x64/arm64/riscv64/loong64/ppc64le), AppImage and Flatpak (x64), the .tar.gz archive, and SHA-256/SHA-1 checksums." \
+            --notes "Unsigned dev build. Not for public distribution. Formats: .deb/.rpm (x64/arm64/ppc64le), .tar.gz (all arches including riscv64/loong64), AppImage and Flatpak (x64), plus checksums." \
             --prerelease --generate-notes 2>/dev/null || true
           files=( assets/*.deb assets/*.rpm assets/*.AppImage assets/*.AppImage.zsync assets/*.tar.gz assets/*.flatpak assets/*.sha256 assets/*.sha1 )
           if [[ ${#files[@]} -eq 0 ]]; then
