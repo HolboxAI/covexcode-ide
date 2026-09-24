@@ -21,20 +21,26 @@ if [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
   security unlock-keychain -p pwd "${KEYCHAIN}"
   # shellcheck disable=SC2086
   security list-keychains -s $KEYCHAINS "${KEYCHAIN}"
-  # security show-keychain-info "${KEYCHAIN}"
 
   echo "+ import certificate to keychain"
   security import "${CERTIFICATE_P12}" -k "${KEYCHAIN}" -P "${CERTIFICATE_OSX_P12_PASSWORD}" -T /usr/bin/codesign
   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k pwd "${KEYCHAIN}" > /dev/null
-  # security find-identity "${KEYCHAIN}"
 
   CODESIGN_IDENTITY="$( security find-identity -v -p codesigning "${KEYCHAIN}" | grep -oEi "([0-9A-F]{40})" | head -n 1 )"
+  if [[ -z "${CODESIGN_IDENTITY}" ]]; then
+    echo "No codesigning identity found in temporary keychain after importing CERTIFICATE_OSX_P12_DATA" >&2
+    security find-identity -v -p codesigning "${KEYCHAIN}" >&2 || true
+    exit 1
+  fi
+
+  echo "+ install @electron/osx-sign (self-contained; does not use vscode/build/darwin/sign.ts)"
+  SIGN_PREFIX="${RUNNER_TEMP}/boxcode-osx-sign"
+  mkdir -p "${SIGN_PREFIX}"
+  npm install --prefix "${SIGN_PREFIX}" --no-save --no-package-lock @electron/osx-sign@^2.0.0
 
   echo "+ signing"
-  export CODESIGN_IDENTITY AGENT_TEMPDIRECTORY
-
-  DEBUG="electron-osx-sign*" node vscode/build/darwin/sign.ts "$( pwd )"
-  # codesign --display --entitlements :- ""
+  export CODESIGN_IDENTITY AGENT_TEMPDIRECTORY SIGN_PREFIX
+  DEBUG="electron-osx-sign*" node ./build/osx/sign-app.mjs "$( pwd )"
 
   echo "+ notarize"
 
@@ -44,12 +50,10 @@ if [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
   zip -r -X -y "${ZIP_FILE}" ./*.app
 
   xcrun notarytool store-credentials "${APP_NAME}" --apple-id "${CERTIFICATE_OSX_APPLE_ID}" --team-id "${CERTIFICATE_OSX_TEAM_ID}" --password "${CERTIFICATE_OSX_APP_PASSWORD}" --keychain "${KEYCHAIN}"
-  # xcrun notarytool history --keychain-profile "${APP_NAME}" --keychain "${KEYCHAIN}"
   xcrun notarytool submit "${ZIP_FILE}" --keychain-profile "${APP_NAME}" --wait --keychain "${KEYCHAIN}"
 
   echo "+ attach staple"
   xcrun stapler staple ./*.app
-  # spctl --assess -vv --type install ./*.app
 
   rm "${ZIP_FILE}"
 

@@ -270,36 +270,14 @@ jobs:
       # permissions on) an Electron .app full of executables.
       #
       # Minimal set of paths prepare_assets.sh needs in the tarball: the app
-      # bundle plus vscode/product.json (the only vscode/ file
-      # prepare_assets.sh reads, for applicationName/nameLong/
-      # tunnelApplicationName - not the whole vscode/ tree, which would drag
-      # along node_modules and be enormous). Always created (not gated on
-      # generate_assets) - this is the actual fix for "why redo compile just
-      # to test a packaging fix".
-      #
-      # Previously also archived the REH/REH-web build outputs on an
-      # unverified claim that prepare_assets.sh needed them - it doesn't
-      # (confirmed by grep: neither "reh" string appears anywhere in that
-      # script), and SHOULD_BUILD_REH/SHOULD_BUILD_REH_WEB above now stop
-      # build.sh from even producing those directories, so archiving them
-      # here would fail outright rather than just waste space.
-      # prepare_assets.sh Developer ID signing runs
-      # `node vscode/build/darwin/sign.ts`, which needs the script, entitlements,
-      # .npmrc (electron version), and product.json. The .app alone is not enough —
-      # confirmed by package failing with MODULE_NOT_FOUND for sign.ts after #107.
+      # bundle plus vscode/product.json (nameLong / applicationName). Signing
+      # no longer needs vscode/build/darwin/sign.ts — build/osx/sign-app.mjs
+      # ships in the repo and is checked out by the package job itself.
       - name: Archive compiled build output
         run: |
           tar -czf compiled.tar.gz \
             "VSCode-darwin-${VSCODE_ARCH}" \
-            vscode/product.json \
-            vscode/.npmrc \
-            vscode/build/darwin/sign.ts \
-            vscode/build/azure-pipelines/darwin/app-entitlements.plist \
-            vscode/build/azure-pipelines/darwin/helper-entitlements.plist \
-            vscode/build/azure-pipelines/darwin/helper-gpu-entitlements.plist \
-            vscode/build/azure-pipelines/darwin/helper-plugin-entitlements.plist \
-            vscode/build/azure-pipelines/darwin/helper-renderer-entitlements.plist \
-            vscode/build/package.json
+            vscode/product.json
 
       # Short retention: this is a same-run relay to the package job, not
       # meant as long-term storage.
@@ -360,17 +338,10 @@ jobs:
       - name: Extract compiled build output
         run: tar -xzf compiled.tar.gz
 
-      # sign.ts imports @electron/osx-sign from vscode/build; the package job
-      # never ran get_repo/build, so install just those deps here (only when
-      # we will actually Developer ID–sign).
-      - name: Install macOS signing dependencies
-        if: ${{ secrets.CERTIFICATE_OSX_P12_DATA != '' }}
-        working-directory: vscode/build
-        run: npm install --no-save --no-package-lock @electron/osx-sign @malept/cross-spawn-promise
-
-      # Developer ID + notarization: build/osx/prepare_assets.sh signs when
-      # CERTIFICATE_OSX_P12_DATA is set (repo Actions secrets). Without them
-      # it falls back to ad-hoc sign so the .app still launches.
+      # Developer ID + notarization: build/osx/prepare_assets.sh installs
+      # @electron/osx-sign and runs build/osx/sign-app.mjs when secrets are set.
+      # Do NOT put `secrets.*` in a step `if:` — GitHub rejects that as a
+      # workflow-file error and the whole run fails with zero jobs (#109).
       - name: Prepare assets
         env:
           CERTIFICATE_OSX_P12_DATA: ${{ secrets.CERTIFICATE_OSX_P12_DATA }}
@@ -387,20 +358,14 @@ jobs:
           path: assets/
           retention-days: 3
 
-      # Testers shouldn't have to dig through an Actions run page to find a
-      # zip - one stable, bookmarkable link instead. The `gh release create
-      # ... || true` pattern is a leftover safety net from when this ran on
-      # two parallel matrix legs racing to create the same release -
-      # harmless now with a single arm64 leg, left as-is since it's still
-      # correct (idempotent create), just no longer load-bearing. Re-add a
-      # second leg's worth of care here if x64 ever comes back into scope.
       - name: Publish the versioned macOS release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTIFICATE_OSX_P12_DATA: ${{ secrets.CERTIFICATE_OSX_P12_DATA }}
         run: |
           set -e
           TAG="${RELEASE_VERSION}"
-          if [[ -n "${{ secrets.CERTIFICATE_OSX_P12_DATA }}" ]]; then
+          if [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
             NOTES="Developer ID–signed and notarized macOS build. Download the .zip or .dmg and open normally — Gatekeeper should accept it after Apple notarization stapling."
           else
             NOTES="Unsigned (ad-hoc) macOS build. Gatekeeper may warn on first launch (right-click → Open). Add CERTIFICATE_OSX_* repo secrets for Developer ID signing + notarization."
