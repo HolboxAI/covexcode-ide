@@ -18,6 +18,16 @@ if [[ "${SHOULD_BUILD_APPIMAGE}" != "no" && "${VSCODE_ARCH}" != "x64" ]]; then
   SHOULD_BUILD_APPIMAGE="no"
 fi
 
+# vscode's gulp debian/rpm maps do not support loong64 (throws
+# "Invalid Debian arch string loong64") and riscv64 hits a missing deps
+# entry ("Cannot read properties of undefined (reading 'Tarball')").
+# Still ship a .tar.gz for those arches; DEB/RPM stay on x64/arm64/ppc64le.
+if [[ "${VSCODE_ARCH}" == "loong64" || "${VSCODE_ARCH}" == "riscv64" ]]; then
+  echo "Skipping DEB/RPM for ${VSCODE_ARCH} (unsupported by upstream gulp linux packaging maps)"
+  SHOULD_BUILD_DEB="no"
+  SHOULD_BUILD_RPM="no"
+fi
+
 if [[ "${SHOULD_BUILD_DEB}" != "no" || "${SHOULD_BUILD_APPIMAGE}" != "no" ]]; then
   npm run gulp "vscode-linux-${VSCODE_ARCH}-prepare-deb"
   npm run gulp "vscode-linux-${VSCODE_ARCH}-build-deb"
