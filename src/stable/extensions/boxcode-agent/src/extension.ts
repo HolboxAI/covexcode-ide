@@ -974,7 +974,11 @@ function autoOpenDevServerUrl(update: SessionUpdate, title: string | undefined, 
 	// Reveal only. `checkInBrowser` used to run here too, which opened a
 	// second editor group beside the one `LocalhostLinkOpenerContribution`
 	// already created from the same terminal "Local:" line.
-	void ensureBrowserTab(url);
+	// The `.catch` is the whole point of "failure swallowed" in the doc
+	// comment above: `ensureBrowserTab` rejects with `Browser tab did not
+	// open.`, and the bare `void` left that rejection unhandled in the
+	// extension host.
+	void ensureBrowserTab(url).catch(() => {});
 }
 
 function renderUpdate(
@@ -1423,20 +1427,30 @@ async function attachToBrowserTab(url: string): Promise<BrowserPageAttachment> {
 	const session = await tab.startCDPSession();
 	const cdp = new CdpClient(session);
 
-	// The tab itself is always the first `type: 'page'` target -- iframes
-	// and workers the page happens to have loaded also show up here, so
-	// this can't just take targetInfos[0].
-	const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>('Target.getTargets');
-	const page = targetInfos.find(t => t.type === 'page');
-	if (!page) {
+	try {
+		// The tab itself is always the first `type: 'page'` target -- iframes
+		// and workers the page happens to have loaded also show up here, so
+		// this can't just take targetInfos[0].
+		const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>('Target.getTargets');
+		const page = targetInfos.find(t => t.type === 'page');
+		if (!page) {
+			throw new Error('No page target attached to this browser tab.');
+		}
+		const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
+		await cdp.send('Page.enable', undefined, sessionId);
+
+		return { session, cdp, sessionId, targetId: page.targetId };
+	} catch (error) {
+		// Any of the CDP calls above can throw; only the `!page` branch used
+		// to clean up, so a throw from `getTargets`/`attachToTarget`/
+		// `Page.enable` leaked both the `CdpClient` and the `BrowserCDPSession`
+		// (the caller's own `finally` only disposes the attachment once this
+		// has returned, so it never saw these). Tear them down here, then
+		// rethrow so the caller still reports `{ outcome: 'failed' }`.
 		cdp.dispose();
 		void session.close();
-		throw new Error('No page target attached to this browser tab.');
+		throw error;
 	}
-	const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
-	await cdp.send('Page.enable', undefined, sessionId);
-
-	return { session, cdp, sessionId, targetId: page.targetId };
 }
 
 /**
