@@ -72,7 +72,8 @@ export interface DiffHunk {
 export type ToolCallContent =
 	| { type: 'content'; text: string }
 	| { type: 'diff'; path: string; oldText?: string; newText: string; hunks?: DiffHunk[] }
-	| { type: 'image'; mimeType: string; data: string };
+	| { type: 'image'; mimeType: string; data: string }
+	| { type: 'plan'; title: string; summary: string; steps: string[]; notDoing?: string[] };
 
 export interface ToolCallUpdate {
 	toolCallId: string;
@@ -422,12 +423,22 @@ export class AcpClient extends EventEmitter {
 	 * can attach images (element-picker screenshots) alongside text --
 	 * `text` stays available as a convenience for the common no-attachment
 	 * case.
+	 *
+	 * `mode` is the optional `PromptRequest.mode` field (boxcode's own
+	 * `tools::Mode`, `snake_case`): `'plan'` runs the turn read-only until a
+	 * proposed plan is approved. Omitted for the default `normal`, so a
+	 * client that never selects Plan sends exactly what it did before.
 	 */
-	async prompt(sessionId: string, content: string | PromptContentBlock[]): Promise<{ stopReason: StopReason; turn: number }> {
+	async prompt(
+		sessionId: string,
+		content: string | PromptContentBlock[],
+		mode?: 'normal' | 'plan',
+	): Promise<{ stopReason: StopReason; turn: number }> {
 		const prompt: PromptContentBlock[] = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
 		const result = (await this.request('session/prompt', {
 			sessionId,
 			prompt,
+			...(mode ? { mode } : {}),
 		})) as { stopReason: StopReason; turn: number };
 		return result;
 	}

@@ -686,7 +686,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			permissionGate.cancelAll();
 		});
 		try {
-			await activeClient.prompt(activeSessionId, content);
+			// `request.mode` only exists once the fork's `chatParticipantPrivate`
+			// proposal is on (see `patches/109-...`); read it defensively so the
+			// extension still builds against the stable `vscode.ChatRequest`.
+			const mode = (request as vscode.ChatRequest & { mode?: string }).mode;
+			await activeClient.prompt(activeSessionId, content, mode === 'plan' ? 'plan' : undefined);
 			// Rendered only on a clean turn end, never after an error -- a
 			// failed turn's partial usage would be a misleading number. One
 			// line regardless of how many `usage_update`s arrived, since a
@@ -1370,7 +1374,11 @@ async function askPermission(
 	// `chatPermission.ts`'s own doc comment). The links instead invoke
 	// `boxcode.permission.respond` (or `.review`) and resolve the gate on the
 	// same turn.
-	stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks));
+	if (diff?.type === 'plan') {
+		stream.markdown(planDecisionMarkdown(diff, allowLabel, rejectLabel, id));
+	} else {
+		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks));
+	}
 	const answer = await wait;
 	pendingReviews.delete(id);
 	// The user answered (Allow/Reject/Review). Remove the prompt from chat:
@@ -1407,6 +1415,56 @@ function permissionDecisionMarkdown(
 		line.appendMarkdown(renderHunksMarkdown(hunks));
 		line.appendMarkdown('\n');
 	}
+	return line;
+}
+
+/**
+ * The plan card boxcode renders in place of a file diff when the turn ran in
+ * plan mode and the model called `exit_plan_mode`: title, summary, a numbered
+ * step list, and the explicitly-out-of-scope items, followed by the same
+ * Approve/Reject command links `permissionDecisionMarkdown` uses. Approving
+ * maps to `Decision::Allowed` (boxcode writes `plan.md`, leaves plan mode,
+ * implements); rejecting maps to `Decision::Refused` (boxcode stays in plan
+ * mode and revises) -- no new wire outcome, just a different card on the
+ * existing `request_permission` channel.
+ *
+ * The title/summary/steps/notDoing are the *model's own* proposal text, so
+ * they go through `appendText` (the same escaping `permissionDecisionMarkdown`
+ * uses for `action`) rather than raw `appendMarkdown` -- a `]` or `(` in a
+ * proposed step name must not be able to smuggle a command link into the card.
+ */
+function planDecisionMarkdown(
+	plan: { title: string; summary: string; steps: string[]; notDoing?: string[] },
+	allowLabel: string,
+	rejectLabel: string,
+	id: string,
+): vscode.MarkdownString {
+	const line = new vscode.MarkdownString(undefined, true);
+	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND] };
+	line.appendMarkdown('$(checklist) **boxcode proposes a plan**\n\n');
+	line.appendMarkdown('**');
+	line.appendText(plan.title);
+	line.appendMarkdown('**\n\n');
+	line.appendText(plan.summary);
+	if (plan.steps.length > 0) {
+		line.appendMarkdown('\n\n**Steps**\n');
+		for (const step of plan.steps) {
+			line.appendMarkdown('1. ');
+			line.appendText(step);
+			line.appendMarkdown('\n');
+		}
+	}
+	if (plan.notDoing && plan.notDoing.length > 0) {
+		line.appendMarkdown('\n**Out of scope**\n');
+		for (const item of plan.notDoing) {
+			line.appendMarkdown('- ');
+			line.appendText(item);
+			line.appendMarkdown('\n');
+		}
+	}
+	line.appendMarkdown(`\n[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	line.appendMarkdown('\n\n');
 	return line;
 }
 

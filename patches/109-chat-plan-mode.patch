@@ -1,0 +1,229 @@
+diff --git a/src/vs/sessions/contrib/providers/copilotChatSessions/browser/copilotChatSessionsProvider.ts b/src/vs/sessions/contrib/providers/copilotChatSessions/browser/copilotChatSessionsProvider.ts
+index 9f94da7f..1e45147c 100644
+--- a/src/vs/sessions/contrib/providers/copilotChatSessions/browser/copilotChatSessionsProvider.ts
++++ b/src/vs/sessions/contrib/providers/copilotChatSessions/browser/copilotChatSessionsProvider.ts
+@@ -2071,7 +2071,7 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
+ 		// Resolve mode
+ 		const modeKind = session.chatMode?.kind ?? ChatModeKind.Agent;
+ 		const modeIsBuiltin = session.chatMode ? isBuiltinChatMode(session.chatMode) : true;
+-		const modeId: 'ask' | 'agent' | 'edit' | 'custom' | undefined = modeIsBuiltin ? modeKind : 'custom';
++		const modeId: 'ask' | 'agent' | 'edit' | 'plan' | 'custom' | undefined = modeIsBuiltin ? modeKind : 'custom';
+ 
+ 		const rawModeInstructions = session.chatMode?.modeInstructions?.get();
+ 		const modeInstructions = rawModeInstructions ? {
+diff --git a/src/vs/workbench/api/common/extHostTypeConverters.ts b/src/vs/workbench/api/common/extHostTypeConverters.ts
+index f349e865..09e33a42 100644
+--- a/src/vs/workbench/api/common/extHostTypeConverters.ts
++++ b/src/vs/workbench/api/common/extHostTypeConverters.ts
+@@ -3459,6 +3459,7 @@ export namespace ChatAgentRequest {
+ 			modeInstructions: request.modeInstructions?.content,
+ 			modeInstructions2: ChatRequestModeInstructions.to(request.modeInstructions),
+ 			permissionLevel: request.permissionLevel,
++			mode: request.mode,
+ 			subAgentInvocationId: request.subAgentInvocationId,
+ 			subAgentName: request.subAgentName,
+ 			parentRequestId: request.parentRequestId,
+@@ -3494,6 +3495,8 @@ export namespace ChatAgentRequest {
+ 			delete (requestWithAllProps as any).hasHooksEnabled;
+ 			// eslint-disable-next-line local/code-no-any-casts
+ 			delete (requestWithAllProps as any).hooks;
++			// eslint-disable-next-line local/code-no-any-casts
++			delete (requestWithAllProps as any).mode;
+ 		}
+ 
+ 		if (!isProposedApiEnabled(extension, 'chatParticipantAdditions')) {
+diff --git a/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingSessionStorage.ts b/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingSessionStorage.ts
+index 0b8e1e0e..0394e36d 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingSessionStorage.ts
++++ b/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingSessionStorage.ts
+@@ -267,7 +267,7 @@ interface IModifiedEntryTelemetryInfoDTO {
+ 	readonly command?: string;
+ 
+ 	readonly modelId?: string;
+-	readonly modeId?: 'ask' | 'edit' | 'agent' | 'custom' | 'applyCodeBlock' | undefined;
++	readonly modeId?: 'ask' | 'edit' | 'agent' | 'plan' | 'custom' | 'applyCodeBlock' | undefined;
+ 	readonly applyCodeBlockSuggestionId?: EditSuggestionId | undefined;
+ 	readonly feature?: 'sideBarChat' | 'inlineChat' | undefined;
+ }
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts b/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
+index d8f0a682..644c4496 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
+@@ -491,7 +491,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
+ 
+ 	public get currentModeInfo(): IChatRequestModeInfo {
+ 		const mode = this._currentModeObservable.get();
+-		const modeId: 'ask' | 'agent' | 'edit' | 'custom' | undefined = mode.isBuiltin ? this.currentModeKind : 'custom';
++		const modeId: 'ask' | 'agent' | 'edit' | 'plan' | 'custom' | undefined = mode.isBuiltin ? this.currentModeKind : 'custom';
+ 
+ 		const modeInstructions = mode.modeInstructions?.get();
+ 		return {
+@@ -1814,6 +1814,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
+ 				case ChatModeKind.Edit:
+ 					modeLabel = localize('chatInput.mode.edit', "(Edit), edit files in your workspace.");
+ 					break;
++				case ChatModeKind.Plan:
++					modeLabel = localize('chatInput.mode.plan', "(Plan), plan changes before implementing.");
++					break;
+ 				case ChatModeKind.Ask:
+ 				default:
+ 					modeLabel = localize('chatInput.mode.ask', "(Ask), ask questions or type / for topics.");
+diff --git a/src/vs/workbench/contrib/chat/common/chatModes.ts b/src/vs/workbench/contrib/chat/common/chatModes.ts
+index 44b18553..cc342de8 100644
+--- a/src/vs/workbench/contrib/chat/common/chatModes.ts
++++ b/src/vs/workbench/contrib/chat/common/chatModes.ts
+@@ -308,6 +308,7 @@ class ChatModes extends Disposable implements IChatModes {
+ 			builtinModes.unshift(ChatMode.Agent);
+ 		}
+ 		builtinModes.push(ChatMode.Edit);
++		builtinModes.push(ChatMode.Plan);
+ 		return builtinModes;
+ 	}
+ 
+@@ -711,12 +712,14 @@ export namespace ChatMode {
+ 	export const Ask = new BuiltinChatMode(ChatModeKind.Ask, 'Ask', localize('chatDescription', "Explore and understand your code"), Codicon.question);
+ 	export const Edit = new BuiltinChatMode(ChatModeKind.Edit, 'Edit', localize('editsDescription', "Edit or refactor selected code"), Codicon.edit);
+ 	export const Agent = new BuiltinChatMode(ChatModeKind.Agent, 'Agent', localize('agentDescription', "Describe what to build"), Codicon.agent);
++	export const Plan = new BuiltinChatMode(ChatModeKind.Plan, 'Plan', localize('planDescription', "Plan changes before implementing"), Codicon.checklist);
+ }
+ 
+ export function isBuiltinChatMode(mode: IChatMode): boolean {
+ 	return mode.id === ChatMode.Ask.id ||
+ 		mode.id === ChatMode.Edit.id ||
+-		mode.id === ChatMode.Agent.id;
++		mode.id === ChatMode.Agent.id ||
++		mode.id === ChatMode.Plan.id;
+ }
+ 
+ /**
+diff --git a/src/vs/workbench/contrib/chat/common/chatService/chatServiceImpl.ts b/src/vs/workbench/contrib/chat/common/chatService/chatServiceImpl.ts
+index 0b21f9b8..f338c696 100644
+--- a/src/vs/workbench/contrib/chat/common/chatService/chatServiceImpl.ts
++++ b/src/vs/workbench/contrib/chat/common/chatService/chatServiceImpl.ts
+@@ -1326,6 +1326,7 @@ export class ChatService extends Disposable implements IChatService {
+ 							userSelectedTools: options?.userSelectedTools?.get(),
+ 							modeInstructions: options?.modeInfo?.modeInstructions,
+ 							permissionLevel: options?.modeInfo?.permissionLevel,
++							mode: options?.modeInfo?.kind,
+ 							editedFileEvents: thisRequest.editedFileEvents,
+ 							hooks: collectedHooks,
+ 							hasHooksEnabled: !!collectedHooks && Object.values(collectedHooks).some(arr => arr.length > 0),
+diff --git a/src/vs/workbench/contrib/chat/common/constants.ts b/src/vs/workbench/contrib/chat/common/constants.ts
+index 52ffe49c..88047d07 100644
+--- a/src/vs/workbench/contrib/chat/common/constants.ts
++++ b/src/vs/workbench/contrib/chat/common/constants.ts
+@@ -110,7 +110,8 @@ export enum ChatConfiguration {
+ export enum ChatModeKind {
+ 	Ask = 'ask',
+ 	Edit = 'edit',
+-	Agent = 'agent'
++	Agent = 'agent',
++	Plan = 'plan'
+ }
+ 
+ /**
+diff --git a/src/vs/workbench/contrib/chat/common/editing/chatEditingService.ts b/src/vs/workbench/contrib/chat/common/editing/chatEditingService.ts
+index 2fec4272..6c9d3052 100644
+--- a/src/vs/workbench/contrib/chat/common/editing/chatEditingService.ts
++++ b/src/vs/workbench/contrib/chat/common/editing/chatEditingService.ts
+@@ -82,7 +82,7 @@ export interface IModifiedEntryTelemetryInfo {
+ 	readonly requestId: string;
+ 	readonly result: IChatAgentResult | undefined;
+ 	readonly modelId: string | undefined;
+-	readonly modeId: 'ask' | 'edit' | 'agent' | 'custom' | 'applyCodeBlock' | undefined;
++	readonly modeId: 'ask' | 'edit' | 'agent' | 'plan' | 'custom' | 'applyCodeBlock' | undefined;
+ 	readonly applyCodeBlockSuggestionId: EditSuggestionId | undefined;
+ 	readonly feature: 'sideBarChat' | 'inlineChat' | undefined;
+ }
+diff --git a/src/vs/workbench/contrib/chat/common/model/chatModel.ts b/src/vs/workbench/contrib/chat/common/model/chatModel.ts
+index 97239a59..c3656122 100644
+--- a/src/vs/workbench/contrib/chat/common/model/chatModel.ts
++++ b/src/vs/workbench/contrib/chat/common/model/chatModel.ts
+@@ -337,7 +337,7 @@ export interface IChatRequestModeInfo {
+ 	kind: ChatModeKind | undefined; // is undefined in case of telemetryModeId === 'applyCodeBlock'
+ 	isBuiltin: boolean;
+ 	modeInstructions: IChatRequestModeInstructions | undefined;
+-	telemetryModeId: 'ask' | 'agent' | 'edit' | 'custom' | 'applyCodeBlock' | undefined;
++	telemetryModeId: 'ask' | 'agent' | 'edit' | 'plan' | 'custom' | 'applyCodeBlock' | undefined;
+ 	telemetryModeName?: string;
+ 	applyCodeBlockSuggestionId: EditSuggestionId | undefined;
+ 	permissionLevel?: ChatPermissionLevel;
+diff --git a/src/vs/workbench/contrib/chat/common/participants/chatAgents.ts b/src/vs/workbench/contrib/chat/common/participants/chatAgents.ts
+index 8cfef4cb..ecd0e100 100644
+--- a/src/vs/workbench/contrib/chat/common/participants/chatAgents.ts
++++ b/src/vs/workbench/contrib/chat/common/participants/chatAgents.ts
+@@ -175,6 +175,12 @@ export interface IChatAgentRequest {
+ 	 * - `'autopilot'`: Everything autoApprove does plus continues until the task is done.
+ 	 */
+ 	permissionLevel?: ChatPermissionLevel;
++	/**
++	 * The chat mode the user selected for this request (`ChatModeKind`).
++	 * `'plan'` asks the agent to research and propose a plan rather than
++	 * making changes directly.
++	 */
++	mode?: ChatModeKind;
+ 	/**
+ 	 * Unique ID for the subagent invocation, used to group tool calls from the same subagent run together.
+ 	 */
+diff --git a/src/vs/workbench/contrib/editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryService.ts b/src/vs/workbench/contrib/editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryService.ts
+index b349871d..a2012f74 100644
+--- a/src/vs/workbench/contrib/editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryService.ts
++++ b/src/vs/workbench/contrib/editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryService.ts
+@@ -54,6 +54,8 @@ export interface IEditTelemetryBaseData {
+ 	| 'edit'
+ 	/** AI agent mode for autonomous task completion and multi-file edits */
+ 	| 'agent'
++	/** Plan mode, which researches and proposes changes before implementing */
++	| 'plan'
+ 	/** Custom mode defined by extensions or user settings */
+ 	| 'custom'
+ 	/** Applying a previously suggested code block */
+diff --git a/src/vs/workbench/contrib/editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryServiceImpl.ts b/src/vs/workbench/contrib/editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryServiceImpl.ts
+index cc3bbf0e..0faff60f 100644
+--- a/src/vs/workbench/contrib/editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryServiceImpl.ts
++++ b/src/vs/workbench/contrib/editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryServiceImpl.ts
+@@ -41,7 +41,7 @@ export class AiEditTelemetryServiceImpl implements IAiEditTelemetryService {
+ 			editLinesInserted: number | undefined;
+ 			editLinesDeleted: number | undefined;
+ 
+-			modeId: 'ask' | 'edit' | 'agent' | 'custom' | 'applyCodeBlock' | undefined;
++			modeId: 'ask' | 'edit' | 'agent' | 'plan' | 'custom' | 'applyCodeBlock' | undefined;
+ 			modelId: string | undefined;
+ 			applyCodeBlockSuggestionId: string | undefined;
+ 			sourceRequestId: string | undefined;
+@@ -115,7 +115,7 @@ export class AiEditTelemetryServiceImpl implements IAiEditTelemetryService {
+ 			editLinesInserted: number | undefined;
+ 			editLinesDeleted: number | undefined;
+ 
+-			modeId: 'ask' | 'edit' | 'agent' | 'custom' | 'applyCodeBlock' | undefined;
++			modeId: 'ask' | 'edit' | 'agent' | 'plan' | 'custom' | 'applyCodeBlock' | undefined;
+ 			modelId: string | undefined;
+ 			applyCodeBlockSuggestionId: string | undefined;
+ 			sourceRequestId: string | undefined;
+@@ -197,7 +197,7 @@ export class AiEditTelemetryServiceImpl implements IAiEditTelemetryService {
+ 			editLinesInserted: number | undefined;
+ 			editLinesDeleted: number | undefined;
+ 
+-			modeId: 'ask' | 'edit' | 'agent' | 'custom' | 'applyCodeBlock' | undefined;
++			modeId: 'ask' | 'edit' | 'agent' | 'plan' | 'custom' | 'applyCodeBlock' | undefined;
+ 			modelId: string | undefined;
+ 			applyCodeBlockSuggestionId: string | undefined;
+ 			sourceRequestId: string | undefined;
+diff --git a/src/vscode-dts/vscode.proposed.chatParticipantPrivate.d.ts b/src/vscode-dts/vscode.proposed.chatParticipantPrivate.d.ts
+index f0fad8b9..0a2d9418 100644
+--- a/src/vscode-dts/vscode.proposed.chatParticipantPrivate.d.ts
++++ b/src/vscode-dts/vscode.proposed.chatParticipantPrivate.d.ts
+@@ -121,6 +121,13 @@ declare module 'vscode' {
+ 		 */
+ 		readonly permissionLevel?: string;
+ 
++		/**
++		 * The chat mode the user selected for this request (`'ask'`, `'edit'`,
++		 * `'agent'`, or `'plan'`). `'plan'` asks the agent to research and
++		 * propose a plan rather than making changes directly.
++		 */
++		readonly mode?: string;
++
+ 		/**
+ 		 * Whether any hooks are enabled for this request.
+ 		 */

@@ -12,7 +12,8 @@
     "chatParticipantAdditions",
     "defaultChatParticipant",
     "browser",
-    "chatReferenceBinaryData"
+    "chatReferenceBinaryData",
+    "chatParticipantPrivate"
   ],
   "capabilities": {
     "virtualWorkspaces": false,
@@ -44,7 +45,8 @@
         "modes": [
           "ask",
           "edit",
-          "agent"
+          "agent",
+          "plan"
         ]
       }
     ],
