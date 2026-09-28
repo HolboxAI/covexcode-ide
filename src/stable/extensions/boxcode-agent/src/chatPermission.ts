@@ -25,13 +25,7 @@ import { permissionOutcomeFromChoice } from './permissionOutcome';
 export const PERMISSION_COMMAND = 'boxcode.permission.respond';
 export const REVIEW_COMMAND = 'boxcode.permission.review';
 
-export type PermissionChoice = 'allow' | 'reject' | 'cancelled' | 'partial';
-
-export interface PermissionAnswer {
-	choice: PermissionChoice;
-	/** Present only for a `partial` answer -- the merged file text. */
-	newText?: string;
-}
+export type PermissionChoice = 'allow' | 'reject' | 'allow-always' | 'deny-always' | 'cancelled';
 
 export class PermissionGate {
 	private nextId = 1;
@@ -85,7 +79,12 @@ export function parsePermissionCommandArgs(args: unknown[]): { id: string; choic
 	if (typeof id !== 'string') {
 		return undefined;
 	}
-	if (choice !== 'allow' && choice !== 'reject') {
+	if (
+		choice !== 'allow' &&
+		choice !== 'reject' &&
+		choice !== 'allow-always' &&
+		choice !== 'deny-always'
+	) {
 		return undefined;
 	}
 	return { id, choice };
@@ -117,7 +116,10 @@ export function permissionOutcomeFromGate(
 	return { outcome: 'cancelled' };
 }
 
-export function permissionCommandUri(id: string, choice: 'allow' | 'reject'): string {
+export function permissionCommandUri(
+	id: string,
+	choice: 'allow' | 'reject' | 'allow-always' | 'deny-always',
+): string {
 	const encoded = encodeURIComponent(JSON.stringify([id, choice]));
 	return `command:${PERMISSION_COMMAND}?${encoded}`;
 }
