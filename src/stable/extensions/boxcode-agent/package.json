@@ -2,7 +2,7 @@
   "name": "boxcode-agent",
   "displayName": "boxcode",
   "description": "Chat with boxcode, driven over its ACP stdio interface.",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "publisher": "boxcode",
   "license": "MIT",
   "engines": {
@@ -47,6 +47,16 @@
           "edit",
           "agent",
           "plan"
+        ],
+        "commands": [
+          {
+            "name": "provider",
+            "description": "Pick a provider, model, and API key (same as the boxcode CLI /provider flow)."
+          },
+          {
+            "name": "model",
+            "description": "Switch model for the current provider without changing the API key."
+          }
         ]
       }
     ],
@@ -65,6 +75,11 @@
       {
         "command": "boxcode.changeProvider",
         "title": "boxcode: Change Provider / Model / API Key",
+        "category": "boxcode"
+      },
+      {
+        "command": "boxcode.setApiKey",
+        "title": "boxcode: Set API Key",
         "category": "boxcode"
       },
       {
@@ -97,21 +112,31 @@
         "boxcode.provider": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Registry id of the LLM provider picked during setup (e.g. `deepseek`), or empty for a manually-entered custom endpoint. Set automatically by the setup flow and by `boxcode: Change Provider / Model / API Key` -- not normally edited by hand."
+          "order": 1,
+          "markdownDescription": "LLM provider registry id (e.g. `deepseek`), or empty for a custom endpoint. Prefer the chat slash command `/provider`, or [Change Provider / Model / API Key](command:boxcode.changeProvider), instead of editing this by hand."
         },
         "boxcode.endpoint": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Base URL for boxcode's OpenAI-compatible LLM endpoint (e.g. `https://api.deepseek.com`). Leave empty to be prompted on first use, or if `~/.boxcode/config.toml` already has one set up from using the `boxcode` CLI directly."
+          "order": 2,
+          "markdownDescription": "Base URL for boxcode's OpenAI-compatible LLM endpoint (e.g. `https://api.deepseek.com`). Set automatically by `/provider`; leave empty to use `~/.boxcode/config.toml` from the CLI when no IDE override is stored."
         },
         "boxcode.model": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Model name to request from the configured endpoint. Set automatically by the setup flow; run `boxcode: Change Provider / Model / API Key` to change it."
+          "order": 3,
+          "markdownDescription": "Model name for the configured provider/endpoint. Use chat `/model` to pick from the provider's list, `/provider` to change provider + model + key, or [Change Provider / Model / API Key](command:boxcode.changeProvider)."
+        },
+        "boxcode.apiKey": {
+          "type": "boolean",
+          "default": true,
+          "order": 4,
+          "markdownDescription": "API keys are stored in the OS secure store (never in `settings.json`). The toggle is unused — use [Set API Key](command:boxcode.setApiKey), chat `/provider`, or [Change Provider / Model / API Key](command:boxcode.changeProvider)."
         },
         "boxcode.costPerMillionTokens": {
           "type": "number",
           "default": 0.35,
+          "order": 5,
           "markdownDescription": "Blended USD price per million tokens, used for the `~$` estimate in the chat usage footnote. Defaults to a blended DeepSeek input+output estimate; set to 0 to show token totals only. The authoritative per-model figure should come from boxcode itself (see `docs/BACKLOG.md`, cost/usage meter)."
         }
       }
