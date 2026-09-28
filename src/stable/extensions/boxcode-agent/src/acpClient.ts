@@ -162,7 +162,7 @@ export interface CheckInBrowserRequest {
 }
 
 export type CheckInBrowserOutcome =
-	| { outcome: 'screenshot'; mimeType: string; data: string }
+	| { outcome: 'screenshot'; mimeType: string; data: string; axTree?: string }
 	| { outcome: 'failed'; reason: string };
 
 /**
@@ -192,7 +192,7 @@ export interface InteractInBrowserRequest {
 }
 
 export type InteractInBrowserOutcome =
-	| { outcome: 'screenshot'; mimeType: string; data: string }
+	| { outcome: 'screenshot'; mimeType: string; data: string; axTree?: string }
 	| { outcome: 'failed'; reason: string };
 
 /**

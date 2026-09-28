@@ -34,6 +34,7 @@ import {
 	ToolCallStatus,
 } from './acpClient';
 import { CdpClient } from './cdpClient';
+import { serializeAxTree, AxNode } from './axTree';
 import { boxcodeBinaryCandidates } from './boxcodeBinary';
 import {
 	parsePermissionCommandArgs,
@@ -1928,6 +1929,36 @@ async function captureScreenshot(attachment: BrowserPageAttachment): Promise<str
 }
 
 /**
+ * Captures the page's accessibility tree and serializes it to the compact
+ * text snapshot the model reads. This is the token-efficient counterpart to
+ * `captureScreenshot`: the human sees the PNG, the model reads roles/labels/
+ * text — the page's *meaning* — without paying image-token cost on every
+ * verification step.
+ *
+ * Best-effort by design: an AX failure must not break the check. The
+ * screenshot path is already complete by the time this runs, so any error
+ * (an unsupported domain on some CDP target, a page that never computed a
+ * tree) simply degrades to the existing screenshot-only result and the model
+ * still gets its "screenshot captured" receipt. `Accessibility.enable` is
+ * called first defensively — some Chromium builds do not compute the tree
+ * until asked — and is harmless when already enabled.
+ */
+async function captureAccessibilityTree(attachment: BrowserPageAttachment): Promise<string | undefined> {
+	try {
+		await attachment.cdp.send('Accessibility.enable', undefined, attachment.sessionId);
+		const { nodes } = await attachment.cdp.send<{ nodes: AxNode[] }>(
+			'Accessibility.getFullAXTree',
+			undefined,
+			attachment.sessionId,
+		);
+		const text = serializeAxTree(nodes ?? []);
+		return text.length > 0 ? text : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * Fulfills `check_in_browser` on the client side: finds or opens the tab at
  * `url`, forces a fresh navigation (a reused tab could otherwise show
  * stale content for a page with no hot-reload of its own), and screenshots
@@ -1958,6 +1989,10 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 		await loaded;
 
 		const data = await captureScreenshot(attachment);
+		const axTree = await captureAccessibilityTree(attachment);
+		if (axTree) {
+			return { outcome: 'screenshot', mimeType: 'image/png', data, axTree };
+		}
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
 		return { outcome: 'failed', reason: describeError(error) };
@@ -2005,6 +2040,10 @@ async function interactInBrowser(url: string, interaction: BrowserInteraction): 
 		}
 
 		const data = await captureScreenshot(attachment);
+		const axTree = await captureAccessibilityTree(attachment);
+		if (axTree) {
+			return { outcome: 'screenshot', mimeType: 'image/png', data, axTree };
+		}
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
 		return { outcome: 'failed', reason: describeError(error) };
