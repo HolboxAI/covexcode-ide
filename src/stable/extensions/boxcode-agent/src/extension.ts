@@ -556,6 +556,20 @@ export function activate(context: vscode.ExtensionContext): void {
 			stream.markdown(restrictedModeMarkdown());
 			return;
 		}
+
+		// Slash commands (`/provider`, `/model`) are local UI flows -- they must
+		// not be forwarded to ACP as ordinary chat prompts.
+		if (request.command === 'provider') {
+			const outcome = await changeProviderFlow(context, discardSession);
+			stream.markdown(providerCommandMarkdown(outcome));
+			return;
+		}
+		if (request.command === 'model') {
+			const outcome = await changeModelFlow(context, discardSession);
+			stream.markdown(modelCommandMarkdown(outcome));
+			return;
+		}
+
 		if (isFreshChat(chatContext.history.length) && client) {
 			// VS Code's "New Chat" reuses this extension host, so without
 			// this the next empty-history request would keep talking to the
@@ -786,22 +800,37 @@ export function activate(context: vscode.ExtensionContext): void {
 		// a different provider) had no in-product fix -- `ensureCredentials`
 		// only re-prompts when a value is *missing*, never when it's wrong,
 		// so the only recovery was hand-editing settings.json and clearing
-		// SecretStorage by hand.
+		// SecretStorage by hand. Runs the setup wizard immediately (same as
+		// chat `/provider`) rather than asking the user to send another
+		// message -- and forces a prompt even when `~/.boxcode/config.toml`
+		// already exists, because clearing IDE settings alone would otherwise
+		// silently fall through to that file.
 		vscode.commands.registerCommand('boxcode.changeProvider', async () => {
-			await context.secrets.delete(SECRET_API_KEY);
-			const config = vscode.workspace.getConfiguration('boxcode');
-			await config.update('provider', undefined, vscode.ConfigurationTarget.Global);
-			await config.update('endpoint', undefined, vscode.ConfigurationTarget.Global);
-			await config.update('model', undefined, vscode.ConfigurationTarget.Global);
-			// The next chat message must spawn a fresh session against the
-			// new credentials, not reuse a client already running with the
-			// old ones -- `ensureReady`'s own memoization exists precisely
-			// to avoid a second spawn per turn, so it has to be cleared
-			// explicitly here rather than just waiting for it to notice.
-			discardSession();
-			void vscode.window.showInformationMessage(
-				'boxcode: cleared. Send a chat message to pick a new provider, model, and API key.',
-			);
+			const outcome = await changeProviderFlow(context, discardSession);
+			if (outcome.kind === 'ok') {
+				void vscode.window.showInformationMessage(
+					`boxcode: using ${outcome.summary}. Send a chat message to start a session with the new credentials.`,
+				);
+			} else if (outcome.kind === 'cancelled') {
+				void vscode.window.showInformationMessage('boxcode: provider change cancelled.');
+			} else if (outcome.kind === 'no-binary') {
+				void vscode.window.showErrorMessage(
+					"boxcode: couldn't find the `boxcode` CLI. Install it first, or set `boxcode.path` in Settings.",
+				);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('boxcode.setApiKey', async () => {
+			const outcome = await setApiKeyFlow(context, discardSession);
+			if (outcome === 'ok') {
+				void vscode.window.showInformationMessage(
+					'boxcode: API key saved securely. Send a chat message to use it.',
+				);
+			} else if (outcome === 'cancelled') {
+				void vscode.window.showInformationMessage('boxcode: API key change cancelled.');
+			}
 		}),
 	);
 }
@@ -1094,6 +1123,166 @@ interface SetupResult {
 	apiKey: string;
 }
 
+type ProviderFlowOutcome =
+	| { kind: 'ok'; summary: string }
+	| { kind: 'cancelled' }
+	| { kind: 'no-binary' };
+
+type ModelFlowOutcome =
+	| { kind: 'ok'; summary: string }
+	| { kind: 'cancelled' }
+	| { kind: 'no-binary' }
+	| { kind: 'no-provider' };
+
+/** Resolve the `boxcode` binary the same way `ensureReady` does, without
+ * spawning an ACP session -- needed by `/provider` and `/model`, which only
+ * need `--providers-json`. */
+async function resolveBoxcodeBinary(): Promise<string | undefined> {
+	const candidates = boxcodeBinaryCandidates(configuredBoxcodePath(), os.homedir());
+	for (const candidate of candidates) {
+		if (await probeBinaryExists(candidate)) {
+			return candidate;
+		}
+	}
+	return undefined;
+}
+
+async function persistSetupResult(context: vscode.ExtensionContext, entered: SetupResult): Promise<void> {
+	const config = vscode.workspace.getConfiguration('boxcode');
+	await config.update('provider', entered.provider, vscode.ConfigurationTarget.Global);
+	await config.update('endpoint', entered.endpoint, vscode.ConfigurationTarget.Global);
+	await config.update('model', entered.model, vscode.ConfigurationTarget.Global);
+	await context.secrets.store(SECRET_API_KEY, entered.apiKey);
+}
+
+function setupSummary(entered: SetupResult): string {
+	const providerLabel = entered.provider || 'custom endpoint';
+	return `${providerLabel} / ${entered.model}`;
+}
+
+/**
+ * Full provider → model → API key wizard, then persist + discard any live
+ * ACP session. Used by chat `/provider` and `boxcode.changeProvider`.
+ */
+async function changeProviderFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<ProviderFlowOutcome> {
+	const boxcodeCommand = await resolveBoxcodeBinary();
+	if (!boxcodeCommand) {
+		return { kind: 'no-binary' };
+	}
+	const entered = await runSetupFlow(boxcodeCommand);
+	if (!entered) {
+		return { kind: 'cancelled' };
+	}
+	await persistSetupResult(context, entered);
+	discardSession();
+	return { kind: 'ok', summary: setupSummary(entered) };
+}
+
+/**
+ * Model-only switch for the currently configured provider. Keeps the stored
+ * API key; updates `boxcode.model` (and endpoint if the registry entry
+ * differs). Falls back to the full provider flow when no provider is set.
+ */
+async function changeModelFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<ModelFlowOutcome> {
+	const boxcodeCommand = await resolveBoxcodeBinary();
+	if (!boxcodeCommand) {
+		return { kind: 'no-binary' };
+	}
+	const config = vscode.workspace.getConfiguration('boxcode');
+	const providerId = config.get<string>('provider', '').trim();
+	if (!providerId) {
+		// Custom endpoint or unset -- can't list registry models; offer the
+		// full provider flow instead of a dead-end QuickPick.
+		const entered = await runSetupFlow(boxcodeCommand);
+		if (!entered) {
+			return { kind: 'cancelled' };
+		}
+		await persistSetupResult(context, entered);
+		discardSession();
+		return { kind: 'ok', summary: setupSummary(entered) };
+	}
+
+	let providers: ProviderDescriptor[];
+	try {
+		providers = await fetchProviders(boxcodeCommand);
+	} catch {
+		return { kind: 'no-provider' };
+	}
+	const provider = providers.find(p => p.id === providerId);
+	if (!provider || provider.models.length === 0) {
+		return { kind: 'no-provider' };
+	}
+
+	const currentModel = config.get<string>('model', '');
+	const model = await vscode.window.showQuickPick(provider.models, {
+		title: `boxcode -- pick a model for ${provider.label}`,
+		placeHolder: currentModel || undefined,
+		ignoreFocusOut: true,
+	});
+	if (!model) {
+		return { kind: 'cancelled' };
+	}
+
+	await config.update('endpoint', provider.endpoint, vscode.ConfigurationTarget.Global);
+	await config.update('model', model, vscode.ConfigurationTarget.Global);
+	discardSession();
+	return { kind: 'ok', summary: `${provider.id} / ${model}` };
+}
+
+/** Prompt for an API key only and store it in SecretStorage. */
+async function setApiKeyFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<'ok' | 'cancelled'> {
+	const config = vscode.workspace.getConfiguration('boxcode');
+	const providerId = config.get<string>('provider', '').trim();
+	const envHint = providerId ? ` (or export ${providerEnvVarName(providerId)})` : '';
+	const apiKey = await vscode.window.showInputBox({
+		title: 'boxcode -- set API key',
+		prompt: `API key stored securely, never written to settings.json${envHint}`,
+		password: true,
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An API key is required.'),
+	});
+	if (!apiKey) {
+		return 'cancelled';
+	}
+	await context.secrets.store(SECRET_API_KEY, apiKey.trim());
+	discardSession();
+	return 'ok';
+}
+
+function providerCommandMarkdown(outcome: ProviderFlowOutcome): string {
+	switch (outcome.kind) {
+		case 'ok':
+			return `Provider updated to **${outcome.summary}**. Send a normal chat message to use it.\n\n` +
+				`You can also change this later with \`/provider\`, \`/model\`, or in **Settings → boxcode**.`;
+		case 'cancelled':
+			return 'Provider change cancelled -- existing credentials are unchanged.';
+		case 'no-binary':
+			return "Couldn't find the `boxcode` CLI. Install it, or set `boxcode.path` in Settings, then run `/provider` again.";
+	}
+}
+
+function modelCommandMarkdown(outcome: ModelFlowOutcome): string {
+	switch (outcome.kind) {
+		case 'ok':
+			return `Model updated to **${outcome.summary}**. Send a normal chat message to use it.`;
+		case 'cancelled':
+			return 'Model change cancelled -- existing model is unchanged.';
+		case 'no-binary':
+			return "Couldn't find the `boxcode` CLI. Install it, or set `boxcode.path` in Settings, then run `/model` again.";
+		case 'no-provider':
+			return 'No provider is configured yet (or the registry has no models for it). Run `/provider` to pick a provider, model, and API key.';
+	}
+}
+
 /**
  * Resolves the env-var overrides to hand `boxcode --acp` (see
  * `AcpClient`'s own doc comment on why these are additive, never blanking):
@@ -1121,10 +1310,7 @@ async function ensureCredentials(context: vscode.ExtensionContext, boxcodeComman
 		endpoint = entered.endpoint;
 		model = entered.model;
 		apiKey = entered.apiKey;
-		await config.update('provider', provider, vscode.ConfigurationTarget.Global);
-		await config.update('endpoint', endpoint, vscode.ConfigurationTarget.Global);
-		await config.update('model', model, vscode.ConfigurationTarget.Global);
-		await context.secrets.store(SECRET_API_KEY, apiKey);
+		await persistSetupResult(context, entered);
 	}
 
 	const overrides: NodeJS.ProcessEnv = {};
