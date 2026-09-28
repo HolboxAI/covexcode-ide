@@ -50,6 +50,7 @@ import {
 	recommendationSkipKey,
 } from './frameworkRecommendations';
 import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
+import { agentSupportsMcp, loadMcpConfig, mcpServersForSession } from './mcpLoader';
 import { referenceContextSection } from './referenceContent';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import { createTurnUsage, TurnUsage } from './turnUsage';
@@ -491,8 +492,23 @@ export function activate(context: vscode.ExtensionContext): void {
 				// subprocess dies; tear the session down so the next message
 				// re-launches (ensureReady re-runs because `ready` is cleared).
 				acp.on('exit', () => discardSession());
-				await acp.initialize();
-				sessionId = await acp.newSession(cwd);
+				const initResult = await acp.initialize();
+				const mcpLoaded = loadMcpConfig({
+					readFile: (file) => {
+						try {
+							return fs.readFileSync(file, 'utf8');
+						} catch {
+							return undefined;
+						}
+					},
+					workspaceFolder: cwd,
+					home: os.homedir(),
+					env: process.env,
+				});
+				sessionId = await acp.newSession(
+					cwd,
+					mcpServersForSession(mcpLoaded, agentSupportsMcp(initResult)),
+				);
 				sessionCwd = cwd;
 			})().catch(error => {
 				// A failed launch must not wedge every later message behind
