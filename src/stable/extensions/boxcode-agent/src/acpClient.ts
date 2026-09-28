@@ -5,6 +5,46 @@
 import * as cp from 'node:child_process';
 import * as readline from 'node:readline';
 import { EventEmitter } from 'node:events';
+import type { toAcpMcpServers } from './mcpConfig';
+
+/**
+ * One entry of ACP v1's `session/new` `mcpServers` array, as built by
+ * `mcpConfig.ts`'s `toAcpMcpServers()`. Derived from that function's own return
+ * type rather than re-declared here, so the two cannot drift apart: the producer
+ * and this consumer are typed by a single source of truth.
+ */
+export type AcpMcpServerConfig = ReturnType<typeof toAcpMcpServers>[number];
+
+/**
+ * Mirrors `protocol.rs`'s agent capabilities. `mcp` is deliberately *not* in the
+ * ACP v1 schema -- boxcode advertises it as a forward-compatible extra so a
+ * client can tell "this build connects MCP servers" apart from "this build
+ * accepts the field and ignores it". ACP v1 makes `mcpServers` required on
+ * `session/new`, so an MCP-less build still accepts a populated array and returns
+ * a session id while connecting nothing (verified by probe -- see
+ * `docs/MCP-verification.md` in the merged design notes). Sending servers to such
+ * a build is therefore a silent no-op, which is precisely what this flag prevents.
+ */
+export interface AgentCapabilities {
+	session?: Record<string, unknown>;
+	mcp?: boolean;
+	promptCapabilities?: { image?: boolean };
+}
+
+export interface InitializeResult {
+	protocolVersion?: number;
+	agentCapabilities?: AgentCapabilities;
+}
+
+/**
+ * Whether the agent we are talking to actually connects the MCP servers it is
+ * handed. Called against the result of `initialize()`; absent capability means
+ * "no", because the failure mode of guessing wrong is a silent no-op that looks
+ * like a working feature.
+ */
+export function agentSupportsMcp(result: InitializeResult | undefined): boolean {
+	return result?.agentCapabilities?.mcp === true;
+}
 
 // Wire types mirror boxcode's own `src/protocol.rs` exactly -- see that
 // module's own doc comments for the ACP v1 schema this implements. Kept to
@@ -405,12 +445,28 @@ export class AcpClient extends EventEmitter {
 		});
 	}
 
-	async initialize(): Promise<void> {
-		await this.request('initialize', { protocolVersion: 1 });
+	/**
+	 * Performs the ACP handshake and returns the agent's capabilities.
+	 *
+	 * Returning the result rather than discarding it is what makes the MCP
+	 * capability gate possible: the caller needs to know whether this build
+	 * connects servers before sending any. Callers that do not care can keep
+	 * ignoring the return value, as they did when this returned `void`.
+	 */
+	async initialize(): Promise<InitializeResult> {
+		const result = (await this.request('initialize', { protocolVersion: 1 })) as InitializeResult | undefined;
+		return result ?? {};
 	}
 
-	async newSession(cwd: string): Promise<string> {
-		const result = (await this.request('session/new', { cwd, mcpServers: [] })) as { sessionId: string };
+	/**
+	 * Opens a session, optionally handing the agent MCP servers to connect.
+	 *
+	 * Defaults to an empty array so existing callers are unaffected, and so the
+	 * "no MCP servers configured" case stays byte-identical on the wire to what
+	 * this client sent before MCP support existed.
+	 */
+	async newSession(cwd: string, mcpServers: readonly AcpMcpServerConfig[] = []): Promise<string> {
+		const result = (await this.request('session/new', { cwd, mcpServers })) as { sessionId: string };
 		return result.sessionId;
 	}
 
