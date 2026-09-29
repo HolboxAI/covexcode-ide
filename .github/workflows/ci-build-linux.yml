@@ -222,6 +222,8 @@ jobs:
         if: env.DISABLED != 'yes'
 
       - name: Install GH
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./build/linux/install_gh.sh
         if: env.DISABLED != 'yes'
 
@@ -494,6 +496,8 @@ jobs:
         if: env.DISABLED != 'yes'
 
       - name: Install GH
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./build/linux/install_gh.sh
         if: env.DISABLED != 'yes'
 
@@ -564,6 +568,8 @@ jobs:
           node-version-file: '.nvmrc'
 
       - name: Install GH
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./build/linux/install_gh.sh
 
       - name: Install libkrb5-dev
