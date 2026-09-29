@@ -5,12 +5,20 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {
+	PERMISSION_STORE_RELATIVE_PATH,
+	PermissionStore,
+	parsePermissionStore,
+	serializePermissionStore,
+} from './permissionStore';
 import * as vscode from 'vscode';
 import {
 	AcpClient,
 	BrowserInteraction,
+	ChangeEntry,
 	CheckInBrowserOutcome,
 	CheckInBrowserRequest,
+	DiffHunk,
 	fetchProviders,
 	InteractInBrowserOutcome,
 	InteractInBrowserRequest,
@@ -26,15 +34,20 @@ import {
 	ToolCallStatus,
 } from './acpClient';
 import { CdpClient } from './cdpClient';
+import { serializeAxTree, AxNode } from './axTree';
 import { boxcodeBinaryCandidates } from './boxcodeBinary';
 import {
 	parsePermissionCommandArgs,
+	parseReviewCommandArgs,
 	permissionCommandUri,
 	permissionOutcomeFromGate,
 	PermissionGate,
 	PERMISSION_COMMAND,
+	REVIEW_COMMAND,
+	reviewCommandUri,
 } from './chatPermission';
 import { isFreshChat } from './freshChat';
+import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
 import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
 import {
@@ -43,9 +56,11 @@ import {
 	recommendationSkipKey,
 } from './frameworkRecommendations';
 import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
-import { describeReferenceValue } from './referenceDescription';
+import { agentSupportsMcp, loadMcpConfig, mcpServersForSession } from './mcpLoader';
+import { referenceContextSection } from './referenceContent';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import { createTurnUsage, TurnUsage } from './turnUsage';
+import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter, SessionUsage } from './sessionUsage';
 import {
 	describeRestrictedMode,
 	folderTrustKey,
@@ -67,6 +82,16 @@ const BOXCODE_COMMAND = 'boxcode';
 const SECRET_API_KEY = 'boxcode.apiKey';
 const DIFF_SCHEME = 'boxcode-diff';
 
+/**
+ * The per-hunk review state for an in-flight permission request, keyed by the
+ * gate id `askPermission` handed the review link. Lives at module scope (not
+ * inside `activate`) because both `askPermission` and the `REVIEW_COMMAND`
+ * handler -- one inside `activate`, one outside -- reach it, and a permission
+ * request can only ever be answered once, so entries are short-lived and
+ * cleared on the answer (or, defensively, on `discardSession`).
+ */
+const pendingReviews = new Map<string, { newText: string; hunks: DiffHunk[] }>();
+
 /** The configured `boxcode.path` setting if set, otherwise the bare command
  * name plus the locations `install.sh` writes to -- an escape hatch for a
  * binary installed somewhere a GUI-launched app's inherited PATH doesn't
@@ -74,6 +99,19 @@ const DIFF_SCHEME = 'boxcode-diff';
  * even though a login shell sees it fine). */
 function configuredBoxcodePath(): string {
 	return vscode.workspace.getConfiguration('boxcode').get<string>('path', '').trim();
+}
+
+/** USD per 1M tokens for the cost half of the usage footer, or `undefined`
+ * when the setting is <= 0 so the footer falls back to tokens-only rather
+ * than fabricating a dollar figure. A blended estimate, not an invoice --
+ * the authoritative per-model figure should come from boxcode itself (see
+ * `docs/BACKLOG.md`, cost/usage meter). */
+function sessionCostRate(): number | undefined {
+	const value = vscode.workspace.getConfiguration('boxcode').get<number>('costPerMillionTokens', 0.35);
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+		return undefined;
+	}
+	return value;
 }
 
 /** Thrown by `ensureCredentials` when the user cancels the setup prompt -- distinguished from a real launch failure so the chat message shown for each reads correctly. */
@@ -165,6 +203,82 @@ class StubLanguageModelProvider implements vscode.LanguageModelChatProvider {
  * already configured `boxcode` from the CLI must not be nagged to repeat
  * that inside the IDE.
  */
+interface RollbackPickItem extends vscode.QuickPickItem {
+	/** What picking this item means, so the command never has to guess
+	 * between "undo everything" (no filter) and a blocked file (no undo). */
+	scope: RollbackScope;
+}
+
+type RollbackScope =
+	| { kind: 'all' }
+	| { kind: 'turn'; turn: number }
+	| { kind: 'files'; files: string[] }
+	| { kind: 'blocked'; reason?: string };
+
+function rollbackActionVerb(action: ChangeEntry['action']): string {
+	switch (action) {
+		case 'restore': return 'restore pre-session text';
+		case 'delete': return 'delete (new file)';
+		case 'blocked': return 'blocked (shell only)';
+	}
+}
+
+/**
+ * Turns a `session/list_changes` result into the one-shot `showQuickPick`
+ * that makes per-file/per-turn undo work: an "undo everything" item, one
+ * per-turn grouping, then the individual files. Blocked entries (boxcode
+ * only ran a shell command against the path, so there is no before-state to
+ * restore) stay listed so the "why" is visible, but map to a `blocked` scope
+ * the caller turns into a no-op. Returns the selection's scope, or
+ * `undefined` when the picker is dismissed.
+ */
+async function pickRollbackScope(changes: ChangeEntry[]): Promise<RollbackScope | undefined> {
+	const undoable = changes.filter(c => c.action !== 'blocked');
+	const items: RollbackPickItem[] = [];
+
+	items.push({
+		label: '$(undo) Undo everything boxcode wrote',
+		description: `${undoable.length} file${undoable.length === 1 ? '' : 's'}`,
+		scope: { kind: 'all' },
+	});
+
+	const turns = [...new Set(changes.map(c => c.turn))].sort((a, b) => a - b);
+	for (const turn of turns) {
+		const count = changes.filter(c => c.turn === turn && c.action !== 'blocked').length;
+		if (count > 0) {
+			items.push({
+				label: `Undo turn ${turn}`,
+				description: `${count} file${count === 1 ? '' : 's'}`,
+				scope: { kind: 'turn', turn },
+			});
+		}
+	}
+
+	for (const entry of changes) {
+		if (entry.action === 'blocked') {
+			items.push({
+				label: entry.path,
+				description: `turn ${entry.turn} · ${rollbackActionVerb(entry.action)}`,
+				detail: entry.reason,
+				scope: { kind: 'blocked', reason: entry.reason },
+			});
+		} else {
+			items.push({
+				label: entry.path,
+				description: `turn ${entry.turn} · ${rollbackActionVerb(entry.action)}`,
+				scope: { kind: 'files', files: [entry.path] },
+			});
+		}
+	}
+
+	const picked = await vscode.window.showQuickPick(items, {
+		title: 'boxcode: choose what to undo',
+		ignoreFocusOut: true,
+		matchOnDescription: true,
+	});
+	return picked?.scope;
+}
+
 export function activate(context: vscode.ExtensionContext): void {
 	let client: AcpClient | undefined;
 	let sessionId: string | undefined;
@@ -174,6 +288,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	// actually starts a new ACP session instead of keeping the one spawned
 	// against `$HOME` on the chat-first landing page.
 	let sessionCwd: string | undefined;
+	// Running token total for the current ACP session -- the cumulative half
+	// of the end-of-turn usage footer, reset alongside the session in
+	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
+	const sessionUsage = createSessionUsage();
 	const permissionGate = new PermissionGate();
 	const promptedTrustFolders = new Set<string>();
 	// Persists for the life of the extension host, not just one turn -- a
@@ -217,6 +335,20 @@ export function activate(context: vscode.ExtensionContext): void {
 			frameworkIndicator.show();
 		} else {
 			frameworkIndicator.hide();
+		}
+	};
+
+	const usageIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 101);
+	usageIndicator.name = 'boxcode: usage';
+	context.subscriptions.push(usageIndicator);
+	const updateUsageIndicator = (): void => {
+		const label = sessionUsageMeter(sessionUsage.total(), sessionCostRate());
+		if (label) {
+			usageIndicator.text = `$(graph) ${label}`;
+			usageIndicator.tooltip = `boxcode usage this session — ${label}`;
+			usageIndicator.show();
+		} else {
+			usageIndicator.hide();
 		}
 	};
 
@@ -300,11 +432,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	function discardSession(): void {
 		permissionGate.cancelAll();
+		pendingReviews.clear();
 		client?.dispose();
 		client = undefined;
 		sessionId = undefined;
 		ready = undefined;
 		sessionCwd = undefined;
+		sessionUsage.reset();
+		updateUsageIndicator();
 	}
 
 	async function requestFolderTrust(): Promise<void> {
@@ -374,8 +509,23 @@ export function activate(context: vscode.ExtensionContext): void {
 				// subprocess dies; tear the session down so the next message
 				// re-launches (ensureReady re-runs because `ready` is cleared).
 				acp.on('exit', () => discardSession());
-				await acp.initialize();
-				sessionId = await acp.newSession(cwd);
+				const initResult = await acp.initialize();
+				const mcpLoaded = loadMcpConfig({
+					readFile: (file) => {
+						try {
+							return fs.readFileSync(file, 'utf8');
+						} catch {
+							return undefined;
+						}
+					},
+					workspaceFolder: cwd,
+					home: os.homedir(),
+					env: process.env,
+				});
+				sessionId = await acp.newSession(
+					cwd,
+					mcpServersForSession(mcpLoaded, agentSupportsMcp(initResult)),
+				);
 				sessionCwd = cwd;
 			})().catch(error => {
 				// A failed launch must not wedge every later message behind
@@ -383,6 +533,14 @@ export function activate(context: vscode.ExtensionContext): void {
 				// attempt so the next chat message gets a fresh try, not a
 				// permanently broken participant until the window reloads.
 				ready = undefined;
+				// `client` was assigned *before* the step that can fail
+				// (`acp.initialize()` / `acp.newSession()`), so by the time we
+				// get here the subprocess is running with no owner. Dispose it
+				// rather than orphan it: its later `exit` fires
+				// `discardSession()`, which would tear down whatever *healthy*
+				// session a later message establishes, and a second process
+				// would be spawned next turn.
+				client?.dispose();
 				client = undefined;
 				sessionCwd = undefined;
 				throw error;
@@ -403,7 +561,28 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!parsed) {
 				return;
 			}
-			permissionGate.respond(parsed.id, parsed.choice);
+			if (permissionGate.respond(parsed.id, parsed.choice)) {
+				rememberPermissionChoice(parsed.id, parsed.choice);
+			}
+		}),
+		vscode.commands.registerCommand(REVIEW_COMMAND, async (...args: unknown[]) => {
+			const id = parseReviewCommandArgs(args);
+			if (id === undefined) {
+				return;
+			}
+			const review = pendingReviews.get(id);
+			if (!review) {
+				return;
+			}
+			pendingReviews.delete(id);
+			const merged = await pickHunks(review.newText, review.hunks);
+			if (merged === undefined) {
+				// QuickPick dismissed (Escape) -- the Allow/Reject links are
+				// still live, so re-register in case they open the picker again.
+				pendingReviews.set(id, review);
+				return;
+			}
+			permissionGate.respond(id, 'partial', merged);
 		}),
 		vscode.commands.registerCommand(TRUST_COMMAND, async () => {
 			await requestFolderTrust();
@@ -429,6 +608,20 @@ export function activate(context: vscode.ExtensionContext): void {
 			stream.markdown(restrictedModeMarkdown());
 			return;
 		}
+
+		// Slash commands (`/provider`, `/model`) are local UI flows -- they must
+		// not be forwarded to ACP as ordinary chat prompts.
+		if (request.command === 'provider') {
+			const outcome = await changeProviderFlow(context, discardSession);
+			stream.markdown(providerCommandMarkdown(outcome));
+			return;
+		}
+		if (request.command === 'model') {
+			const outcome = await changeModelFlow(context, discardSession);
+			stream.markdown(modelCommandMarkdown(outcome));
+			return;
+		}
+
 		if (isFreshChat(chatContext.history.length) && client) {
 			// VS Code's "New Chat" reuses this extension host, so without
 			// this the next empty-history request would keep talking to the
@@ -478,7 +671,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage);
+				updateUsageIndicator();
 			}
 		};
 		const onPermissionRequest = (
@@ -512,6 +706,13 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		};
 
+		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
+		// Registered *after* the `await` above so a throw while reading an
+		// attachment (e.g. a binary reference whose bytes can't be loaded)
+		// can't leak these: they were previously added before any `try`, so
+		// that failure path skipped the `finally` that removes them, and each
+		// such turn piled another four listeners + `onCancel` onto the shared,
+		// long-lived `activeClient`.
 		activeClient.on('update', onUpdate);
 		activeClient.on('permissionRequest', onPermissionRequest);
 		activeClient.on('browserCheckRequest', onBrowserCheckRequest);
@@ -523,14 +724,21 @@ export function activate(context: vscode.ExtensionContext): void {
 		const onCancel = token.onCancellationRequested(() => {
 			permissionGate.cancelAll();
 		});
-		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
 		try {
-			await activeClient.prompt(activeSessionId, content);
+			// `request.mode` only exists once the fork's `chatParticipantPrivate`
+			// proposal is on (see `patches/109-...`); read it defensively so the
+			// extension still builds against the stable `vscode.ChatRequest`.
+			const mode = (request as vscode.ChatRequest & { mode?: string }).mode;
+			await activeClient.prompt(activeSessionId, content, mode === 'plan' ? 'plan' : undefined);
 			// Rendered only on a clean turn end, never after an error -- a
 			// failed turn's partial usage would be a misleading number. One
 			// line regardless of how many `usage_update`s arrived, since a
-			// multi-response turn emits one per LLM response.
-			const footnote = turnUsage.footnote();
+			// multi-response turn emits one per LLM response. The session
+			// total is cumulative and includes partial spend from an earlier
+			// failed turn, which is the honest number for cost.
+			const footnote = [turnUsage.footnote(), sessionUsageFootnote(sessionUsage.total(), sessionCostRate())]
+				.filter((line): line is string => line !== undefined)
+				.join(' · ');
 			if (footnote) {
 				stream.markdown(`\n\n*${footnote}*\n`);
 			}
@@ -560,22 +768,85 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			const activeClient = client;
 			const activeSessionId = sessionId;
-			// Same posture as the TUI's own /rollback: confirm before
-			// touching disk, not after.
-			const choice = await vscode.window.showWarningMessage(
-				'Undo every file boxcode has written this session? Files it only ran commands ' +
-					'against, not wrote, are not covered by this.',
-				{ modal: true },
-				'Undo',
-			);
-			if (choice !== 'Undo') {
-				return;
-			}
 			try {
-				const summary = await activeClient.rollback(activeSessionId);
+				// Peek at the journal first so the picker reflects exactly what
+				// an undo would touch, then confirm by *choosing* the scope --
+				// same posture as the TUI's own /rollback: decide before
+				// touching disk, not after.
+				const { changes, shellWarning } = await activeClient.listChanges(activeSessionId);
+				if (!changes.some(c => c.action !== 'blocked')) {
+					const hint = shellWarning ? ` ${shellWarning}` : '';
+					void vscode.window.showInformationMessage(`boxcode: nothing to undo.${hint}`);
+					return;
+				}
+				const scope = await pickRollbackScope(changes);
+				if (!scope) {
+					return;
+				}
+				if (scope.kind === 'blocked') {
+					const why = scope.reason ? ` ${scope.reason}` : '';
+					void vscode.window.showInformationMessage(`boxcode: can't undo that file.${why}`);
+					return;
+				}
+				const options = scope.kind === 'all'
+					? undefined
+					: scope.kind === 'turn'
+						? { turn: scope.turn }
+						: { files: scope.files };
+				const summary = await activeClient.rollback(activeSessionId, options);
 				void vscode.window.showInformationMessage(`boxcode: ${summary}`);
 			} catch (error) {
 				void vscode.window.showErrorMessage(`boxcode: couldn't roll back (${describeError(error)})`);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		// Invoked by the native "Restore Checkpoint" button rendered above each
+		// user message (MenuId.ChatMessageCheckpoint). VS Code's own restore path
+		// is a no-op for boxcode chat -- there's no IChatEditingSession -- so the
+		// core patch 108-chat-restore-checkpoint-boxcode.patch detects a boxcode
+		// request and delegates here with its 1-based turn number.
+		//
+		// "Restore to before `turn`" = put every file touched at this turn or
+		// later back to the state it held just before this turn began, so an
+		// edit in turn 2 is undone while turn 1's edit survives. boxcode's
+		// journal keeps the per-turn before-state for exactly this; the request
+		// uses `restoreBeforeTurn`, not the first-touch `turn` filter.
+		vscode.commands.registerCommand('boxcode.restoreCheckpoint', async (turn?: number) => {
+			if (!client || !sessionId) {
+				void vscode.window.showInformationMessage("boxcode: no session yet -- send a message first.");
+				return;
+			}
+			// No turn argument (e.g. invoked from the command palette) means
+			// there's no checkpoint to scope to -- defer to the full picker.
+			if (turn === undefined) {
+				await vscode.commands.executeCommand('boxcode.rollback');
+				return;
+			}
+			const activeClient = client;
+			const activeSessionId = sessionId;
+			try {
+				// The journal records files, not chat messages, so this restores
+				// workspace content only -- same limitation as the picker's own
+				// "undo turn N" entries.
+				const summary = await activeClient.rollback(activeSessionId, { restoreBeforeTurn: turn });
+				if (!summary.startsWith("Rolled back nothing")) {
+					void vscode.window.showInformationMessage(`boxcode: [turn ${turn}] ${summary}`);
+					return;
+				}
+				// A "nothing" here is ambiguous: the turn made no file edits, or it
+				// changed files through a shell command (`run_command`), which the
+				// journal tracks by name but cannot undo. Surface that context so
+				// the message explains itself instead of leaving the user guessing.
+				try {
+					const { shellWarning } = await activeClient.listChanges(activeSessionId);
+					void vscode.window.showWarningMessage(`boxcode: [turn ${turn}] ${summary}${shellWarning ? ` ${shellWarning}` : ''}`);
+				} catch {
+					void vscode.window.showWarningMessage(`boxcode: [turn ${turn}] ${summary}`);
+				}
+			} catch (error) {
+				void vscode.window.showErrorMessage(`boxcode: couldn't restore checkpoint (${describeError(error)})`);
 			}
 		}),
 	);
@@ -585,51 +856,74 @@ export function activate(context: vscode.ExtensionContext): void {
 		// a different provider) had no in-product fix -- `ensureCredentials`
 		// only re-prompts when a value is *missing*, never when it's wrong,
 		// so the only recovery was hand-editing settings.json and clearing
-		// SecretStorage by hand.
+		// SecretStorage by hand. Runs the setup wizard immediately (same as
+		// chat `/provider`) rather than asking the user to send another
+		// message -- and forces a prompt even when `~/.boxcode/config.toml`
+		// already exists, because clearing IDE settings alone would otherwise
+		// silently fall through to that file.
 		vscode.commands.registerCommand('boxcode.changeProvider', async () => {
-			await context.secrets.delete(SECRET_API_KEY);
-			const config = vscode.workspace.getConfiguration('boxcode');
-			await config.update('provider', undefined, vscode.ConfigurationTarget.Global);
-			await config.update('endpoint', undefined, vscode.ConfigurationTarget.Global);
-			await config.update('model', undefined, vscode.ConfigurationTarget.Global);
-			// The next chat message must spawn a fresh session against the
-			// new credentials, not reuse a client already running with the
-			// old ones -- `ensureReady`'s own memoization exists precisely
-			// to avoid a second spawn per turn, so it has to be cleared
-			// explicitly here rather than just waiting for it to notice.
-			discardSession();
-			void vscode.window.showInformationMessage(
-				'boxcode: cleared. Send a chat message to pick a new provider, model, and API key.',
-			);
+			const outcome = await changeProviderFlow(context, discardSession);
+			if (outcome.kind === 'ok') {
+				void vscode.window.showInformationMessage(
+					`boxcode: using ${outcome.summary}. Send a chat message to start a session with the new credentials.`,
+				);
+			} else if (outcome.kind === 'cancelled') {
+				void vscode.window.showInformationMessage('boxcode: provider change cancelled.');
+			} else if (outcome.kind === 'no-binary') {
+				void vscode.window.showErrorMessage(
+					"boxcode: couldn't find the `boxcode` CLI. Install it first, or set `boxcode.path` in Settings.",
+				);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('boxcode.setApiKey', async () => {
+			const outcome = await setApiKeyFlow(context, discardSession);
+			if (outcome === 'ok') {
+				void vscode.window.showInformationMessage(
+					'boxcode: API key saved securely. Send a chat message to use it.',
+				);
+			} else if (outcome === 'cancelled') {
+				void vscode.window.showInformationMessage('boxcode: API key change cancelled.');
+			}
 		}),
 	);
 }
 
 /**
- * Folds `request.references` -- context attached via the Integrated
- * Browser's own element-picker, console-log-to-chat, and screenshot
- * features (`browserEditorChatFeatures.ts`, upstream and unpatched in this
- * fork) -- into the content blocks `AcpClient.prompt` actually sends.
- * boxcode never had to build any of the attachment UI itself: clicking an
- * element or attaching console logs already lands here as an ordinary
- * `ChatPromptReference`, the same mechanism any chat participant gets, once
- * `boxcode.agent` is the active default agent (see `ChatContextKeys.enabled`
- * in VS Code's own `chatAgents.ts` -- it only needs *some* default agent
- * active, not anything browser-specific).
+ * Folds `request.references` -- context the user attached via `@`-mentions
+ * or the Integrated Browser's element-picker / console-log-to-chat /
+ * screenshot features (`browserEditorChatFeatures.ts`, upstream and
+ * unpatched in this fork) -- into the content blocks `AcpClient.prompt`
+ * actually sends. boxcode never built any attachment UI: every one of these
+ * arrives as an ordinary `ChatPromptReference`, the same mechanism any chat
+ * participant gets once `boxcode.agent` is the active default agent.
  *
- * Image attachments (element screenshots) are real `ContentBlock::Image`
- * blocks now, not dropped -- `ChatReferenceBinaryData.data()` is async
- * (returns the bytes as a `Thenable<Uint8Array>`), which is the whole
- * reason this function itself is `async`. A `Location` reference (e.g. a
- * console-log's source position) is stringified by hand rather than via a
- * bare `String(...)`, which on a `Location` object yields the useless
- * `"[object Object]"` -- `vscode.d.ts`'s own type for `.value` is
- * `string | Uri | Location | unknown`, so those are the two known non-string
- * shapes actually worth special-casing.
+ * Two reference shapes carry real content and are read from disk here: a
+ * `Uri` (a `#file`/`@`-mentioned file or doc) and a `Location` (a
+ * `#sym`-attached symbol). Both become a structured markdown section --
+ * path, language fence, and the file's text (or the symbol's line range) --
+ * rather than the bare path string an earlier version emitted, which is what
+ * makes `@file`/`@symbol` context actually useful to the model. Image
+ * attachments are `ContentBlock::Image` blocks (`ChatReferenceBinaryData`
+ * `.data()` is async, which is why this function is `async`); raw string
+ * references (console logs, CSS selectors) pass through unchanged, and
+ * anything `referenceContextSection` can't resolve is skipped rather than
+ * injected as a "[unrecognized]" marker.
  */
 async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: WorkspaceContext): Promise<PromptContentBlock[]> {
 	const sections: string[] = [];
 	const images: PromptContentBlock[] = [];
+	// Reads a workspace file's text for a `Uri`/`Location` reference. Only
+	// `file:` references reach this -- `referenceContextSection` filters on
+	// scheme before calling -- and an unreadable path (directory, deleted
+	// file) throws, which `referenceContextSection` turns into a path-only
+	// fallback rather than failing the whole prompt.
+	const readTextFile = async (fsPath: string): Promise<string> => {
+		const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(fsPath));
+		return new TextDecoder().decode(bytes);
+	};
 
 	for (const reference of request.references) {
 		if (reference.value instanceof vscode.ChatReferenceBinaryData) {
@@ -641,9 +935,10 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 			});
 			continue;
 		}
-		const heading = reference.modelDescription ?? reference.id;
-		const body = describeReferenceValue(reference.value);
-		sections.push(`### Attached: ${heading}\n\n${body}`);
+		const section = await referenceContextSection(reference, readTextFile);
+		if (section) {
+			sections.push(section);
+		}
 	}
 
 	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
@@ -740,18 +1035,28 @@ function appendTitleSafely(line: vscode.MarkdownString, title: string): void {
  * (non-terminal, non-MCP) tool; `toolCallId` is the field that correlates the
  * completion update back to this row.
  */
-function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
+function pushToolInvocation(
+	toolCallId: string,
+	title: string,
+	kind: string | undefined,
+	status: ToolCallStatus | undefined,
+	stream: vscode.ChatResponseStream,
+): void {
 	const message = new vscode.MarkdownString(undefined, true);
 	appendTitleSafely(message, title);
 
-	const part = new vscode.ChatToolInvocationPart(update.kind ?? 'boxcode', update.toolCallId!);
+	const part = new vscode.ChatToolInvocationPart(kind ?? 'boxcode', toolCallId);
 	part.enablePartialUpdate = true;
-	part.isComplete = update.status === 'completed' || update.status === 'failed';
+	part.isComplete = status === 'completed' || status === 'failed';
 	part.invocationMessage = message;
 	if (part.isComplete) {
 		part.pastTenseMessage = message;
 	}
 	stream.push(part);
+}
+
+function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
+	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream);
 }
 
 /**
@@ -797,7 +1102,11 @@ function autoOpenDevServerUrl(update: SessionUpdate, title: string | undefined, 
 	// Reveal only. `checkInBrowser` used to run here too, which opened a
 	// second editor group beside the one `LocalhostLinkOpenerContribution`
 	// already created from the same terminal "Local:" line.
-	void ensureBrowserTab(url);
+	// The `.catch` is the whole point of "failure swallowed" in the doc
+	// comment above: `ensureBrowserTab` rejects with `Browser tab did not
+	// open.`, and the bare `void` left that rejection unhandled in the
+	// extension host.
+	void ensureBrowserTab(url).catch(() => {});
 }
 
 function renderUpdate(
@@ -807,6 +1116,7 @@ function renderUpdate(
 	openedDevServerUrls: Set<string>,
 	shownBrowserPreviews: Set<string>,
 	turnUsage: TurnUsage,
+	sessionUsage: SessionUsage,
 ): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -854,10 +1164,11 @@ function renderUpdate(
 		}
 		case 'usage_update':
 			// Consumed, not rendered: one footnote at end of turn (see
-			// createTurnUsage) rather than a line per update, because a
-			// multi-response turn would otherwise print several counts
-			// mid-stream.
+			// createTurnUsage / sessionUsage) rather than a line per update,
+			// because a multi-response turn would otherwise print several
+			// counts mid-stream.
 			turnUsage.record(update);
+			sessionUsage.record(update);
 			break;
 		default:
 			// Every other legal ACP v1 variant boxcode doesn't emit yet --
@@ -876,6 +1187,166 @@ interface SetupResult {
 	endpoint: string;
 	model: string;
 	apiKey: string;
+}
+
+type ProviderFlowOutcome =
+	| { kind: 'ok'; summary: string }
+	| { kind: 'cancelled' }
+	| { kind: 'no-binary' };
+
+type ModelFlowOutcome =
+	| { kind: 'ok'; summary: string }
+	| { kind: 'cancelled' }
+	| { kind: 'no-binary' }
+	| { kind: 'no-provider' };
+
+/** Resolve the `boxcode` binary the same way `ensureReady` does, without
+ * spawning an ACP session -- needed by `/provider` and `/model`, which only
+ * need `--providers-json`. */
+async function resolveBoxcodeBinary(): Promise<string | undefined> {
+	const candidates = boxcodeBinaryCandidates(configuredBoxcodePath(), os.homedir());
+	for (const candidate of candidates) {
+		if (await probeBinaryExists(candidate)) {
+			return candidate;
+		}
+	}
+	return undefined;
+}
+
+async function persistSetupResult(context: vscode.ExtensionContext, entered: SetupResult): Promise<void> {
+	const config = vscode.workspace.getConfiguration('boxcode');
+	await config.update('provider', entered.provider, vscode.ConfigurationTarget.Global);
+	await config.update('endpoint', entered.endpoint, vscode.ConfigurationTarget.Global);
+	await config.update('model', entered.model, vscode.ConfigurationTarget.Global);
+	await context.secrets.store(SECRET_API_KEY, entered.apiKey);
+}
+
+function setupSummary(entered: SetupResult): string {
+	const providerLabel = entered.provider || 'custom endpoint';
+	return `${providerLabel} / ${entered.model}`;
+}
+
+/**
+ * Full provider → model → API key wizard, then persist + discard any live
+ * ACP session. Used by chat `/provider` and `boxcode.changeProvider`.
+ */
+async function changeProviderFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<ProviderFlowOutcome> {
+	const boxcodeCommand = await resolveBoxcodeBinary();
+	if (!boxcodeCommand) {
+		return { kind: 'no-binary' };
+	}
+	const entered = await runSetupFlow(boxcodeCommand);
+	if (!entered) {
+		return { kind: 'cancelled' };
+	}
+	await persistSetupResult(context, entered);
+	discardSession();
+	return { kind: 'ok', summary: setupSummary(entered) };
+}
+
+/**
+ * Model-only switch for the currently configured provider. Keeps the stored
+ * API key; updates `boxcode.model` (and endpoint if the registry entry
+ * differs). Falls back to the full provider flow when no provider is set.
+ */
+async function changeModelFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<ModelFlowOutcome> {
+	const boxcodeCommand = await resolveBoxcodeBinary();
+	if (!boxcodeCommand) {
+		return { kind: 'no-binary' };
+	}
+	const config = vscode.workspace.getConfiguration('boxcode');
+	const providerId = config.get<string>('provider', '').trim();
+	if (!providerId) {
+		// Custom endpoint or unset -- can't list registry models; offer the
+		// full provider flow instead of a dead-end QuickPick.
+		const entered = await runSetupFlow(boxcodeCommand);
+		if (!entered) {
+			return { kind: 'cancelled' };
+		}
+		await persistSetupResult(context, entered);
+		discardSession();
+		return { kind: 'ok', summary: setupSummary(entered) };
+	}
+
+	let providers: ProviderDescriptor[];
+	try {
+		providers = await fetchProviders(boxcodeCommand);
+	} catch {
+		return { kind: 'no-provider' };
+	}
+	const provider = providers.find(p => p.id === providerId);
+	if (!provider || provider.models.length === 0) {
+		return { kind: 'no-provider' };
+	}
+
+	const currentModel = config.get<string>('model', '');
+	const model = await vscode.window.showQuickPick(provider.models, {
+		title: `boxcode -- pick a model for ${provider.label}`,
+		placeHolder: currentModel || undefined,
+		ignoreFocusOut: true,
+	});
+	if (!model) {
+		return { kind: 'cancelled' };
+	}
+
+	await config.update('endpoint', provider.endpoint, vscode.ConfigurationTarget.Global);
+	await config.update('model', model, vscode.ConfigurationTarget.Global);
+	discardSession();
+	return { kind: 'ok', summary: `${provider.id} / ${model}` };
+}
+
+/** Prompt for an API key only and store it in SecretStorage. */
+async function setApiKeyFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<'ok' | 'cancelled'> {
+	const config = vscode.workspace.getConfiguration('boxcode');
+	const providerId = config.get<string>('provider', '').trim();
+	const envHint = providerId ? ` (or export ${providerEnvVarName(providerId)})` : '';
+	const apiKey = await vscode.window.showInputBox({
+		title: 'boxcode -- set API key',
+		prompt: `API key stored securely, never written to settings.json${envHint}`,
+		password: true,
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An API key is required.'),
+	});
+	if (!apiKey) {
+		return 'cancelled';
+	}
+	await context.secrets.store(SECRET_API_KEY, apiKey.trim());
+	discardSession();
+	return 'ok';
+}
+
+function providerCommandMarkdown(outcome: ProviderFlowOutcome): string {
+	switch (outcome.kind) {
+		case 'ok':
+			return `Provider updated to **${outcome.summary}**. Send a normal chat message to use it.\n\n` +
+				`You can also change this later with \`/provider\`, \`/model\`, or in **Settings → boxcode**.`;
+		case 'cancelled':
+			return 'Provider change cancelled -- existing credentials are unchanged.';
+		case 'no-binary':
+			return "Couldn't find the `boxcode` CLI. Install it, or set `boxcode.path` in Settings, then run `/provider` again.";
+	}
+}
+
+function modelCommandMarkdown(outcome: ModelFlowOutcome): string {
+	switch (outcome.kind) {
+		case 'ok':
+			return `Model updated to **${outcome.summary}**. Send a normal chat message to use it.`;
+		case 'cancelled':
+			return 'Model change cancelled -- existing model is unchanged.';
+		case 'no-binary':
+			return "Couldn't find the `boxcode` CLI. Install it, or set `boxcode.path` in Settings, then run `/model` again.";
+		case 'no-provider':
+			return 'No provider is configured yet (or the registry has no models for it). Run `/provider` to pick a provider, model, and API key.';
+	}
 }
 
 /**
@@ -905,10 +1376,7 @@ async function ensureCredentials(context: vscode.ExtensionContext, boxcodeComman
 		endpoint = entered.endpoint;
 		model = entered.model;
 		apiKey = entered.apiKey;
-		await config.update('provider', provider, vscode.ConfigurationTarget.Global);
-		await config.update('endpoint', endpoint, vscode.ConfigurationTarget.Global);
-		await config.update('model', model, vscode.ConfigurationTarget.Global);
-		await context.secrets.store(SECRET_API_KEY, apiKey);
+		await persistSetupResult(context, entered);
 	}
 
 	const overrides: NodeJS.ProcessEnv = {};
@@ -1077,6 +1545,62 @@ async function runCustomEndpointFlow(
  * (`stream.confirmation`) would deadlock behind VS Code's one-request-at-a-
  * time Send button.
  */
+/** Where a project's accumulated permission rules live. */
+function permissionStoreFile(cwd: string): string {
+	return path.join(cwd, PERMISSION_STORE_RELATIVE_PATH);
+}
+
+/**
+ * Reads the project's permission rules. A missing or unreadable file is not
+ * an error -- it just means nothing has been granted yet.
+ */
+function loadPermissionStore(cwd: string): PermissionStore {
+	try {
+		return new PermissionStore(
+			parsePermissionStore(fs.readFileSync(permissionStoreFile(cwd), 'utf8')).rules,
+		);
+	} catch {
+		return new PermissionStore([]);
+	}
+}
+
+/** Details a pending prompt needs so a later "always" choice can be stored. */
+const pendingPermissionContext = new Map<string, { cwd: string; action: string }>();
+
+/**
+ * Records an "Always allow" / "Deny always" choice against the project.
+ *
+ * Rules match the action exactly and never as a substring, so granting one
+ * command cannot silently authorise a different command that merely starts
+ * the same way.
+ */
+function rememberPermissionChoice(id: string, choice: string): void {
+	const context = pendingPermissionContext.get(id);
+	pendingPermissionContext.delete(id);
+	if (!context || (choice !== 'allow-always' && choice !== 'deny-always')) {
+		return;
+	}
+	try {
+		const store = loadPermissionStore(context.cwd);
+		const added = store.addRule({
+			kind: '',
+			match: 'exact',
+			pattern: context.action,
+			decision: choice === 'allow-always' ? 'allow' : 'deny',
+			createdAt: new Date().toISOString(),
+			source: 'user',
+		});
+		if (!added) {
+			return;
+		}
+		const file = permissionStoreFile(context.cwd);
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, serializePermissionStore(store.toFile()), 'utf8');
+	} catch {
+		// A permission file we cannot write must never break the tool call.
+	}
+}
+
 async function askPermission(
 	request: RequestPermissionRequest,
 	diffContentProvider: DiffContentProvider,
@@ -1091,20 +1615,55 @@ async function askPermission(
 	const rejectLabel = reject?.name ?? 'Reject';
 
 	const diff = request.toolCall.content;
+	const hunks = diff?.type === 'diff' && diff.hunks && diff.hunks.length > 0 ? diff.hunks : undefined;
 	if (diff?.type === 'diff') {
 		await showDiff(diff, diffContentProvider, cwd);
 	}
 
+	// Incremental permissions: if the user already granted (or refused) this
+	// exact action, answer from the stored rule instead of prompting again.
+	const remembered = loadPermissionStore(cwd).decide({ kind: '', action });
+	if (remembered === 'allow' && allow) {
+		return { outcome: 'selected', optionId: allow.optionId };
+	}
+	if (remembered === 'deny' && reject) {
+		return { outcome: 'selected', optionId: reject.optionId };
+	}
+
 	const { id, wait } = permissionGate.create();
+	if (diff?.type === 'diff' && hunks) {
+		pendingReviews.set(id, { newText: diff.newText, hunks });
+	}
+	// The pending call is rendered as a `ChatToolInvocationPart` before the
+	// prompt. That part doubles as the anchor `clearToPreviousToolInvocation`
+	// below needs: it is the last tool invocation on the stream, so clearing
+	// "to the previous tool invocation" removes exactly the prompt markdown
+	// that follows it and nothing else, leaving the pending row in place for
+	// boxcode's later completed update to flip in place (same `toolCallId`).
+	const pending = request.toolCall;
+	if (pending.toolCallId && pending.title) {
+		pushToolInvocation(pending.toolCallId, pending.title, pending.kind, pending.status, stream);
+	}
 	// The Allow/Reject choice is the in-chat markdown command links below.
 	// A `stream.confirmation()` card would deadlock here: its click arrives
 	// as a follow-up ChatRequest while `session/prompt` is still awaiting, so
 	// VS Code keeps Send disabled until this handler settles (see
 	// `chatPermission.ts`'s own doc comment). The links instead invoke
-	// `boxcode.permission.respond` and resolve the gate on the same turn.
-	stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id));
-	const choice = await wait;
-	return permissionOutcomeFromGate(choice, allow, reject);
+	// `boxcode.permission.respond` (or `.review`) and resolve the gate on the
+	// same turn.
+	if (diff?.type === 'plan') {
+		stream.markdown(planDecisionMarkdown(diff, allowLabel, rejectLabel, id));
+	} else {
+		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks));
+	}
+	const answer = await wait;
+	pendingReviews.delete(id);
+	// The user answered (Allow/Reject/Review). Remove the prompt from chat:
+	// `clearToPreviousToolInvocation` slices the response back to the pending
+	// row pushed above, so the question -- and its now-dead links -- vanish
+	// rather than lingering as an unclickable card for the rest of the turn.
+	stream.clearToPreviousToolInvocation(vscode.ChatResponseClearToPreviousToolInvocationReason.NoReason);
+	return permissionOutcomeFromGate(answer, allow, reject);
 }
 
 function escapeMarkdownLinkLabel(label: string): string {
@@ -1116,15 +1675,105 @@ function permissionDecisionMarkdown(
 	allowLabel: string,
 	rejectLabel: string,
 	id: string,
+	hunks?: DiffHunk[],
 ): vscode.MarkdownString {
 	const line = new vscode.MarkdownString(undefined, true);
-	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND] };
+	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND, REVIEW_COMMAND] };
 	line.appendMarkdown('$(warning) **boxcode needs permission**\n\nboxcode wants to ');
 	line.appendText(action);
 	line.appendMarkdown('.\n\n');
 	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
-	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})\n\n`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	if (hunks) {
+		line.appendMarkdown(`&nbsp;&nbsp;[$(list-selection) Review hunks…](${reviewCommandUri(id)})`);
+	}
+	line.appendMarkdown('\n\n');
+	if (hunks) {
+		line.appendMarkdown(renderHunksMarkdown(hunks));
+		line.appendMarkdown('\n');
+	}
 	return line;
+}
+
+/**
+ * The plan card boxcode renders in place of a file diff when the turn ran in
+ * plan mode and the model called `exit_plan_mode`: title, summary, a numbered
+ * step list, and the explicitly-out-of-scope items, followed by the same
+ * Approve/Reject command links `permissionDecisionMarkdown` uses. Approving
+ * maps to `Decision::Allowed` (boxcode writes `plan.md`, leaves plan mode,
+ * implements); rejecting maps to `Decision::Refused` (boxcode stays in plan
+ * mode and revises) -- no new wire outcome, just a different card on the
+ * existing `request_permission` channel.
+ *
+ * The title/summary/steps/notDoing are the *model's own* proposal text, so
+ * they go through `appendText` (the same escaping `permissionDecisionMarkdown`
+ * uses for `action`) rather than raw `appendMarkdown` -- a `]` or `(` in a
+ * proposed step name must not be able to smuggle a command link into the card.
+ */
+function planDecisionMarkdown(
+	plan: { title: string; summary: string; steps: string[]; notDoing?: string[] },
+	allowLabel: string,
+	rejectLabel: string,
+	id: string,
+): vscode.MarkdownString {
+	const line = new vscode.MarkdownString(undefined, true);
+	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND] };
+	line.appendMarkdown('$(checklist) **boxcode proposes a plan**\n\n');
+	line.appendMarkdown('**');
+	line.appendText(plan.title);
+	line.appendMarkdown('**\n\n');
+	line.appendText(plan.summary);
+	if (plan.steps.length > 0) {
+		line.appendMarkdown('\n\n**Steps**\n');
+		for (const step of plan.steps) {
+			line.appendMarkdown('1. ');
+			line.appendText(step);
+			line.appendMarkdown('\n');
+		}
+	}
+	if (plan.notDoing && plan.notDoing.length > 0) {
+		line.appendMarkdown('\n**Out of scope**\n');
+		for (const item of plan.notDoing) {
+			line.appendMarkdown('- ');
+			line.appendText(item);
+			line.appendMarkdown('\n');
+		}
+	}
+	line.appendMarkdown(`\n[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	line.appendMarkdown('\n\n');
+	return line;
+}
+
+/**
+ * The per-hunk accept/reject picker. Opens a multi-select QuickPick over the
+ * hunks -- all pre-selected, so "review" means choosing which to *drop*,
+ * matching how the whole-file Allow already accepts everything -- and returns
+ * the merged text, or `undefined` if the picker was dismissed (which the
+ * caller treats as "no answer yet", leaving the Allow/Reject links live).
+ *
+ * `showQuickPick` is safe where `stream.confirmation()` is not: it is a plain
+ * modal that resolves its own promise, not a follow-up ChatRequest, so it
+ * cannot deadlock behind VS Code's Send button while `session/prompt` is
+ * still awaiting (see `chatPermission.ts`'s own doc comment).
+ */
+async function pickHunks(newText: string, hunks: DiffHunk[]): Promise<string | undefined> {
+	const items = hunks.map((hunk, index): vscode.QuickPickItem & { hunkIndex: number } => ({
+		label: `$(diff) Hunk ${index + 1}`,
+		description: summarizeHunk(hunk),
+		picked: true,
+		hunkIndex: index,
+	}));
+	const selected = await vscode.window.showQuickPick(items, {
+		placeHolder: 'Choose which hunks to apply (unchecked hunks are reverted)',
+		canPickMany: true,
+		matchOnDescription: true,
+	});
+	if (selected === undefined) {
+		return undefined;
+	}
+	const accepted = hunks.map((_, index) => selected.some(item => item.hunkIndex === index));
+	return applyHunkSelection(newText, hunks, accepted);
 }
 
 /**
@@ -1244,20 +1893,30 @@ async function attachToBrowserTab(url: string): Promise<BrowserPageAttachment> {
 	const session = await tab.startCDPSession();
 	const cdp = new CdpClient(session);
 
-	// The tab itself is always the first `type: 'page'` target -- iframes
-	// and workers the page happens to have loaded also show up here, so
-	// this can't just take targetInfos[0].
-	const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>('Target.getTargets');
-	const page = targetInfos.find(t => t.type === 'page');
-	if (!page) {
+	try {
+		// The tab itself is always the first `type: 'page'` target -- iframes
+		// and workers the page happens to have loaded also show up here, so
+		// this can't just take targetInfos[0].
+		const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>('Target.getTargets');
+		const page = targetInfos.find(t => t.type === 'page');
+		if (!page) {
+			throw new Error('No page target attached to this browser tab.');
+		}
+		const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
+		await cdp.send('Page.enable', undefined, sessionId);
+
+		return { session, cdp, sessionId, targetId: page.targetId };
+	} catch (error) {
+		// Any of the CDP calls above can throw; only the `!page` branch used
+		// to clean up, so a throw from `getTargets`/`attachToTarget`/
+		// `Page.enable` leaked both the `CdpClient` and the `BrowserCDPSession`
+		// (the caller's own `finally` only disposes the attachment once this
+		// has returned, so it never saw these). Tear them down here, then
+		// rethrow so the caller still reports `{ outcome: 'failed' }`.
 		cdp.dispose();
 		void session.close();
-		throw new Error('No page target attached to this browser tab.');
+		throw error;
 	}
-	const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
-	await cdp.send('Page.enable', undefined, sessionId);
-
-	return { session, cdp, sessionId, targetId: page.targetId };
 }
 
 /**
@@ -1283,6 +1942,36 @@ async function captureScreenshot(attachment: BrowserPageAttachment): Promise<str
 		attachment.sessionId,
 	);
 	return data;
+}
+
+/**
+ * Captures the page's accessibility tree and serializes it to the compact
+ * text snapshot the model reads. This is the token-efficient counterpart to
+ * `captureScreenshot`: the human sees the PNG, the model reads roles/labels/
+ * text — the page's *meaning* — without paying image-token cost on every
+ * verification step.
+ *
+ * Best-effort by design: an AX failure must not break the check. The
+ * screenshot path is already complete by the time this runs, so any error
+ * (an unsupported domain on some CDP target, a page that never computed a
+ * tree) simply degrades to the existing screenshot-only result and the model
+ * still gets its "screenshot captured" receipt. `Accessibility.enable` is
+ * called first defensively — some Chromium builds do not compute the tree
+ * until asked — and is harmless when already enabled.
+ */
+async function captureAccessibilityTree(attachment: BrowserPageAttachment): Promise<string | undefined> {
+	try {
+		await attachment.cdp.send('Accessibility.enable', undefined, attachment.sessionId);
+		const { nodes } = await attachment.cdp.send<{ nodes: AxNode[] }>(
+			'Accessibility.getFullAXTree',
+			undefined,
+			attachment.sessionId,
+		);
+		const text = serializeAxTree(nodes ?? []);
+		return text.length > 0 ? text : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /**
@@ -1316,6 +2005,10 @@ async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
 		await loaded;
 
 		const data = await captureScreenshot(attachment);
+		const axTree = await captureAccessibilityTree(attachment);
+		if (axTree) {
+			return { outcome: 'screenshot', mimeType: 'image/png', data, axTree };
+		}
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
 		return { outcome: 'failed', reason: describeError(error) };
@@ -1363,6 +2056,10 @@ async function interactInBrowser(url: string, interaction: BrowserInteraction): 
 		}
 
 		const data = await captureScreenshot(attachment);
+		const axTree = await captureAccessibilityTree(attachment);
+		if (axTree) {
+			return { outcome: 'screenshot', mimeType: 'image/png', data, axTree };
+		}
 		return { outcome: 'screenshot', mimeType: 'image/png', data };
 	} catch (error) {
 		return { outcome: 'failed', reason: describeError(error) };

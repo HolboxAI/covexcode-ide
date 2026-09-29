@@ -5,6 +5,46 @@
 import * as cp from 'node:child_process';
 import * as readline from 'node:readline';
 import { EventEmitter } from 'node:events';
+import type { toAcpMcpServers } from './mcpConfig';
+
+/**
+ * One entry of ACP v1's `session/new` `mcpServers` array, as built by
+ * `mcpConfig.ts`'s `toAcpMcpServers()`. Derived from that function's own return
+ * type rather than re-declared here, so the two cannot drift apart: the producer
+ * and this consumer are typed by a single source of truth.
+ */
+export type AcpMcpServerConfig = ReturnType<typeof toAcpMcpServers>[number];
+
+/**
+ * Mirrors `protocol.rs`'s agent capabilities. `mcp` is deliberately *not* in the
+ * ACP v1 schema -- boxcode advertises it as a forward-compatible extra so a
+ * client can tell "this build connects MCP servers" apart from "this build
+ * accepts the field and ignores it". ACP v1 makes `mcpServers` required on
+ * `session/new`, so an MCP-less build still accepts a populated array and returns
+ * a session id while connecting nothing (verified by probe -- see
+ * `docs/MCP-verification.md` in the merged design notes). Sending servers to such
+ * a build is therefore a silent no-op, which is precisely what this flag prevents.
+ */
+export interface AgentCapabilities {
+	session?: Record<string, unknown>;
+	mcp?: boolean;
+	promptCapabilities?: { image?: boolean };
+}
+
+export interface InitializeResult {
+	protocolVersion?: number;
+	agentCapabilities?: AgentCapabilities;
+}
+
+/**
+ * Whether the agent we are talking to actually connects the MCP servers it is
+ * handed. Called against the result of `initialize()`; absent capability means
+ * "no", because the failure mode of guessing wrong is a silent no-op that looks
+ * like a working feature.
+ */
+export function agentSupportsMcp(result: InitializeResult | undefined): boolean {
+	return result?.agentCapabilities?.mcp === true;
+}
 
 // Wire types mirror boxcode's own `src/protocol.rs` exactly -- see that
 // module's own doc comments for the ACP v1 schema this implements. Kept to
@@ -36,6 +76,27 @@ export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refu
 
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
+export type DiffLineChange = 'context' | 'added' | 'removed';
+
+/**
+ * Mirrors `protocol.rs`'s own `DiffHunkLine`/`DiffHunk`/`DiffLineChange`
+ * exactly -- the per-hunk split of a file change boxcode pre-computes so a
+ * client can offer per-hunk accept/reject without reimplementing its diff
+ * (see `headless.rs::diff_hunks_for_review`). Line numbers are 1-based;
+ * `oldNo` is absent on an added line and `newNo` absent on a removed line,
+ * matching the gutter of any two-column diff.
+ */
+export interface DiffHunkLine {
+	change: DiffLineChange;
+	oldNo?: number;
+	newNo?: number;
+	text: string;
+}
+
+export interface DiffHunk {
+	lines: DiffHunkLine[];
+}
+
 /**
  * Mirrors `protocol.rs`'s own `ToolCallContent` exactly -- the three
  * variants boxcode implements (`content`/`diff` are ACP v1's own; `image`
@@ -43,12 +104,16 @@ export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
  * reasoning as `session/checkInBrowser` not being part of ACP's schema
  * either). `Diff.oldText` is absent (not empty) for a brand-new file,
  * matching `preview_change_text`'s own before-is-`None` case rather than
- * boxcode sending an empty string for it.
+ * boxcode sending an empty string for it. `Diff.hunks` is absent either
+ * when the change has no hunkable diff (CRLF line endings, an oversized
+ * diff -- see `headless.rs::diff_hunks_for_review`) or from a boxcode that
+ * predates per-hunk review; its absence means "whole-file review only".
  */
 export type ToolCallContent =
 	| { type: 'content'; text: string }
-	| { type: 'diff'; path: string; oldText?: string; newText: string }
-	| { type: 'image'; mimeType: string; data: string };
+	| { type: 'diff'; path: string; oldText?: string; newText: string; hunks?: DiffHunk[] }
+	| { type: 'image'; mimeType: string; data: string }
+	| { type: 'plan'; title: string; summary: string; steps: string[]; notDoing?: string[] };
 
 export interface ToolCallUpdate {
 	toolCallId: string;
@@ -121,7 +186,8 @@ export interface RequestPermissionRequest {
 
 export type RequestPermissionOutcome =
 	| { outcome: 'cancelled' }
-	| { outcome: 'selected'; optionId: string };
+	| { outcome: 'selected'; optionId: string }
+	| { outcome: 'partial'; newText: string };
 
 /**
  * `session/checkInBrowser` -- not part of ACP's own schema (the spec has no
@@ -136,7 +202,7 @@ export interface CheckInBrowserRequest {
 }
 
 export type CheckInBrowserOutcome =
-	| { outcome: 'screenshot'; mimeType: string; data: string }
+	| { outcome: 'screenshot'; mimeType: string; data: string; axTree?: string }
 	| { outcome: 'failed'; reason: string };
 
 /**
@@ -166,8 +232,29 @@ export interface InteractInBrowserRequest {
 }
 
 export type InteractInBrowserOutcome =
-	| { outcome: 'screenshot'; mimeType: string; data: string }
+	| { outcome: 'screenshot'; mimeType: string; data: string; axTree?: string }
 	| { outcome: 'failed'; reason: string };
+
+/**
+ * One rollback-journal entry, mirroring `protocol.rs::ChangeEntry` exactly.
+ * `action` is the pre-planned undo for this file (`restore` = put the
+ * pre-session text back, `delete` = the file didn't exist before the
+ * session, `blocked` = boxcode only ran a shell command against it, so it
+ * has no before-state to restore and cannot be undone), and `reason` is
+ * only present when the entry is `blocked`.
+ */
+export interface ChangeEntry {
+	path: string;
+	turn: number;
+	touches: number;
+	action: 'restore' | 'delete' | 'blocked';
+	reason?: string;
+}
+
+export interface ListChangesResponse {
+	changes: ChangeEntry[];
+	shellWarning?: string;
+}
 
 interface PendingRequest {
 	resolve: (result: unknown) => void;
@@ -260,12 +347,27 @@ export class AcpClient extends EventEmitter {
 		} catch {
 			return; // malformed line -- not this client's job to crash over, mirrors transport.rs's own read loop
 		}
+		if (!isObject(value)) {
+			return; // a JSON-RPC message is always an object; anything else is not for us
+		}
 
 		if (value.method === 'session/update') {
-			this.emit('update', value.params as SessionNotification);
+			// Guard the shape before emitting: `onUpdate` (extension.ts) hands
+			// `notification.update` straight to `renderUpdate`, which switches
+			// on `update.sessionUpdate` -- a `session/update` with a missing or
+			// non-object `params.update` would throw there instead of being
+			// ignored as an unrecognized notification.
+			const params = value.params;
+			const update = isObject(params) ? params.update : undefined;
+			if (isObject(update) && typeof update.sessionUpdate === 'string') {
+				this.emit('update', params as SessionNotification);
+			}
 			return;
 		}
 		if (value.method === 'session/request_permission') {
+			if (!isObject(value.params)) {
+				return;
+			}
 			const respond: RespondToPermission = outcome => {
 				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
 			};
@@ -273,6 +375,9 @@ export class AcpClient extends EventEmitter {
 			return;
 		}
 		if (value.method === 'session/checkInBrowser') {
+			if (!isObject(value.params)) {
+				return;
+			}
 			const respond: RespondToBrowserCheck = outcome => {
 				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
 			};
@@ -280,6 +385,9 @@ export class AcpClient extends EventEmitter {
 			return;
 		}
 		if (value.method === 'session/interactInBrowser') {
+			if (!isObject(value.params)) {
+				return;
+			}
 			const respond: RespondToBrowserInteract = outcome => {
 				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
 			};
@@ -337,12 +445,28 @@ export class AcpClient extends EventEmitter {
 		});
 	}
 
-	async initialize(): Promise<void> {
-		await this.request('initialize', { protocolVersion: 1 });
+	/**
+	 * Performs the ACP handshake and returns the agent's capabilities.
+	 *
+	 * Returning the result rather than discarding it is what makes the MCP
+	 * capability gate possible: the caller needs to know whether this build
+	 * connects servers before sending any. Callers that do not care can keep
+	 * ignoring the return value, as they did when this returned `void`.
+	 */
+	async initialize(): Promise<InitializeResult> {
+		const result = (await this.request('initialize', { protocolVersion: 1 })) as InitializeResult | undefined;
+		return result ?? {};
 	}
 
-	async newSession(cwd: string): Promise<string> {
-		const result = (await this.request('session/new', { cwd, mcpServers: [] })) as { sessionId: string };
+	/**
+	 * Opens a session, optionally handing the agent MCP servers to connect.
+	 *
+	 * Defaults to an empty array so existing callers are unaffected, and so the
+	 * "no MCP servers configured" case stays byte-identical on the wire to what
+	 * this client sent before MCP support existed.
+	 */
+	async newSession(cwd: string, mcpServers: readonly AcpMcpServerConfig[] = []): Promise<string> {
+		const result = (await this.request('session/new', { cwd, mcpServers })) as { sessionId: string };
 		return result.sessionId;
 	}
 
@@ -355,14 +479,24 @@ export class AcpClient extends EventEmitter {
 	 * can attach images (element-picker screenshots) alongside text --
 	 * `text` stays available as a convenience for the common no-attachment
 	 * case.
+	 *
+	 * `mode` is the optional `PromptRequest.mode` field (boxcode's own
+	 * `tools::Mode`, `snake_case`): `'plan'` runs the turn read-only until a
+	 * proposed plan is approved. Omitted for the default `normal`, so a
+	 * client that never selects Plan sends exactly what it did before.
 	 */
-	async prompt(sessionId: string, content: string | PromptContentBlock[]): Promise<StopReason> {
+	async prompt(
+		sessionId: string,
+		content: string | PromptContentBlock[],
+		mode?: 'normal' | 'plan',
+	): Promise<{ stopReason: StopReason; turn: number }> {
 		const prompt: PromptContentBlock[] = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
 		const result = (await this.request('session/prompt', {
 			sessionId,
 			prompt,
-		})) as { stopReason: StopReason };
-		return result.stopReason;
+			...(mode ? { mode } : {}),
+		})) as { stopReason: StopReason; turn: number };
+		return result;
 	}
 
 	/**
@@ -370,10 +504,28 @@ export class AcpClient extends EventEmitter {
 	 * on boxcode's own side (local disk I/O, never an LLM round trip), so
 	 * there's nothing to stream here; the returned summary is the whole
 	 * answer.
+	 *
+	 * `options` narrows the rollback to the journal entries boxcode selects:
+	 * `files` spends only the named paths (matched by display or resolved
+	 * path), `turn` spends only files first touched in that turn, and
+	 * `restoreBeforeTurn` puts every file touched at that turn or later back
+	 * to its state just before that turn began (the per-turn form of `turn`,
+	 * which undoes a file edited across turns without half-undoing it). Omit
+	 * all three for the pre-existing all-or-nothing undo. Every field maps
+	 * straight onto `protocol.rs::RollbackRequest`.
 	 */
-	async rollback(sessionId: string): Promise<string> {
-		const result = (await this.request('session/rollback', { sessionId })) as { summary: string };
+	async rollback(sessionId: string, options?: { files?: string[]; turn?: number; restoreBeforeTurn?: number }): Promise<string> {
+		const result = (await this.request('session/rollback', { sessionId, ...options })) as { summary: string };
 		return result.summary;
+	}
+
+	/**
+	 * `session/list_changes` -- reads the rollback journal without spending
+	 * anything, so the UI can offer a per-file/per-turn picker before it
+	 * commits to an undo. Synchronous like `rollback` (local journal read).
+	 */
+	async listChanges(sessionId: string): Promise<ListChangesResponse> {
+		return (await this.request('session/list_changes', { sessionId })) as ListChangesResponse;
 	}
 
 	dispose(): void {
@@ -548,4 +700,11 @@ export function fetchProviders(boxcodeCommand: string, args: string[] = ['--prov
 
 function describeErrorLocal(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+// Plain `boolean` on purpose, not a type predicate: `value`/`params` in
+// `handleLine` are `any`, and a predicate would narrow them to
+// `Record<string, unknown>`, breaking the `as` casts the dispatcher relies on.
+function isObject(value: unknown): boolean {
+	return typeof value === 'object' && value !== null;
 }

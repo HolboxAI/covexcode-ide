@@ -238,7 +238,20 @@ else
   fi
 fi
 
-node build/npm/preinstall.ts
+# Windows runners occasionally crash npm during gyp header install
+# (exit 3221226505 / STATUS_STACK_BUFFER_OVERRUN) before the main npm ci
+# retry loop below ever runs. Retry the preinstall step itself.
+for i in {1..5}; do # try 5 times
+  node build/npm/preinstall.ts && break
+
+  if [[ $i == 5 ]]; then
+    echo "Npm preinstall failed too many times" >&2
+    exit 1
+  fi
+  echo "Npm preinstall failed $i, trying again..."
+
+  sleep $(( 15 * (i + 1)))
+done
 
 mv .npmrc .npmrc.bak
 cp ../npmrc .npmrc

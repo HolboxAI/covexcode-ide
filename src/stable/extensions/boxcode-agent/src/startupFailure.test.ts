@@ -36,6 +36,15 @@ test('describeStartupFailure() treats exit code 2 as an unknown --acp flag', () 
 	assert.match(message, /boxcode --upgrade/);
 });
 
+test('describeStartupFailure() does not mistake another command exiting 2 for an old boxcode CLI', () => {
+	// Exit 2 is boxcode's "unknown argument" convention only for the
+	// `boxcode --acp` spawn; a different subprocess that happened to exit 2
+	// must fall through to the generic failure prose, not the upgrade prompt.
+	const message = describeStartupFailure(new Error('git exited (code 2, signal null)'), 'darwin');
+	assert.match(message, /Make sure `boxcode` is installed and on your PATH/);
+	assert.doesNotMatch(message, /boxcode --upgrade/);
+});
+
 test('describeStartupFailure() falls back to generic prose for a non-ENOENT failure', () => {
 	// The real case this covers: boxcode is installed and found, but crashes
 	// on startup for some other reason (bad config, permissions, etc.) --

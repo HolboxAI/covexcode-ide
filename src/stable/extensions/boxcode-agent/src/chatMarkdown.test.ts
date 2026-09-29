@@ -25,6 +25,16 @@ test('stripOversizedDataUris() replaces a screenshot-sized data URI with a short
 	assert.ok(stripped.length < 200);
 });
 
+test('stripOversizedDataUris() stops at trailing prose instead of swallowing it', () => {
+	// A bare data URI (no `)` to delimit it) followed by prose: the base64
+	// class must not eat the words after it as if they were payload.
+	const payload = 'A'.repeat(3000);
+	const text = `data:image/png;base64,${payload}\n\nHere is some prose after the image.`;
+	const stripped = stripOversizedDataUris(text);
+	assert.doesNotMatch(stripped, /AAAA/);
+	assert.match(stripped, /Here is some prose after the image\./);
+});
+
 test('describeBrowserPreview() does not include image bytes', () => {
 	assert.match(describeBrowserPreview(), /Integrated Browser/);
 	assert.doesNotMatch(describeBrowserPreview(), /base64/);
