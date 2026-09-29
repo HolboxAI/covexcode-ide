@@ -27,6 +27,17 @@ export const REVIEW_COMMAND = 'boxcode.permission.review';
 
 export type PermissionChoice = 'allow' | 'reject' | 'allow-always' | 'deny-always' | 'cancelled';
 
+/**
+ * What a permission gate's waiter resolves to. `choice` is the user's click
+ * (`allow`/`reject`), a cancellation (`cancelled`), or a per-hunk review
+ * result (`partial`); `newText` rides along only for `partial`, carrying the
+ * merged whole-file text the review picker produced (see `diffReview.ts`).
+ */
+export type PermissionAnswer = {
+	choice: 'allow' | 'reject' | 'cancelled' | 'partial';
+	newText?: string;
+};
+
 export class PermissionGate {
 	private nextId = 1;
 	private readonly pending = new Map<string, (answer: PermissionAnswer) => void>();
@@ -73,7 +84,9 @@ export class PermissionGate {
 	}
 }
 
-export function parsePermissionCommandArgs(args: unknown[]): { id: string; choice: 'allow' | 'reject' } | undefined {
+export function parsePermissionCommandArgs(
+	args: unknown[],
+): { id: string; choice: 'allow' | 'reject' | 'allow-always' | 'deny-always' } | undefined {
 	const id = args[0];
 	const choice = args[1];
 	if (typeof id !== 'string') {
