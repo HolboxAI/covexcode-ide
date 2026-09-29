@@ -76,11 +76,25 @@ import {
 	workspacePromptPrefix,
 	type WorkspaceContext,
 } from './workspaceContext';
+import {
+	DeviceLoginError,
+	heartbeatOnce,
+	logoutLocal,
+	readAccountStatus,
+	saveAccountCredentials,
+	type AccountCredentials,
+} from './accountLogin';
+import {
+	AUTH_PROVIDER_ID,
+	registerBoxcodeAuthProvider,
+	runBrowserDeviceLogin,
+} from './boxcodeAuthProvider';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
 const SECRET_API_KEY = 'boxcode.apiKey';
 const DIFF_SCHEME = 'boxcode-diff';
+const SIGN_IN_WITH_BOXCODE = 'Sign in with boxcode.sh (browser)…';
 
 /**
  * The per-hunk review state for an in-flight permission request, keyed by the
@@ -351,6 +365,59 @@ export function activate(context: vscode.ExtensionContext): void {
 			usageIndicator.hide();
 		}
 	};
+
+	const accountIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+	accountIndicator.name = 'boxcode: account';
+	context.subscriptions.push(accountIndicator);
+	const updateAccountIndicator = (): void => {
+		const status = readAccountStatus();
+		if (status.signedIn) {
+			const who = status.email || 'boxcode.sh';
+			accountIndicator.text = `$(account) ${who}`;
+			accountIndicator.tooltip = `Signed in to boxcode.sh as ${who}. Click for account.`;
+			accountIndicator.command = 'boxcode.showAccount';
+		} else {
+			accountIndicator.text = '$(account) Sign in';
+			accountIndicator.tooltip = 'Sign in to boxcode.sh (Settings → Accounts → boxcode.sh)';
+			accountIndicator.command = 'boxcode.signIn';
+		}
+		accountIndicator.show();
+	};
+
+	const applyAccountCredentials = async (creds: AccountCredentials): Promise<void> => {
+		await persistSetupResult(context, {
+			provider: creds.provider,
+			endpoint: creds.endpoint,
+			model: creds.model,
+			apiKey: creds.apiKey,
+		});
+		discardSession();
+		updateAccountIndicator();
+	};
+
+	const clearAccountCredentials = async (): Promise<void> => {
+		await context.secrets.delete(SECRET_API_KEY);
+		const config = vscode.workspace.getConfiguration('boxcode');
+		const endpoint = (config.get<string>('endpoint', '') || '').toLowerCase();
+		if (endpoint.includes('llm.boxcode.sh')) {
+			await config.update('endpoint', '', vscode.ConfigurationTarget.Global);
+			await config.update('model', '', vscode.ConfigurationTarget.Global);
+			await config.update('provider', '', vscode.ConfigurationTarget.Global);
+		}
+		discardSession();
+		updateAccountIndicator();
+	};
+
+	const authProvider = registerBoxcodeAuthProvider(context, {
+		onCredentialsSaved: applyAccountCredentials,
+		onLoggedOut: clearAccountCredentials,
+	});
+	updateAccountIndicator();
+	void heartbeatOnce();
+	const heartbeatTimer = setInterval(() => {
+		void heartbeatOnce();
+	}, 5 * 60 * 1000);
+	context.subscriptions.push({ dispose: () => clearInterval(heartbeatTimer) });
 
 	const RECS_SKIP_STATE = 'boxcode.frameworkRecommendationSkips';
 	const INSTALL_RECS_ACTION = 'Install';
@@ -889,6 +956,70 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}),
 	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('boxcode.signIn', async () => {
+			try {
+				const session = await vscode.authentication.getSession(AUTH_PROVIDER_ID, [], {
+					createIfNone: true,
+				});
+				authProvider.refreshFromDisk();
+				updateAccountIndicator();
+				const who = session.account.label;
+				void vscode.window.showInformationMessage(
+					`boxcode: signed in as ${who}. Credentials saved to ~/.boxcode — same as \`boxcode login\`.`,
+				);
+			} catch (err) {
+				if (err instanceof DeviceLoginError && /cancelled/i.test(err.message)) {
+					void vscode.window.showInformationMessage('boxcode: sign-in cancelled.');
+					return;
+				}
+				const message = err instanceof Error ? err.message : String(err);
+				void vscode.window.showErrorMessage(`boxcode: sign-in failed — ${message}`);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('boxcode.signOut', async () => {
+			logoutLocal();
+			await clearAccountCredentials();
+			authProvider.refreshFromDisk();
+			void vscode.window.showInformationMessage('boxcode: signed out of boxcode.sh.');
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('boxcode.showAccount', async () => {
+			const status = readAccountStatus();
+			if (!status.signedIn) {
+				const choice = await vscode.window.showInformationMessage(
+					'Not signed in to boxcode.sh. Sign in opens the browser (Settings → Accounts → boxcode.sh).',
+					'Sign In',
+				);
+				if (choice === 'Sign In') {
+					await vscode.commands.executeCommand('boxcode.signIn');
+				}
+				return;
+			}
+			const who = status.email || 'boxcode.sh account';
+			const detail = [
+				`Account:  ${who}`,
+				status.endpoint ? `Endpoint: ${status.endpoint}` : undefined,
+				status.model ? `Model:    ${status.model}` : undefined,
+				'',
+				'Manage from Accounts (profile icon) → boxcode.sh, or Sign Out below.',
+			]
+				.filter(line => line !== undefined)
+				.join('\n');
+			const choice = await vscode.window.showInformationMessage(detail, 'Sign Out', 'Open Account Page');
+			if (choice === 'Sign Out') {
+				await vscode.commands.executeCommand('boxcode.signOut');
+			} else if (choice === 'Open Account Page') {
+				await vscode.env.openExternal(vscode.Uri.parse('https://boxcode.sh/account'));
+			}
+		}),
+	);
 }
 
 /**
@@ -1413,6 +1544,28 @@ function providerEnvVarName(providerId: string): string {
 
 const CUSTOM_ENDPOINT_ITEM = 'Custom endpoint…';
 
+/** Browser device login → SetupResult, also writing ~/.boxcode like the CLI. */
+async function signInSetupResult(): Promise<SetupResult | undefined> {
+	try {
+		const creds = await runBrowserDeviceLogin();
+		saveAccountCredentials(creds);
+		void heartbeatOnce();
+		return {
+			provider: creds.provider,
+			endpoint: creds.endpoint,
+			model: creds.model,
+			apiKey: creds.apiKey,
+		};
+	} catch (err) {
+		if (err instanceof DeviceLoginError && /cancelled/i.test(err.message)) {
+			return undefined;
+		}
+		const message = err instanceof Error ? err.message : String(err);
+		void vscode.window.showErrorMessage(`boxcode: sign-in failed — ${message}`);
+		return undefined;
+	}
+}
+
 /**
  * Provider -> model -> API key, mirroring the TUI's own `/provider` overlay
  * flow (`ProviderPicker`/`ModelPicker`/`ApiKeyPrompt` in `app.rs`) instead
@@ -1420,6 +1573,10 @@ const CUSTOM_ENDPOINT_ITEM = 'Custom endpoint…';
  * for why: a real tester hit the old three-bare-textbox version and asked
  * "why do you need an endpoint? it should be pick a provider and model and
  * enter an API key," which is exactly what the TUI already had.
+ *
+ * First offers Sign in with boxcode.sh (browser device login, same as
+ * Accounts → boxcode.sh / `boxcode login`), then falls through to the
+ * provider picker for BYOK.
  *
  * Falls back to the old raw endpoint/model/key flow (renamed
  * `runCustomEndpointFlow` below) both for "Custom endpoint…" and, silently,
@@ -1429,6 +1586,29 @@ const CUSTOM_ENDPOINT_ITEM = 'Custom endpoint…';
  * before this ever runs).
  */
 async function runSetupFlow(boxcodeCommand: string): Promise<SetupResult | undefined> {
+	const accountPick = await vscode.window.showQuickPick(
+		[
+			{
+				label: SIGN_IN_WITH_BOXCODE,
+				description: 'Google sign-in in the browser — promo key via boxcode.sh',
+			},
+			{
+				label: 'Use your own API key…',
+				description: 'Pick a provider and enter a key (BYOK)',
+			},
+		],
+		{
+			title: 'boxcode setup — how do you want to connect?',
+			ignoreFocusOut: true,
+		},
+	);
+	if (!accountPick) {
+		return undefined;
+	}
+	if (accountPick.label === SIGN_IN_WITH_BOXCODE) {
+		return signInSetupResult();
+	}
+
 	let providers: ProviderDescriptor[];
 	try {
 		providers = await fetchProviders(boxcodeCommand);

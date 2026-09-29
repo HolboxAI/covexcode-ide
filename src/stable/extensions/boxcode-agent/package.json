@@ -2,7 +2,7 @@
   "name": "boxcode-agent",
   "displayName": "boxcode",
   "description": "Chat with boxcode, driven over its ACP stdio interface.",
-  "version": "1.0.10",
+	"version": "1.0.11",
   "publisher": "boxcode",
   "license": "MIT",
   "engines": {
@@ -73,6 +73,21 @@
         "category": "boxcode"
       },
       {
+        "command": "boxcode.signIn",
+        "title": "boxcode: Sign In to boxcode.sh",
+        "category": "boxcode"
+      },
+      {
+        "command": "boxcode.signOut",
+        "title": "boxcode: Sign Out of boxcode.sh",
+        "category": "boxcode"
+      },
+      {
+        "command": "boxcode.showAccount",
+        "title": "boxcode: Show Account",
+        "category": "boxcode"
+      },
+      {
         "command": "boxcode.changeProvider",
         "title": "boxcode: Change Provider / Model / API Key",
         "category": "boxcode"
@@ -98,6 +113,12 @@
         "category": "boxcode"
       }
     ],
+    "authentication": [
+      {
+        "id": "boxcode",
+        "label": "boxcode.sh"
+      }
+    ],
     "configurationDefaults": {
       "security.workspace.trust.banner": "always"
     },
@@ -107,19 +128,19 @@
         "boxcode.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to the `boxcode` binary, if it isn't on the PATH this app was launched with. Leave empty to resolve `boxcode` off PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.boxcode/bin` (the locations `install.sh` actually writes to, which a Finder-launched app's PATH often misses)."
+          "markdownDescription": "Path to the `boxcode` CLI binary, if it isn't on the PATH this app was launched with. Leave empty to resolve `boxcode` off PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.boxcode/bin` (the locations `install.sh` actually writes to, which a Finder-launched app's PATH often misses)."
         },
         "boxcode.provider": {
           "type": "string",
           "default": "",
           "order": 1,
-          "markdownDescription": "LLM provider registry id (e.g. `deepseek`), or empty for a custom endpoint. Prefer the chat slash command `/provider`, or [Change Provider / Model / API Key](command:boxcode.changeProvider), instead of editing this by hand."
+          "markdownDescription": "LLM provider registry id (e.g. `deepseek`), or empty for a custom endpoint. Prefer **Sign In to boxcode.sh** (Accounts / profile menu), chat `/provider`, or [Change Provider / Model / API Key](command:boxcode.changeProvider)."
         },
         "boxcode.endpoint": {
           "type": "string",
           "default": "",
           "order": 2,
-          "markdownDescription": "Base URL for boxcode's OpenAI-compatible LLM endpoint (e.g. `https://api.deepseek.com`). Set automatically by `/provider`; leave empty to use `~/.boxcode/config.toml` from the CLI when no IDE override is stored."
+          "markdownDescription": "Base URL for boxcode's OpenAI-compatible LLM endpoint (e.g. `https://api.deepseek.com` or `https://llm.boxcode.sh/v1`). Set automatically by Sign In / `/provider`; leave empty to use `~/.boxcode/config.toml` from the CLI when no IDE override is stored."
         },
         "boxcode.model": {
           "type": "string",
@@ -131,7 +152,7 @@
           "type": "boolean",
           "default": true,
           "order": 4,
-          "markdownDescription": "API keys are stored in the OS secure store (never in `settings.json`). The toggle is unused — use [Set API Key](command:boxcode.setApiKey), chat `/provider`, or [Change Provider / Model / API Key](command:boxcode.changeProvider)."
+          "markdownDescription": "API keys are stored in the OS secure store (never in `settings.json`). Prefer [Sign In to boxcode.sh](command:boxcode.signIn), [Set API Key](command:boxcode.setApiKey), or [Change Provider / Model / API Key](command:boxcode.changeProvider)."
         },
         "boxcode.costPerMillionTokens": {
           "type": "number",
