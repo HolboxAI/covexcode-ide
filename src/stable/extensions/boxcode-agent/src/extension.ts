@@ -588,6 +588,13 @@ export function activate(context: vscode.ExtensionContext): void {
 					workspaceFolder: cwd,
 					home: os.homedir(),
 					env: process.env,
+					// A workspace-scope server launches a command from the repository
+					// under the user's own account, so it is only allowed in a folder
+					// the user has already trusted. Reusing the editor's trust state
+					// keeps that decision visible and revocable, where a separate
+					// approval store could silently disagree with it.
+					approve: (_server, scope) =>
+						scope !== 'workspace' || vscode.workspace.isTrusted,
 				});
 				sessionId = await acp.newSession(
 					cwd,
