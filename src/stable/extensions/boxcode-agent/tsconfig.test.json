@@ -12,5 +12,5 @@
 		"typeRoots": ["./node_modules/@types"]
 	},
 	"include": ["src/**/*.ts"],
-	"exclude": ["src/extension.ts"]
+	"exclude": ["src/extension.ts", "src/boxcodeAuthProvider.ts"]
 }
