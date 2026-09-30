@@ -111,6 +111,11 @@
         "command": "boxcode.trustWorkspace",
         "title": "boxcode: Trust This Folder",
         "category": "boxcode"
+      },
+      {
+        "command": "boxcode.importFromVSCode",
+        "title": "boxcode: Import from VS Code",
+        "category": "boxcode"
       }
     ],
     "authentication": [
