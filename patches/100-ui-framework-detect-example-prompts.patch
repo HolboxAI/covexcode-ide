@@ -2,7 +2,7 @@ diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessions
 index 0000000..0000000 100644
 --- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
 +++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
-@@ -55,6 +55,7 @@
+@@ -55,6 +55,7 @@ import { GettingStartedEditorOptions, GettingStartedInput } from '../../welcomeG
  import { IMarkdownRendererService } from '../../../../platform/markdown/browser/markdownRenderer.js';
  import { MarkdownString } from '../../../../base/common/htmlContent.js';
  import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
@@ -10,11 +10,11 @@ index 0000000..0000000 100644
  import { IWorkspacesService, IRecentFolder, IRecentWorkspace, isRecentFolder, isRecentWorkspace } from '../../../../platform/workspaces/common/workspaces.js';
  import { IHostService } from '../../../services/host/browser/host.js';
  import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
-@@ -151,6 +152,116 @@
+@@ -151,6 +152,132 @@ const OPEN_WORKSPACE_EXAMPLE_PROMPTS: IWelcomeExamplePrompt[] = [
  	},
  ];
  
-+type WelcomeFrameworkId = 'next' | 'vite' | 'react' | 'vue' | 'svelte' | 'angular' | 'node';
++type WelcomeFrameworkId = 'next' | 'nuxt' | 'astro' | 'react' | 'vue' | 'svelte' | 'angular' | 'node';
 +
 +/**
 + * boxcode-ide: framework-specific overrides of OPEN_WORKSPACE_EXAMPLE_PROMPTS.
@@ -37,6 +37,33 @@ index 0000000..0000000 100644
 +			icon: Codicon.plug,
 +			label: localize('examplePrompt.next.addApiRoute.label', "Add an API route"),
 +			prompt: localize('examplePrompt.next.addApiRoute.prompt', "Add a new API route to this Next.js app and call it from a client component."),
++		},
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
++	],
++	nuxt: [
++		{
++			id: 'nuxt.addPage',
++			icon: Codicon.file,
++			label: localize('examplePrompt.nuxt.addPage.label', "Add a new page"),
++			prompt: localize('examplePrompt.nuxt.addPage.prompt', "Add a new page to this Nuxt app and link it from the nav."),
++		},
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[0],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
++		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
++	],
++	astro: [
++		{
++			id: 'astro.addPage',
++			icon: Codicon.file,
++			label: localize('examplePrompt.astro.addPage.label', "Add a new page"),
++			prompt: localize('examplePrompt.astro.addPage.prompt', "Add a new page to this Astro site and link it from the nav."),
++		},
++		{
++			id: 'astro.addComponent',
++			icon: Codicon.symbolClass,
++			label: localize('examplePrompt.astro.addComponent.label', "Add a component"),
++			prompt: localize('examplePrompt.astro.addComponent.prompt', "Add a new Astro component and use it on an existing page."),
 +		},
 +		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
 +		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
@@ -69,17 +96,6 @@ index 0000000..0000000 100644
 +			icon: Codicon.symbolClass,
 +			label: localize('examplePrompt.angular.addComponent.label', "Add a new component"),
 +			prompt: localize('examplePrompt.angular.addComponent.prompt', "Generate a new Angular component for this project and wire it into a route."),
-+		},
-+		OPEN_WORKSPACE_EXAMPLE_PROMPTS[0],
-+		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
-+		OPEN_WORKSPACE_EXAMPLE_PROMPTS[3],
-+	],
-+	vite: [
-+		{
-+			id: 'vite.addComponent',
-+			icon: Codicon.symbolClass,
-+			label: localize('examplePrompt.vite.addComponent.label', "Add a new component"),
-+			prompt: localize('examplePrompt.vite.addComponent.prompt', "Add a new component to this project and use it from the main entry point."),
 +		},
 +		OPEN_WORKSPACE_EXAMPLE_PROMPTS[0],
 +		OPEN_WORKSPACE_EXAMPLE_PROMPTS[1],
@@ -127,7 +143,7 @@ index 0000000..0000000 100644
  /**
   * - visibleDurationMs: Do they close it right away or leave it open (#3)
   * - closedBy: Track what action caused the close (viewAllSessions, chatSubmission, sessionClicked, etc.) (#5)
-@@ -246,6 +357,7 @@
+@@ -246,6 +373,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
  		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
  		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
  		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -135,7 +151,7 @@ index 0000000..0000000 100644
  		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
  		@IHostService private readonly hostService: IHostService,
  		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
-@@ -339,7 +451,7 @@
+@@ -339,7 +467,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
  
  		// boxcode-ide: seeded example prompts directly under the input, so the
  		// first-run user is shown what to ask for instead of a blank box.
@@ -144,18 +160,17 @@ index 0000000..0000000 100644
  
  		// Sessions or walkthroughs
  		const sessionsSection = append(this.contentContainer, $('.agentSessionsWelcome-sessionsSection'));
-@@ -530,14 +642,69 @@
+@@ -529,6 +657,56 @@ export class AgentSessionsWelcomePage extends EditorPane {
+ 		this.applyPrefillData();
  	}
  
- 	/**
++	/**
 +	 * boxcode-ide: best-effort framework detection for the open-workspace
 +	 * example prompts. Keep this order in lockstep with frameworkDetector.ts
 +	 * (the agent overlay) -- that module cannot be imported from core, and a
 +	 * Vite+React app used to show Vite chips here while the status bar said
 +	 * React. Meta-frameworks first; `vite` is a build tool, not a framework.
-+	 * Nuxt reuses Vue chips; Astro has no dedicated set yet so it falls
-+	 * through to the generic prompts. `node` is extra for this page only
-+	 * (express/fastify/koa). Never throws.
++	 * `node` is extra for this page only (express/fastify/koa). Never throws.
 +	 */
 +	private async detectFramework(): Promise<WelcomeFrameworkId | undefined> {
 +		const root = this.workspaceContextService.getWorkspace().folders[0]?.uri;
@@ -172,7 +187,10 @@ index 0000000..0000000 100644
 +				return 'next';
 +			}
 +			if ('nuxt' in deps || '@nuxt/kit' in deps) {
-+				return 'vue';
++				return 'nuxt';
++			}
++			if ('astro' in deps) {
++				return 'astro';
 +			}
 +			if ('@sveltejs/kit' in deps || 'svelte' in deps) {
 +				return 'svelte';
@@ -196,10 +214,10 @@ index 0000000..0000000 100644
 +		return undefined;
 +	}
 +
-+	/**
+ 	/**
  	 * boxcode-ide: render the example prompt chips under the chat input.
  	 *
- 	 * Clicking a chip fills the input and focuses it - it deliberately does not
+@@ -536,8 +714,14 @@ export class AgentSessionsWelcomePage extends EditorPane {
  	 * submit, so the prompt stays editable and the user can add their own detail
  	 * before sending. Same mechanism `applyPrefillData` already uses.
  	 */
