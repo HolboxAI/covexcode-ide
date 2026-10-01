@@ -89,6 +89,16 @@ import {
 	registerBoxcodeAuthProvider,
 	runBrowserDeviceLogin,
 } from './boxcodeAuthProvider';
+import {
+	collectSourceSnapshot,
+	detectSourceInstalls,
+	hasImportableContent,
+	mergeKeybindings,
+	mergeSettings,
+	type ImportSnapshot,
+	type SnippetFile,
+	type SourceInstall,
+} from './vscodeImport';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
@@ -1027,6 +1037,205 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}),
 	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('boxcode.importFromVSCode', () => runImportFromVSCode(context)),
+	);
+
+	// One-shot, on first launch: if a VS Code-family install is present with
+	// anything to import, offer once via a non-modal toast. The command above
+	// stays available regardless, so "Not now" closes the nag but not the door.
+	void maybePromptVSCodeImport(context);
+}
+
+const IMPORT_PROMPTED_STATE = 'boxcode.vscodeImportPrompted';
+
+type ImportCategory = 'settings' | 'keybindings' | 'snippets' | 'extensions';
+
+interface ImportCategoryItem extends vscode.QuickPickItem {
+	category: ImportCategory;
+}
+
+/**
+ * boxcode-ide's user-data directory, derived from `context.globalStorageUri`
+ * (`<userData>/User/globalStorage/<publisher>.<name>`) rather than hardcoding
+ * the product name -- so this survives a fork rename without a code change.
+ */
+function destinationUserDir(context: vscode.ExtensionContext): string {
+	const storage = context.globalStorageUri.fsPath;
+	return path.join(path.dirname(path.dirname(path.dirname(storage))), 'User');
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> | undefined {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+			? parsed as Record<string, unknown>
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function readJsonArray(filePath: string): unknown[] {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function writeJson(filePath: string, value: unknown): void {
+	fs.mkdirSync(path.dirname(filePath), { recursive: true });
+	fs.writeFileSync(filePath, JSON.stringify(value, null, 4));
+}
+
+// The merge rules live in vscodeImport.ts (pure + tested); these three write
+// helpers are the only disk-touching glue, and they all go through the
+// user-data directory VS Code itself watches -- so settings/keybindings/
+// snippets hot-reload without a window restart.
+
+function importSettings(context: vscode.ExtensionContext, src: Record<string, unknown>): number {
+	const filePath = path.join(destinationUserDir(context), 'settings.json');
+	writeJson(filePath, mergeSettings(readJsonObject(filePath) ?? {}, src));
+	return Object.keys(src).length;
+}
+
+function importKeybindings(context: vscode.ExtensionContext, src: unknown[]): number {
+	const filePath = path.join(destinationUserDir(context), 'keybindings.json');
+	writeJson(filePath, mergeKeybindings(readJsonArray(filePath), src));
+	return src.length;
+}
+
+function importSnippets(context: vscode.ExtensionContext, snippets: SnippetFile[]): number {
+	const dir = path.join(destinationUserDir(context), 'snippets');
+	for (const snippet of snippets) {
+		writeJson(path.join(dir, snippet.name), snippet.content);
+	}
+	return snippets.length;
+}
+
+async function importExtensions(context: vscode.ExtensionContext, ids: string[]): Promise<number> {
+	const installed = new Set(vscode.extensions.all.map(ext => ext.id.toLowerCase()));
+	let count = 0;
+	for (const id of ids) {
+		if (installed.has(id.toLowerCase())) {
+			continue;
+		}
+		try {
+			await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+			count++;
+		} catch {
+			// Gallery miss or the user cancelled this one id -- keep going.
+		}
+	}
+	return count;
+}
+
+async function pickSourceInstall(installs: SourceInstall[]): Promise<SourceInstall | undefined> {
+	if (installs.length === 1) {
+		return installs[0];
+	}
+	const picked = await vscode.window.showQuickPick(
+		installs.map(install => ({
+			label: install.label,
+			description: install.userDataDir,
+			install,
+		})),
+		{ placeHolder: 'Import from which install?' },
+	);
+	return (picked as { install?: SourceInstall } | undefined)?.install;
+}
+
+async function pickImportCategories(snapshot: ImportSnapshot): Promise<ImportCategoryItem[] | undefined> {
+	const items: ImportCategoryItem[] = [];
+	if (snapshot.settings && Object.keys(snapshot.settings).length > 0) {
+		items.push({ label: 'Settings', description: `${Object.keys(snapshot.settings).length} keys`, picked: true, category: 'settings' });
+	}
+	if (snapshot.keybindings && snapshot.keybindings.length > 0) {
+		items.push({ label: 'Keybindings', description: `${snapshot.keybindings.length} bindings`, picked: true, category: 'keybindings' });
+	}
+	if (snapshot.snippets.length > 0) {
+		items.push({ label: 'Snippets', description: `${snapshot.snippets.length} files`, picked: true, category: 'snippets' });
+	}
+	if (snapshot.extensionIds.length > 0) {
+		items.push({ label: 'Extensions', description: `${snapshot.extensionIds.length} installed`, picked: true, category: 'extensions' });
+	}
+	if (items.length === 0) {
+		void vscode.window.showInformationMessage(
+			`${snapshot.install.label} has nothing to import (no settings, keybindings, snippets, or extensions).`,
+		);
+		return undefined;
+	}
+	const picked = await vscode.window.showQuickPick(items, {
+		canPickMany: true,
+		placeHolder: `Choose what to import from ${snapshot.install.label}`,
+	});
+	return picked;
+}
+
+async function runImportFromVSCode(context: vscode.ExtensionContext): Promise<void> {
+	const installs = detectSourceInstalls(os.homedir(), process.platform, process.env);
+	if (installs.length === 0) {
+		void vscode.window.showInformationMessage('No VS Code installation found to import from.');
+		return;
+	}
+	const install = await pickSourceInstall(installs);
+	if (!install) {
+		return;
+	}
+	const snapshot = collectSourceSnapshot(install);
+	const chosen = await pickImportCategories(snapshot);
+	if (!chosen || chosen.length === 0) {
+		return;
+	}
+
+	const wanted = new Set(chosen.map(item => item.category));
+	const parts: string[] = [];
+	if (wanted.has('settings') && snapshot.settings) {
+		parts.push(`${importSettings(context, snapshot.settings)} settings`);
+	}
+	if (wanted.has('keybindings') && snapshot.keybindings) {
+		parts.push(`${importKeybindings(context, snapshot.keybindings)} keybindings`);
+	}
+	if (wanted.has('snippets') && snapshot.snippets.length > 0) {
+		parts.push(`${importSnippets(context, snapshot.snippets)} snippets`);
+	}
+	if (wanted.has('extensions') && snapshot.extensionIds.length > 0) {
+		const installed = await importExtensions(context, snapshot.extensionIds);
+		if (installed > 0) {
+			parts.push(`${installed} extensions`);
+		}
+	}
+
+	void vscode.window.showInformationMessage(
+		parts.length > 0
+			? `boxcode: imported ${parts.join(', ')} from ${snapshot.install.label}.`
+			: 'boxcode: import finished — nothing new to import.',
+	);
+}
+
+async function maybePromptVSCodeImport(context: vscode.ExtensionContext): Promise<void> {
+	if (context.globalState.get<boolean>(IMPORT_PROMPTED_STATE, false)) {
+		return;
+	}
+	const importable = detectSourceInstalls(os.homedir(), process.platform, process.env)
+		.map(collectSourceSnapshot)
+		.filter(hasImportableContent);
+	if (importable.length === 0) {
+		// Nothing to import yet -- don't set the flag, so an install that
+		// appears later still gets offered once.
+		return;
+	}
+	await context.globalState.update(IMPORT_PROMPTED_STATE, true);
+	const label = importable.length === 1
+		? `Import settings, keybindings, and extensions from ${importable[0].install.label}?`
+		: 'Import settings, keybindings, and extensions from a VS Code install?';
+	const choice = await vscode.window.showInformationMessage(label, 'Import', 'Not now');
+	if (choice === 'Import') {
+		await runImportFromVSCode(context);
+	}
 }
 
 /**
