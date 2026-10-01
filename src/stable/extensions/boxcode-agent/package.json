@@ -40,7 +40,8 @@
         "description": "Ask boxcode to read, write, and run things in this workspace.",
         "isDefault": true,
         "locations": [
-          "panel"
+          "panel",
+          "editor"
         ],
         "modes": [
           "ask",

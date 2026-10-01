@@ -706,7 +706,17 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
-		if (isFreshChat(chatContext.history.length) && client) {
+		// Inline chat (Ctrl+I in an editor) is a propose-only flow: the selected
+		// editor buffer is the source of truth, boxcode runs in `edit` mode, and
+		// its write/edit diffs are rendered as an in-editor accept/reject session
+		// rather than applied to disk. Detected via `chatParticipantPrivate`'s
+		// `location2`, which is a `ChatRequestEditorData` only at the editor
+		// location (the panel, terminal and notebook locations all lack `.document`).
+		const inlineEditorData = (request as vscode.ChatRequest & { location2?: vscode.ChatRequestEditorData }).location2;
+		const isInline = inlineEditorData?.document !== undefined;
+		// Inline chat has its own empty history and must not discard the shared
+		// panel session (which "New Chat" reuse is guarding against below).
+		if (!isInline && isFreshChat(chatContext.history.length) && client) {
 			// VS Code's "New Chat" reuses this extension host, so without
 			// this the next empty-history request would keep talking to the
 			// previous HeadlessSession -- every "new chat" was the same
@@ -752,10 +762,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		const toolCallTitles = new Map<string, string>();
 		const shownBrowserPreviews = new Set<string>();
 		const turnUsage = createTurnUsage();
+		// Inline edit carries the editor buffer and the paths whose diffs were
+		// already emitted, so renderUpdate can convert each `diff` into a
+		// `stream.textEdit` and the end of the turn can finalize them.
+		const inlineEdit: InlineEditContext | undefined = isInline && inlineEditorData
+			? { cwd: workspace.cwd, primaryDocument: inlineEditorData.document, touched: new Set<string>() }
+			: undefined;
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
 				updateUsageIndicator();
 			}
 		};
@@ -790,7 +806,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		};
 
-		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
+		const content = isInline && inlineEditorData
+			? inlineEditPrompt(request, inlineEditorData, workspaceWithFramework)
+			: await attachReferencesToPrompt(request, workspaceWithFramework);
 		// Registered *after* the `await` above so a throw while reading an
 		// attachment (e.g. a binary reference whose bytes can't be loaded)
 		// can't leak these: they were previously added before any `try`, so
@@ -813,7 +831,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			// proposal is on (see `patches/109-...`); read it defensively so the
 			// extension still builds against the stable `vscode.ChatRequest`.
 			const mode = (request as vscode.ChatRequest & { mode?: string }).mode;
-			await activeClient.prompt(activeSessionId, content, mode === 'plan' ? 'plan' : undefined);
+			// Inline edit forces boxcode's propose-only `edit` mode. A plain
+			// panel turn sends `normal` explicitly so a prior `plan`/`edit` turn
+			// can't leave the shared session in a stale mode (`mode` is per-turn,
+			// but boxcode keeps the last value when the field is omitted).
+			await activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			// Finalize every resource that received a proposed diff so VS Code's
+			// inline editing session knows no more edits are coming and can offer
+			// accept/reject. No-op in the panel (inlineEdit is undefined there).
+			if (inlineEdit) {
+				for (const fsPath of inlineEdit.touched) {
+					stream.textEdit(vscode.Uri.file(fsPath), true);
+				}
+			}
 			// Rendered only on a clean turn end, never after an error -- a
 			// failed turn's partial usage would be a misleading number. One
 			// line regardless of how many `usage_update`s arrived, since a
@@ -1239,6 +1269,42 @@ async function maybePromptVSCodeImport(context: vscode.ExtensionContext): Promis
 }
 
 /**
+ * Builds the prompt for an editor inline-chat turn (Ctrl+I). The selected
+ * editor buffer -- including unsaved changes -- is the source of truth, so it
+ * is embedded in full rather than read back from disk; boxcode runs this turn
+ * in `edit` mode (propose-only) and its write/edit diffs come back as
+ * reviewable inline edits rather than on-disk writes.
+ */
+function inlineEditPrompt(
+	request: vscode.ChatRequest,
+	editorData: vscode.ChatRequestEditorData,
+	workspace: WorkspaceContext,
+): PromptContentBlock[] {
+	const document = editorData.document;
+	const relativePath = document.uri.scheme === 'file'
+		? (path.relative(workspace.cwd, document.uri.fsPath) || path.basename(document.uri.fsPath))
+		: document.uri.toString();
+	const selection = editorData.selection;
+	const selectionLine = selection.isEmpty
+		? 'No text is selected (the cursor is the only anchor).'
+		: `The user selected lines ${selection.start.line + 1} through ${selection.end.line + 1}.`;
+	const languageId = document.languageId || 'text';
+
+	const body = [
+		`File: ${relativePath}`,
+		selectionLine,
+		'',
+		`Instruction: ${request.prompt}`,
+		'',
+		'Current editor buffer (source of truth -- may include unsaved changes):',
+		'```' + languageId,
+		document.getText(),
+		'```',
+	].join('\n');
+	return [{ type: 'text', text: prependWorkspacePrefix(body, workspacePromptPrefix(workspace)) }];
+}
+
+/**
  * Folds `request.references` -- context the user attached via `@`-mentions
  * or the Integrated Browser's element-picker / console-log-to-chat /
  * screenshot features (`browserEditorChatFeatures.ts`, upstream and
@@ -1456,6 +1522,15 @@ function autoOpenDevServerUrl(update: SessionUpdate, title: string | undefined, 
 	void ensureBrowserTab(url).catch(() => {});
 }
 
+interface InlineEditContext {
+	/** The workspace cwd, used to resolve a `diff.path` to a filesystem path. */
+	cwd: string;
+	/** The editor the user invoked Ctrl+I on -- preferred when a diff targets it. */
+	primaryDocument: vscode.TextDocument;
+	/** Filesystem paths already emitted as `textEdit`s, finalized at turn end. */
+	touched: Set<string>;
+}
+
 function renderUpdate(
 	update: SessionUpdate,
 	stream: vscode.ChatResponseStream,
@@ -1464,6 +1539,7 @@ function renderUpdate(
 	shownBrowserPreviews: Set<string>,
 	turnUsage: TurnUsage,
 	sessionUsage: SessionUsage,
+	inlineEdit: InlineEditContext | undefined,
 ): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -1475,6 +1551,25 @@ function renderUpdate(
 		}
 		case 'tool_call':
 		case 'tool_call_update': {
+			// Inline edit converts boxcode's proposed `diff` straight into an
+			// in-editor edit rather than a tool-call card in the panel.
+			if (inlineEdit && update.content?.type === 'diff') {
+				const diff = update.content;
+				const fsPath = resolvePathAgainstCwd(inlineEdit.cwd, diff.path);
+				const document = inlineEdit.primaryDocument.uri.fsPath === fsPath
+					? inlineEdit.primaryDocument
+					: vscode.workspace.textDocuments.find(d => d.uri.scheme === 'file' && d.uri.fsPath === fsPath);
+				if (document) {
+					const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+					stream.textEdit(document.uri, [new vscode.TextEdit(fullRange, diff.newText)]);
+					inlineEdit.touched.add(document.uri.fsPath);
+				} else {
+					const line = new vscode.MarkdownString(undefined, true);
+					line.appendMarkdown(`$(edit) Proposed a change to \`${diff.path}\` (not open in the editor -- open it to review).\n\n`);
+					stream.markdown(line);
+				}
+				break;
+			}
 			if (update.toolCallId && update.title) {
 				toolCallTitles.set(update.toolCallId, update.title);
 			}
