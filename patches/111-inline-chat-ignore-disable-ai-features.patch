@@ -1,0 +1,15 @@
+diff --git a/src/vs/workbench/contrib/inlineChat/browser/inlineChatActions.ts b/src/vs/workbench/contrib/inlineChat/browser/inlineChatActions.ts
+--- a/src/vs/workbench/contrib/inlineChat/browser/inlineChatActions.ts
++++ b/src/vs/workbench/contrib/inlineChat/browser/inlineChatActions.ts
+@@ -43,7 +43,10 @@
+ 	CTX_INLINE_CHAT_POSSIBLE,
+ 	EditorContextKeys.writable,
+ 	EditorContextKeys.editorSimpleInput.negate(),
+-	ContextKeyExpr.has('config.chat.disableAIFeatures').negate(),
++	// Note (boxcode fork): do NOT gate inline chat on `config.chat.disableAIFeatures`.
++	// This fork sets that flag's default to `true` to hide GitHub Copilot's built-in
++	// AI features, but inline chat is powered by the boxcode default agent, so it must
++	// stay available regardless of that flag.
+ );
+ 
+ export class StartSessionAction extends Action2 {
