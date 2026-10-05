@@ -1116,7 +1116,7 @@ function importSnippets(context: vscode.ExtensionContext, snippets: SnippetFile[
 	return snippets.length;
 }
 
-async function importExtensions(context: vscode.ExtensionContext, ids: string[]): Promise<number> {
+async function importExtensions(ids: string[]): Promise<number> {
 	const installed = new Set(vscode.extensions.all.map(ext => ext.id.toLowerCase()));
 	let count = 0;
 	for (const id of ids) {
@@ -1203,7 +1203,7 @@ async function runImportFromVSCode(context: vscode.ExtensionContext): Promise<vo
 		parts.push(`${importSnippets(context, snapshot.snippets)} snippets`);
 	}
 	if (wanted.has('extensions') && snapshot.extensionIds.length > 0) {
-		const installed = await importExtensions(context, snapshot.extensionIds);
+		const installed = await importExtensions(snapshot.extensionIds);
 		if (installed > 0) {
 			parts.push(`${installed} extensions`);
 		}
