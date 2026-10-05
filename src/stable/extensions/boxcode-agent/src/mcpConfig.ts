@@ -384,10 +384,12 @@ export interface AcpEnvVariable {
  * of `{ name, value }` pairs -- not a JSON object -- and have no `cwd`; the agent
  * inherits the session working directory.
  *
- * The boxcode CLI currently parses this field as an untyped `Vec<serde_json::Value>`
- * and ignores it, so the extension defines the shape in practice. The
- * `streamable-http` variant below is the one part not yet pinned to a published
- * schema and must be agreed with the CLI before either side relies on it.
+ * The boxcode CLI now parses this field into typed configs (`src/mcp.rs`), validates
+ * them per server and connects them: `session/new` carries the configs into
+ * `SessionActor::spawn`, which connects off the request path. The shape is therefore
+ * agreed on both sides, not defined by the extension alone. The `streamable-http`
+ * variant below remains the one part not fully implemented CLI-side, which currently
+ * rejects it as unimplemented, so it must not be relied on yet.
  */
 export interface AcpStdioMcpServer {
 	readonly name: string;
