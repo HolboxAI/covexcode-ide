@@ -99,6 +99,7 @@ import {
 	type SnippetFile,
 	type SourceInstall,
 } from './vscodeImport';
+import { registerInlineCompletion } from './inlineCompletionProvider';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
@@ -333,6 +334,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.lm.registerLanguageModelChatProvider('boxcode', new StubLanguageModelProvider()),
 	);
+	// Tab-style multi-line completion: registers a `file`-scheme inline
+	// completion provider that predicts the continuation at the cursor. The
+	// fork already ships the whole ghost-text/accept layer in
+	// `src/vs/editor/contrib/inlineCompletions/` with no provider, and
+	// `editor.inlineSuggest.enabled` defaults true -- so this is the only
+	// piece that was missing.
+	context.subscriptions.push(registerInlineCompletion(context));
 
 	// Detected once per cwd and reused by both the status-bar badge and the
 	// agent's hidden context, so the two can't disagree about what framework
