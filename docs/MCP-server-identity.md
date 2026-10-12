@@ -50,7 +50,7 @@ The CLI's rule and the IDE's rule are not the same rule, and they are not invers
 | Characters kept | `A-Za-z0-9_-` | `A-Za-z0-9_` |
 | `-` in a name | kept | folded to `_` |
 | `_` in a name | folded to `-` (server segment) | kept |
-| Two names folding together | rejected at config parse | no check found |
+| Two names folding together | rejected at config parse | no check found (see test below) |
 
 `server_id_fragment` (L152) is `slug(server).replace('_', "-")`, so a server fragment can
 never contain the separator. That is what makes `parse_tool_id`'s split on the first `__`
@@ -70,6 +70,30 @@ persisted against one string does not match the other.
 It is also worth being plain that neither mapping is injective. `my server`, `my-server`
 and `my_server` all fold together. The CLI catches this while parsing the config and
 refuses it; the IDE appears not to, so there the collision survives into a persisted rule.
+This is pinned by test — see the section below.
+
+## Confirmed by test
+
+`mcpConfig.test.ts` pins three behaviours this brief previously stated only as read from
+the source:
+
+- `mcpToolName()` is **not injective**: `my server`, `my-server` and `my_server` all map to
+  the same `mcp__my_server` id. Distinct servers therefore share one derived id, and a rule
+  persisted against that text cannot tell them apart.
+- The IDE derives a **different id than the CLI** for the same raw server name —
+  `mcp__my_server__…` here versus `mcp__my-server__…` there. A rule persisted against one
+  string does not match the other.
+- `parseMcpToolName()` is **not** the inverse its docstring claims: a segment containing
+  `__` cannot be split back apart, because `sanitizeSegment` preserves `_` while `__` is the
+  separator.
+
+Run with `npm test` in `src/stable/extensions/boxcode-agent`. Full suite: **241 pass, 0
+fail**. That directory also carries one environment-dependent failure
+(`acpClient.test.ts`'s `probeAcpSupported`) which appears or not depending on the installed
+CLI and is unrelated to these tests.
+
+These tests characterise existing behaviour; they do not endorse it, and no production code
+was changed.
 
 ## Still not confirmed
 
