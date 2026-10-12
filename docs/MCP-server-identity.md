@@ -67,21 +67,28 @@ The same raw name therefore derives a *different* id on each side. The CLI's own
 where the IDE would derive `"mcp__my_server__do_it"` for that same server. A permission
 persisted against one string does not match the other.
 
-It is also worth being plain that neither mapping is injective. `my server`, `my-server`
-and `my_server` all fold together. The CLI catches this while parsing the config and
-refuses it (`src/mcp.rs:696`). The IDE does not: no collision check was found in either
-module, so there the collision survives into a persisted rule. That last point is an
-**absence of found code, not a test result** — it is not asserted below, and no test added
-here claims it.
+It is also worth being plain that neither mapping is injective. `my-server`, `my_server`
+and `my.server` all fold to the same segment — and all three satisfy the IDE's
+`SERVER_NAME_PATTERN`, so this is a collision a real config can reach rather than a
+malformed-input curiosity. (An earlier draft of this note used `my server` as the third
+example. The IDE's `SERVER_NAME_PATTERN` rejects a space, so it is not a name that side
+accepts; whether the CLI's config parser admits one was not checked -- its own test
+exercises `my server` only at the function level.) The CLI catches the
+collapse while parsing the config and refuses it (`src/mcp.rs:696`). The IDE does not: no
+collision check was found in either module, so there the collision survives into a
+persisted rule. That last point is an **absence of found code, not a test result** — no
+test added here claims it.
 
 ## Confirmed by test
 
-`mcpConfig.test.ts` pins three behaviours this brief previously stated only as read from
+`mcpConfig.test.ts` pins four behaviours this brief previously stated only as read from
 the source:
 
-- `mcpToolName()` is **not injective**: `my server`, `my-server` and `my_server` all map to
+- `mcpToolName()` is **not injective**: `my-server`, `my_server` and `my.server` all map to
   the same `mcp__my_server` id. Distinct servers therefore share one derived id, and a rule
   persisted against that text cannot tell them apart.
+- That collision is **reachable**: `parseMcpConfig()` accepts all three of those names, so
+  the fold is not an artifact of input a validator would have rejected.
 - The IDE derives a **different id than the CLI** for the same raw server name —
   `mcp__my_server__…` here versus `mcp__my-server__…` there. A rule persisted against one
   string does not match the other.
