@@ -172,7 +172,9 @@ test('parseMcpToolName() returns undefined for a non-MCP tool name', () => {
 // tests pin the current behaviour so it cannot change silently.
 
 test('mcpToolName() is not injective: distinct server names collapse to one id', () => {
-	const ids = ['my-server', 'my_server', 'my server'].map((name) => mcpToolName(name, 'ping'));
+	// All three satisfy SERVER_NAME_PATTERN (/^[A-Za-z0-9][A-Za-z0-9_.-]*$/), so these
+	// are names the config parser accepts -- not malformed input.
+	const ids = ['my-server', 'my_server', 'my.server'].map((name) => mcpToolName(name, 'ping'));
 	assert.equal(new Set(ids).size, 1, `expected one id, got ${JSON.stringify(ids)}`);
 	assert.equal(ids[0], 'mcp__my_server__ping');
 });
@@ -184,6 +186,23 @@ test('mcpToolName() derives a different id than the CLI for the same server name
 	// name is shared, not the id derived from it.
 	assert.equal(mcpToolName('my-server', 'ping'), 'mcp__my_server__ping');
 	assert.equal(mcpToolName('my_server', 'ping'), 'mcp__my_server__ping');
+});
+
+test('parseMcpConfig() accepts colliding server names and reports no error', () => {
+	// The reachability half of the claim above: three distinct, individually valid
+	// server names are all kept by the parser, yet they collapse to a single tool
+	// id. Nothing in the IDE rejects the collision.
+	const result = parseMcpConfig(
+		{
+			'my-server': { command: 'a' },
+			my_server: { command: 'b' },
+			'my.server': { command: 'c' },
+		},
+		NO_ENV,
+	);
+	assert.equal(result.servers.length, 3);
+	const ids = result.servers.map((server) => mcpToolName(server.name, 'ping'));
+	assert.equal(new Set(ids).size, 1, `expected one id, got ${JSON.stringify(ids)}`);
 });
 
 test('parseMcpToolName() is NOT the inverse of mcpToolName() when a segment contains __', () => {
