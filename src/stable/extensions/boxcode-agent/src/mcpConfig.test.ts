@@ -164,6 +164,37 @@ test('parseMcpToolName() returns undefined for a non-MCP tool name', () => {
 	assert.equal(parseMcpToolName('mcp__'), undefined);
 });
 
+// --- Characterization tests: derived tool ids are NOT a safe key ---
+//
+// sanitizeSegment() folds everything outside [A-Za-z0-9_] to `_`, so the mapping
+// from server name to tool id is not injective. Anything persisted against the
+// derived id (a permission rule in particular) is therefore ambiguous. These
+// tests pin the current behaviour so it cannot change silently.
+
+test('mcpToolName() is not injective: distinct server names collapse to one id', () => {
+	const ids = ['my-server', 'my_server', 'my server'].map((name) => mcpToolName(name, 'ping'));
+	assert.equal(new Set(ids).size, 1, `expected one id, got ${JSON.stringify(ids)}`);
+	assert.equal(ids[0], 'mcp__my_server__ping');
+});
+
+test('mcpToolName() derives a different id than the CLI for the same server name', () => {
+	// The CLI's slug() keeps `-` and folds `_` to `-` (boxcode: src/mcp.rs, slug()
+	// and server_id_fragment()), so it derives `mcp__my-server__ping` for the same
+	// input. The two repos sanitize in opposite directions; only the raw server
+	// name is shared, not the id derived from it.
+	assert.equal(mcpToolName('my-server', 'ping'), 'mcp__my_server__ping');
+	assert.equal(mcpToolName('my_server', 'ping'), 'mcp__my_server__ping');
+});
+
+test('parseMcpToolName() is NOT the inverse of mcpToolName() when a segment contains __', () => {
+	// sanitizeSegment() preserves `_`, but the separator is `__`, so a server name
+	// containing a double underscore does not split back apart. This documents
+	// current, defective behaviour rather than desired behaviour.
+	const name = mcpToolName('my__server', 'ping');
+	assert.equal(name, 'mcp__my__server__ping');
+	assert.deepEqual(parseMcpToolName(name), { serverName: 'my', toolName: 'server__ping' });
+});
+
 test('describeMcpServer() summarises both transports', () => {
 	assert.equal(
 		describeMcpServer({ name: 'fs', transport: 'stdio', command: 'npx', args: ['-y', 'pkg'] }),
