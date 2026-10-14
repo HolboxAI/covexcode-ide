@@ -100,6 +100,8 @@ import {
 	type SourceInstall,
 } from './vscodeImport';
 import { registerInlineCompletion } from './inlineCompletionProvider';
+import { detectDeicticReferent } from './deictic';
+import { formatFocusedSurface } from './focusedSurface';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
@@ -1360,6 +1362,18 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 		if (section) {
 			sections.push(section);
 		}
+	}
+
+	const referent = detectDeicticReferent(request.prompt);
+	if (referent?.kind === 'ui') {
+		const surface = formatFocusedSurface({
+			editorLabel: vscode.window.activeTextEditor?.document.fileName,
+			editorLanguageId: vscode.window.activeTextEditor?.document.languageId,
+			terminalName: vscode.window.activeTerminal?.name,
+		});
+		sections.push('The user is pointing at something on screen ("this option", "the leftmost pane", "the button at the very bottom"). '
+			+ 'If the running app is not already open in the browser preview, open it and use the page text accessibility tree to resolve the target instead of guessing a file path.'
+			+ (surface ? `\nCurrently focused: ${surface}` : ''));
 	}
 
 	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
