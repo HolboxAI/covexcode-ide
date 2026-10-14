@@ -129,6 +129,22 @@ test('resolveMcpServers() attributes diagnostics to the layer they came from', (
 	assert.match(result.diagnostics[0]?.message ?? '', /\[workspace\]/);
 });
 
+test('resolveMcpServers() refuses a cross-layer collision the per-layer check cannot see', () => {
+	// Each layer is valid on its own: `my-server` and `my_server` are both accepted and
+	// neither layer contains a collision. But they fold to the same tool id prefix once
+	// merged, while their names differ, so the override-by-name rule above never sees it.
+	// The merge fails closed and keeps the first claimant.
+	const result = resolveMcpServers(
+		{
+			user: { mcpServers: { 'my-server': { command: 'a' } } },
+			workspace: { mcpServers: { my_server: { command: 'b' } } },
+		},
+		NO_ENV,
+	);
+	assert.deepEqual(result.servers.map(entry => entry.server.name), ['my-server']);
+	assert.match(result.diagnostics.map(diagnostic => diagnostic.message).join('\n'), /collides with "my-server"/);
+});
+
 test('toAcpMcpServers() emits env as an array of name/value pairs', () => {
 	const [server] = toAcpMcpServers([{ name: 'a', transport: 'stdio', command: 'run', env: { TOKEN: 't' } }]);
 	assert.deepEqual(server, { name: 'a', command: 'run', args: [], env: [{ name: 'TOKEN', value: 't' }] });
@@ -188,10 +204,11 @@ test('mcpToolName() derives a different id than the CLI for the same server name
 	assert.equal(mcpToolName('my_server', 'ping'), 'mcp__my_server__ping');
 });
 
-test('parseMcpConfig() accepts colliding server names and reports no error', () => {
+test('parseMcpConfig() rejects names that derive the same tool id prefix', () => {
 	// The reachability half of the claim above: three distinct, individually valid
-	// server names are all kept by the parser, yet they collapse to a single tool
-	// id. Nothing in the IDE rejects the collision.
+	// server names collapse to a single tool id. The parser now fails closed on the
+	// two colliders and keeps only the first, so a rule written for one server cannot
+	// be dispatched to the other.
 	const result = parseMcpConfig(
 		{
 			'my-server': { command: 'a' },
@@ -200,9 +217,12 @@ test('parseMcpConfig() accepts colliding server names and reports no error', () 
 		},
 		NO_ENV,
 	);
-	assert.equal(result.servers.length, 3);
-	const ids = result.servers.map((server) => mcpToolName(server.name, 'ping'));
-	assert.equal(new Set(ids).size, 1, `expected one id, got ${JSON.stringify(ids)}`);
+	assert.equal(result.servers.length, 1);
+	assert.equal(result.servers[0].name, 'my-server');
+	assert.equal(result.diagnostics.length, 2);
+	for (const diagnostic of result.diagnostics) {
+		assert.match(diagnostic.message, /collides with/);
+	}
 });
 
 test('parseMcpToolName() is NOT the inverse of mcpToolName() when a segment contains __', () => {

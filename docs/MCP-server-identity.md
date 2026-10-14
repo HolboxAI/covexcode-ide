@@ -50,7 +50,7 @@ The CLI's rule and the IDE's rule are not the same rule, and they are not invers
 | Characters kept | `A-Za-z0-9_-` | `A-Za-z0-9_` |
 | `-` in a name | kept | folded to `_` |
 | `_` in a name | folded to `-` (server segment) | kept |
-| Two names folding together | rejected at config parse | no check found in either module |
+| Two names folding together | rejected at config parse | **now also rejected** -- see below |
 
 `server_id_fragment` (L152) is `slug(server).replace('_', "-")`, so a server fragment can
 never contain the separator. That is what makes `parse_tool_id`'s split on the first `__`
@@ -101,13 +101,23 @@ fail**. That directory also carries one environment-dependent failure
 (`acpClient.test.ts`'s `probeAcpSupported`) which appears or not depending on the installed
 CLI and is unrelated to these tests.
 
-These tests characterise existing behaviour; they do not endorse it, and no production code
-was changed.
+These tests were written against the CLI's existing behaviour. Following them, the IDE was
+brought into line: it now rejects a collision too, in both `parseMcpConfig()` (within one
+settings layer) and `resolveMcpServers()` (across layers, where the override-by-name rule
+cannot see a folded collision). See the "Now enforced" section above.
+
+## Now enforced on both sides
+
+- The IDE rejects two servers that sanitize to the same fragment. Within a layer,
+  `parseMcpConfig()` fails closed and keeps the first claimant; across layers,
+  `resolveMcpServers()` does the same, because a user-scope `my-server` and a
+  workspace-scope `my_server` fold together while their names differ, so the
+  override-by-name rule never sees the collision.
+- This is a **behaviour change**: a config that loaded before now errors. It matches the
+  CLI, which has rejected the same collision since before this note was written.
 
 ## Still not confirmed
 
-- whether the IDE's MCP modules reject two servers that sanitize to the same fragment —
-  the greps found nothing, but that is an absence of hits, not proof of absence;
 - the `ToolKind` variant the CLI maps `Action::Mcp` to on the ACP wire.
 
 ## Unrelated but current

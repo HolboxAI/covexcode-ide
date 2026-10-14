@@ -317,6 +317,12 @@ export function parseMcpConfig(
 	}
 
 	const servers: McpServer[] = [];
+	// Two distinct names can derive the same tool id prefix -- `my-server` and
+	// `my_server` both sanitise to `mcp__my_server__`. Uniqueness of the name is
+	// not uniqueness of the id the name derives, so a rule persisted against one
+	// server's tools would be dispatched to the other. Fail closed and reject the
+	// collider, mirroring `parse_server_configs` in boxcode's src/mcp.rs.
+	const claimedIds = new Map<string, string>();
 	for (const [name, entry] of Object.entries(map)) {
 		if (!SERVER_NAME_PATTERN.test(name)) {
 			diagnostics.error(
@@ -325,8 +331,20 @@ export function parseMcpConfig(
 			);
 			continue;
 		}
+		const toolIdPrefix = sanitizeSegment(name);
+		const claimedBy = claimedIds.get(toolIdPrefix);
+		if (claimedBy !== undefined) {
+			diagnostics.error(
+				`${basePath}.${name}`,
+				`Name collides with "${claimedBy}": both derive the tool id prefix "mcp__${toolIdPrefix}__", so a permission granted for one would reach the other. Rename one of them.`,
+			);
+			continue;
+		}
 		const server = parseServer(name, entry, context, basePath, diagnostics);
 		if (server !== undefined) {
+			// Only a server that actually parsed claims the id, so an entry rejected
+			// for another reason cannot block a valid one later in the map.
+			claimedIds.set(toolIdPrefix, name);
 			servers.push(server);
 		}
 	}
@@ -356,9 +374,33 @@ export function resolveMcpServers(
 	const workspaceByName = new Map(workspace.servers.map(server => [server.name, server]));
 	const servers: ResolvedMcpServer[] = [];
 	const seen = new Set<string>();
+	// Each layer is internally collision-free -- parseMcpConfig rejects a collision
+	// within one layer -- but two layers can still collide once merged: a user-scope
+	// `my-server` and a workspace-scope `my_server` fold to the same tool id prefix
+	// while their names differ, so the override-by-name rule below never sees it.
+	// Track the folded prefix across both layers and fail closed on a second claim.
+	const claimedIds = new Map<string, string>();
+
+	const claim = (server: McpServer): boolean => {
+		const toolIdPrefix = sanitizeSegment(server.name);
+		const claimedBy = claimedIds.get(toolIdPrefix);
+		if (claimedBy !== undefined) {
+			diagnostics.error(
+				`mcpServers.${server.name}`,
+				`Name collides with "${claimedBy}" from another settings layer: both derive the tool id prefix "mcp__${toolIdPrefix}__", so a permission granted for one would reach the other. Rename one of them.`,
+			);
+			return false;
+		}
+		claimedIds.set(toolIdPrefix, server.name);
+		return true;
+	};
 
 	for (const server of user.servers) {
 		const override = workspaceByName.get(server.name);
+		const resolved = override !== undefined ? override : server;
+		if (!claim(resolved)) {
+			continue;
+		}
 		if (override !== undefined) {
 			servers.push({ server: override, scope: 'workspace', requiresApproval: true });
 		} else {
@@ -367,7 +409,7 @@ export function resolveMcpServers(
 		seen.add(server.name);
 	}
 	for (const server of workspace.servers) {
-		if (!seen.has(server.name)) {
+		if (!seen.has(server.name) && claim(server)) {
 			servers.push({ server, scope: 'workspace', requiresApproval: true });
 		}
 	}
