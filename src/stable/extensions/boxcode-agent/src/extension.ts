@@ -1759,7 +1759,9 @@ async function changeModelFlow(
 		return { kind: 'cancelled' };
 	}
 
-	await config.update('endpoint', provider.endpoint, vscode.ConfigurationTarget.Global);
+	// Model-only: do not rewrite endpoint. Overwriting with the registry
+	// host (e.g. api.deepseek.com) breaks boxcode.sh proxy logins that keep
+	// provider=deepseek from older builds while pointing at llm.boxcode.sh.
 	await config.update('model', model, vscode.ConfigurationTarget.Global);
 	discardSession();
 	return { kind: 'ok', summary: `${provider.id} / ${model}` };
@@ -1824,6 +1826,21 @@ function modelCommandMarkdown(outcome: ModelFlowOutcome): string {
  * this runs a one-time setup prompt and persists the result. Throws
  * `SetupCancelled` if the user backs out of that prompt.
  */
+const BOXCODE_PROXY_ENDPOINT = 'https://llm.boxcode.sh/v1';
+
+function looksLikeBoxcodeProxyKey(apiKey: string): boolean {
+	return apiKey.trim().toLowerCase().startsWith('bx-live-');
+}
+
+function isDeepseekHost(endpoint: string): boolean {
+	try {
+		const host = new URL(endpoint).hostname.toLowerCase();
+		return host === 'api.deepseek.com' || host.endsWith('.deepseek.com');
+	} catch {
+		return /api\.deepseek\.com/i.test(endpoint);
+	}
+}
+
 async function ensureCredentials(context: vscode.ExtensionContext, boxcodeCommand: string): Promise<NodeJS.ProcessEnv> {
 	const config = vscode.workspace.getConfiguration('boxcode');
 	let provider = config.get<string>('provider', '');
@@ -1841,6 +1858,15 @@ async function ensureCredentials(context: vscode.ExtensionContext, boxcodeComman
 		model = entered.model;
 		apiKey = entered.apiKey;
 		await persistSetupResult(context, entered);
+	}
+
+	// Repair misconfigured proxy logins: a bx-live key must never be sent to
+	// api.deepseek.com (that produces HTTP 401 "Your api key is invalid").
+	if (looksLikeBoxcodeProxyKey(apiKey) && (!endpoint.trim() || isDeepseekHost(endpoint))) {
+		endpoint = BOXCODE_PROXY_ENDPOINT;
+		provider = '';
+		await config.update('endpoint', endpoint, vscode.ConfigurationTarget.Global);
+		await config.update('provider', '', vscode.ConfigurationTarget.Global);
 	}
 
 	const overrides: NodeJS.ProcessEnv = {};

@@ -143,13 +143,17 @@ export async function pollDeviceLogin(
 	}
 	const body = (await res.json().catch(() => ({}))) as DevicePollResponse;
 	if (body.api_key) {
+		// Provider stays empty on purpose: this is a custom proxy endpoint
+		// (llm.boxcode.sh), not DeepSeek BYOK. Stamping provider=deepseek made
+		// `/model` rewrite endpoint to api.deepseek.com while keeping the
+		// bx-live promo key — DeepSeek then 401s "api key invalid".
 		return {
 			kind: 'approved',
 			credentials: {
 				endpoint: (body.endpoint ?? '').replace(/\/+$/, ''),
 				model: body.model ?? '',
 				apiKey: body.api_key,
-				provider: 'deepseek',
+				provider: '',
 				sessionToken: (body.session_token ?? '').trim(),
 				email: (body.email ?? '').trim(),
 			},

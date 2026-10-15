@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+	pollDeviceLogin,
 	readLlmFields,
 	upsertLlmFields,
 	verificationUrl,
@@ -83,4 +84,26 @@ provider = "deepseek"
 	const out = upsertLlmFields(input, { api_key: '' });
 	assert.equal(readLlmFields(out).api_key, '');
 	assert.equal(readLlmFields(out).endpoint, 'https://llm.boxcode.sh/v1');
+});
+
+test('pollDeviceLogin does not stamp provider=deepseek for proxy keys', async () => {
+	const fetchImpl = (async () =>
+		new Response(
+			JSON.stringify({
+				api_key: 'bx-live-abc',
+				endpoint: 'https://llm.boxcode.sh/v1',
+				model: 'deepseek-v4-flash',
+				session_token: 'sess',
+				email: 'a@b.com',
+			}),
+			{ status: 200 },
+		)) as typeof fetch;
+	const outcome = await pollDeviceLogin('device', 'https://boxcode.sh', fetchImpl);
+	assert.equal(outcome.kind, 'approved');
+	if (outcome.kind !== 'approved') {
+		return;
+	}
+	assert.equal(outcome.credentials.provider, '');
+	assert.equal(outcome.credentials.endpoint, 'https://llm.boxcode.sh/v1');
+	assert.equal(outcome.credentials.apiKey, 'bx-live-abc');
 });
