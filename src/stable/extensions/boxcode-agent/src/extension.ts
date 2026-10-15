@@ -89,6 +89,19 @@ import {
 	registerBoxcodeAuthProvider,
 	runBrowserDeviceLogin,
 } from './boxcodeAuthProvider';
+import {
+	collectSourceSnapshot,
+	detectSourceInstalls,
+	hasImportableContent,
+	mergeKeybindings,
+	mergeSettings,
+	type ImportSnapshot,
+	type SnippetFile,
+	type SourceInstall,
+} from './vscodeImport';
+import { registerInlineCompletion } from './inlineCompletionProvider';
+import { detectDeicticReferent } from './deictic';
+import { formatFocusedSurface } from './focusedSurface';
 
 const PARTICIPANT_ID = 'boxcode.agent';
 const BOXCODE_COMMAND = 'boxcode';
@@ -323,6 +336,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.lm.registerLanguageModelChatProvider('boxcode', new StubLanguageModelProvider()),
 	);
+	// Tab-style multi-line completion: registers a `file`-scheme inline
+	// completion provider that predicts the continuation at the cursor. The
+	// fork already ships the whole ghost-text/accept layer in
+	// `src/vs/editor/contrib/inlineCompletions/` with no provider, and
+	// `editor.inlineSuggest.enabled` defaults true -- so this is the only
+	// piece that was missing.
+	context.subscriptions.push(registerInlineCompletion(context));
 
 	// Detected once per cwd and reused by both the status-bar badge and the
 	// agent's hidden context, so the two can't disagree about what framework
@@ -588,6 +608,13 @@ export function activate(context: vscode.ExtensionContext): void {
 					workspaceFolder: cwd,
 					home: os.homedir(),
 					env: process.env,
+					// A workspace-scope server launches a command from the repository
+					// under the user's own account, so it is only allowed in a folder
+					// the user has already trusted. Reusing the editor's trust state
+					// keeps that decision visible and revocable, where a separate
+					// approval store could silently disagree with it.
+					approve: (_server, scope) =>
+						scope !== 'workspace' || vscode.workspace.isTrusted,
 				});
 				sessionId = await acp.newSession(
 					cwd,
@@ -689,7 +716,17 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
-		if (isFreshChat(chatContext.history.length) && client) {
+		// Inline chat (Ctrl+I in an editor) is a propose-only flow: the selected
+		// editor buffer is the source of truth, boxcode runs in `edit` mode, and
+		// its write/edit diffs are rendered as an in-editor accept/reject session
+		// rather than applied to disk. Detected via `chatParticipantPrivate`'s
+		// `location2`, which is a `ChatRequestEditorData` only at the editor
+		// location (the panel, terminal and notebook locations all lack `.document`).
+		const inlineEditorData = (request as vscode.ChatRequest & { location2?: vscode.ChatRequestEditorData }).location2;
+		const isInline = inlineEditorData?.document !== undefined;
+		// Inline chat has its own empty history and must not discard the shared
+		// panel session (which "New Chat" reuse is guarding against below).
+		if (!isInline && isFreshChat(chatContext.history.length) && client) {
 			// VS Code's "New Chat" reuses this extension host, so without
 			// this the next empty-history request would keep talking to the
 			// previous HeadlessSession -- every "new chat" was the same
@@ -735,10 +772,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		const toolCallTitles = new Map<string, string>();
 		const shownBrowserPreviews = new Set<string>();
 		const turnUsage = createTurnUsage();
+		// Inline edit carries the editor buffer and the paths whose diffs were
+		// already emitted, so renderUpdate can convert each `diff` into a
+		// `stream.textEdit` and the end of the turn can finalize them.
+		const inlineEdit: InlineEditContext | undefined = isInline && inlineEditorData
+			? { cwd: workspace.cwd, primaryDocument: inlineEditorData.document, touched: new Set<string>() }
+			: undefined;
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
 				updateUsageIndicator();
 			}
 		};
@@ -773,7 +816,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		};
 
-		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
+		const content = isInline && inlineEditorData
+			? inlineEditPrompt(request, inlineEditorData, workspaceWithFramework)
+			: await attachReferencesToPrompt(request, workspaceWithFramework);
 		// Registered *after* the `await` above so a throw while reading an
 		// attachment (e.g. a binary reference whose bytes can't be loaded)
 		// can't leak these: they were previously added before any `try`, so
@@ -796,7 +841,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			// proposal is on (see `patches/109-...`); read it defensively so the
 			// extension still builds against the stable `vscode.ChatRequest`.
 			const mode = (request as vscode.ChatRequest & { mode?: string }).mode;
-			await activeClient.prompt(activeSessionId, content, mode === 'plan' ? 'plan' : undefined);
+			// Inline edit forces boxcode's propose-only `edit` mode. A plain
+			// panel turn sends `normal` explicitly so a prior `plan`/`edit` turn
+			// can't leave the shared session in a stale mode (`mode` is per-turn,
+			// but boxcode keeps the last value when the field is omitted).
+			await activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			// Finalize every resource that received a proposed diff so VS Code's
+			// inline editing session knows no more edits are coming and can offer
+			// accept/reject. No-op in the panel (inlineEdit is undefined there).
+			if (inlineEdit) {
+				for (const fsPath of inlineEdit.touched) {
+					stream.textEdit(vscode.Uri.file(fsPath), true);
+				}
+			}
 			// Rendered only on a clean turn end, never after an error -- a
 			// failed turn's partial usage would be a misleading number. One
 			// line regardless of how many `usage_update`s arrived, since a
@@ -1020,6 +1077,241 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}),
 	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('boxcode.importFromVSCode', () => runImportFromVSCode(context)),
+	);
+
+	// One-shot, on first launch: if a VS Code-family install is present with
+	// anything to import, offer once via a non-modal toast. The command above
+	// stays available regardless, so "Not now" closes the nag but not the door.
+	void maybePromptVSCodeImport(context);
+}
+
+const IMPORT_PROMPTED_STATE = 'boxcode.vscodeImportPrompted';
+
+type ImportCategory = 'settings' | 'keybindings' | 'snippets' | 'extensions';
+
+interface ImportCategoryItem extends vscode.QuickPickItem {
+	category: ImportCategory;
+}
+
+/**
+ * boxcode-ide's user-data directory, derived from `context.globalStorageUri`
+ * (`<userData>/User/globalStorage/<publisher>.<name>`) rather than hardcoding
+ * the product name -- so this survives a fork rename without a code change.
+ */
+function destinationUserDir(context: vscode.ExtensionContext): string {
+	const storage = context.globalStorageUri.fsPath;
+	return path.join(path.dirname(path.dirname(path.dirname(storage))), 'User');
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> | undefined {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+			? parsed as Record<string, unknown>
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function readJsonArray(filePath: string): unknown[] {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function writeJson(filePath: string, value: unknown): void {
+	fs.mkdirSync(path.dirname(filePath), { recursive: true });
+	fs.writeFileSync(filePath, JSON.stringify(value, null, 4));
+}
+
+// The merge rules live in vscodeImport.ts (pure + tested); these three write
+// helpers are the only disk-touching glue, and they all go through the
+// user-data directory VS Code itself watches -- so settings/keybindings/
+// snippets hot-reload without a window restart.
+
+function importSettings(context: vscode.ExtensionContext, src: Record<string, unknown>): number {
+	const filePath = path.join(destinationUserDir(context), 'settings.json');
+	writeJson(filePath, mergeSettings(readJsonObject(filePath) ?? {}, src));
+	return Object.keys(src).length;
+}
+
+function importKeybindings(context: vscode.ExtensionContext, src: unknown[]): number {
+	const filePath = path.join(destinationUserDir(context), 'keybindings.json');
+	writeJson(filePath, mergeKeybindings(readJsonArray(filePath), src));
+	return src.length;
+}
+
+function importSnippets(context: vscode.ExtensionContext, snippets: SnippetFile[]): number {
+	const dir = path.join(destinationUserDir(context), 'snippets');
+	for (const snippet of snippets) {
+		writeJson(path.join(dir, snippet.name), snippet.content);
+	}
+	return snippets.length;
+}
+
+async function importExtensions(ids: string[]): Promise<number> {
+	const installed = new Set(vscode.extensions.all.map(ext => ext.id.toLowerCase()));
+	let count = 0;
+	for (const id of ids) {
+		if (installed.has(id.toLowerCase())) {
+			continue;
+		}
+		try {
+			await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+			count++;
+		} catch {
+			// Gallery miss or the user cancelled this one id -- keep going.
+		}
+	}
+	return count;
+}
+
+async function pickSourceInstall(installs: SourceInstall[]): Promise<SourceInstall | undefined> {
+	if (installs.length === 1) {
+		return installs[0];
+	}
+	const picked = await vscode.window.showQuickPick(
+		installs.map(install => ({
+			label: install.label,
+			description: install.userDataDir,
+			install,
+		})),
+		{ placeHolder: 'Import from which install?' },
+	);
+	return (picked as { install?: SourceInstall } | undefined)?.install;
+}
+
+async function pickImportCategories(snapshot: ImportSnapshot): Promise<ImportCategoryItem[] | undefined> {
+	const items: ImportCategoryItem[] = [];
+	if (snapshot.settings && Object.keys(snapshot.settings).length > 0) {
+		items.push({ label: 'Settings', description: `${Object.keys(snapshot.settings).length} keys`, picked: true, category: 'settings' });
+	}
+	if (snapshot.keybindings && snapshot.keybindings.length > 0) {
+		items.push({ label: 'Keybindings', description: `${snapshot.keybindings.length} bindings`, picked: true, category: 'keybindings' });
+	}
+	if (snapshot.snippets.length > 0) {
+		items.push({ label: 'Snippets', description: `${snapshot.snippets.length} files`, picked: true, category: 'snippets' });
+	}
+	if (snapshot.extensionIds.length > 0) {
+		items.push({ label: 'Extensions', description: `${snapshot.extensionIds.length} installed`, picked: true, category: 'extensions' });
+	}
+	if (items.length === 0) {
+		void vscode.window.showInformationMessage(
+			`${snapshot.install.label} has nothing to import (no settings, keybindings, snippets, or extensions).`,
+		);
+		return undefined;
+	}
+	const picked = await vscode.window.showQuickPick(items, {
+		canPickMany: true,
+		placeHolder: `Choose what to import from ${snapshot.install.label}`,
+	});
+	return picked;
+}
+
+async function runImportFromVSCode(context: vscode.ExtensionContext): Promise<void> {
+	const installs = detectSourceInstalls(os.homedir(), process.platform, process.env);
+	if (installs.length === 0) {
+		void vscode.window.showInformationMessage('No VS Code installation found to import from.');
+		return;
+	}
+	const install = await pickSourceInstall(installs);
+	if (!install) {
+		return;
+	}
+	const snapshot = collectSourceSnapshot(install);
+	const chosen = await pickImportCategories(snapshot);
+	if (!chosen || chosen.length === 0) {
+		return;
+	}
+
+	const wanted = new Set(chosen.map(item => item.category));
+	const parts: string[] = [];
+	if (wanted.has('settings') && snapshot.settings) {
+		parts.push(`${importSettings(context, snapshot.settings)} settings`);
+	}
+	if (wanted.has('keybindings') && snapshot.keybindings) {
+		parts.push(`${importKeybindings(context, snapshot.keybindings)} keybindings`);
+	}
+	if (wanted.has('snippets') && snapshot.snippets.length > 0) {
+		parts.push(`${importSnippets(context, snapshot.snippets)} snippets`);
+	}
+	if (wanted.has('extensions') && snapshot.extensionIds.length > 0) {
+		const installed = await importExtensions(snapshot.extensionIds);
+		if (installed > 0) {
+			parts.push(`${installed} extensions`);
+		}
+	}
+
+	void vscode.window.showInformationMessage(
+		parts.length > 0
+			? `boxcode: imported ${parts.join(', ')} from ${snapshot.install.label}.`
+			: 'boxcode: import finished — nothing new to import.',
+	);
+}
+
+async function maybePromptVSCodeImport(context: vscode.ExtensionContext): Promise<void> {
+	if (context.globalState.get<boolean>(IMPORT_PROMPTED_STATE, false)) {
+		return;
+	}
+	const importable = detectSourceInstalls(os.homedir(), process.platform, process.env)
+		.map(collectSourceSnapshot)
+		.filter(hasImportableContent);
+	if (importable.length === 0) {
+		// Nothing to import yet -- don't set the flag, so an install that
+		// appears later still gets offered once.
+		return;
+	}
+	await context.globalState.update(IMPORT_PROMPTED_STATE, true);
+	const label = importable.length === 1
+		? `Import settings, keybindings, and extensions from ${importable[0].install.label}?`
+		: 'Import settings, keybindings, and extensions from a VS Code install?';
+	const choice = await vscode.window.showInformationMessage(label, 'Import', 'Not now');
+	if (choice === 'Import') {
+		await runImportFromVSCode(context);
+	}
+}
+
+/**
+ * Builds the prompt for an editor inline-chat turn (Ctrl+I). The selected
+ * editor buffer -- including unsaved changes -- is the source of truth, so it
+ * is embedded in full rather than read back from disk; boxcode runs this turn
+ * in `edit` mode (propose-only) and its write/edit diffs come back as
+ * reviewable inline edits rather than on-disk writes.
+ */
+function inlineEditPrompt(
+	request: vscode.ChatRequest,
+	editorData: vscode.ChatRequestEditorData,
+	workspace: WorkspaceContext,
+): PromptContentBlock[] {
+	const document = editorData.document;
+	const relativePath = document.uri.scheme === 'file'
+		? (path.relative(workspace.cwd, document.uri.fsPath) || path.basename(document.uri.fsPath))
+		: document.uri.toString();
+	const selection = editorData.selection;
+	const selectionLine = selection.isEmpty
+		? 'No text is selected (the cursor is the only anchor).'
+		: `The user selected lines ${selection.start.line + 1} through ${selection.end.line + 1}.`;
+	const languageId = document.languageId || 'text';
+
+	const body = [
+		`File: ${relativePath}`,
+		selectionLine,
+		'',
+		`Instruction: ${request.prompt}`,
+		'',
+		'Current editor buffer (source of truth -- may include unsaved changes):',
+		'```' + languageId,
+		document.getText(),
+		'```',
+	].join('\n');
+	return [{ type: 'text', text: prependWorkspacePrefix(body, workspacePromptPrefix(workspace)) }];
 }
 
 /**
@@ -1070,6 +1362,18 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 		if (section) {
 			sections.push(section);
 		}
+	}
+
+	const referent = detectDeicticReferent(request.prompt);
+	if (referent?.kind === 'ui') {
+		const surface = formatFocusedSurface({
+			editorLabel: vscode.window.activeTextEditor?.document.fileName,
+			editorLanguageId: vscode.window.activeTextEditor?.document.languageId,
+			terminalName: vscode.window.activeTerminal?.name,
+		});
+		sections.push('The user is pointing at something on screen ("this option", "the leftmost pane", "the button at the very bottom"). '
+			+ 'If the running app is not already open in the browser preview, open it and use the page text accessibility tree to resolve the target instead of guessing a file path.'
+			+ (surface ? `\nCurrently focused: ${surface}` : ''));
 	}
 
 	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
@@ -1240,6 +1544,15 @@ function autoOpenDevServerUrl(update: SessionUpdate, title: string | undefined, 
 	void ensureBrowserTab(url).catch(() => {});
 }
 
+interface InlineEditContext {
+	/** The workspace cwd, used to resolve a `diff.path` to a filesystem path. */
+	cwd: string;
+	/** The editor the user invoked Ctrl+I on -- preferred when a diff targets it. */
+	primaryDocument: vscode.TextDocument;
+	/** Filesystem paths already emitted as `textEdit`s, finalized at turn end. */
+	touched: Set<string>;
+}
+
 function renderUpdate(
 	update: SessionUpdate,
 	stream: vscode.ChatResponseStream,
@@ -1248,6 +1561,7 @@ function renderUpdate(
 	shownBrowserPreviews: Set<string>,
 	turnUsage: TurnUsage,
 	sessionUsage: SessionUsage,
+	inlineEdit: InlineEditContext | undefined,
 ): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -1259,6 +1573,25 @@ function renderUpdate(
 		}
 		case 'tool_call':
 		case 'tool_call_update': {
+			// Inline edit converts boxcode's proposed `diff` straight into an
+			// in-editor edit rather than a tool-call card in the panel.
+			if (inlineEdit && update.content?.type === 'diff') {
+				const diff = update.content;
+				const fsPath = resolvePathAgainstCwd(inlineEdit.cwd, diff.path);
+				const document = inlineEdit.primaryDocument.uri.fsPath === fsPath
+					? inlineEdit.primaryDocument
+					: vscode.workspace.textDocuments.find(d => d.uri.scheme === 'file' && d.uri.fsPath === fsPath);
+				if (document) {
+					const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+					stream.textEdit(document.uri, [new vscode.TextEdit(fullRange, diff.newText)]);
+					inlineEdit.touched.add(document.uri.fsPath);
+				} else {
+					const line = new vscode.MarkdownString(undefined, true);
+					line.appendMarkdown(`$(edit) Proposed a change to \`${diff.path}\` (not open in the editor -- open it to review).\n\n`);
+					stream.markdown(line);
+				}
+				break;
+			}
 			if (update.toolCallId && update.title) {
 				toolCallTitles.set(update.toolCallId, update.title);
 			}

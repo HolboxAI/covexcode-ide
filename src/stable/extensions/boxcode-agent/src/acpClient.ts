@@ -482,13 +482,15 @@ export class AcpClient extends EventEmitter {
 	 *
 	 * `mode` is the optional `PromptRequest.mode` field (boxcode's own
 	 * `tools::Mode`, `snake_case`): `'plan'` runs the turn read-only until a
-	 * proposed plan is approved. Omitted for the default `normal`, so a
-	 * client that never selects Plan sends exactly what it did before.
+	 * proposed plan is approved, `'edit'` runs the turn file-scoped and
+	 * propose-only (diffs are shown to the user, nothing touches disk).
+	 * Omitted for the default `normal`, so a client that never selects a mode
+	 * sends exactly what it did before.
 	 */
 	async prompt(
 		sessionId: string,
 		content: string | PromptContentBlock[],
-		mode?: 'normal' | 'plan',
+		mode?: 'normal' | 'plan' | 'edit',
 	): Promise<{ stopReason: StopReason; turn: number }> {
 		const prompt: PromptContentBlock[] = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
 		const result = (await this.request('session/prompt', {

@@ -131,12 +131,12 @@ export async function runBrowserDeviceLogin(
 	return vscode.window.withProgress(
 		{
 			location: vscode.ProgressLocation.Notification,
-			title: `boxcode: sign in — Device ID ${start.user_code}`,
+			title: 'boxcode: sign in — complete Authorize in the browser',
 			cancellable: true,
 		},
 		async (progress, progressToken) => {
 			progress.report({
-				message: 'Complete Google sign-in in the browser, then approve this device…',
+				message: 'Sign in with Google if asked, then click Authorize…',
 			});
 			while (Date.now() < deadline) {
 				if (token?.isCancellationRequested || progressToken.isCancellationRequested) {

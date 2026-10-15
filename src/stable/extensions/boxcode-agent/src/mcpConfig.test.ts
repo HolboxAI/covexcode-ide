@@ -129,6 +129,22 @@ test('resolveMcpServers() attributes diagnostics to the layer they came from', (
 	assert.match(result.diagnostics[0]?.message ?? '', /\[workspace\]/);
 });
 
+test('resolveMcpServers() refuses a cross-layer collision the per-layer check cannot see', () => {
+	// Each layer is valid on its own: `my-server` and `my_server` are both accepted and
+	// neither layer contains a collision. But they fold to the same tool id prefix once
+	// merged, while their names differ, so the override-by-name rule above never sees it.
+	// The merge fails closed and keeps the first claimant.
+	const result = resolveMcpServers(
+		{
+			user: { mcpServers: { 'my-server': { command: 'a' } } },
+			workspace: { mcpServers: { my_server: { command: 'b' } } },
+		},
+		NO_ENV,
+	);
+	assert.deepEqual(result.servers.map(entry => entry.server.name), ['my-server']);
+	assert.match(result.diagnostics.map(diagnostic => diagnostic.message).join('\n'), /collides with "my-server"/);
+});
+
 test('toAcpMcpServers() emits env as an array of name/value pairs', () => {
 	const [server] = toAcpMcpServers([{ name: 'a', transport: 'stdio', command: 'run', env: { TOKEN: 't' } }]);
 	assert.deepEqual(server, { name: 'a', command: 'run', args: [], env: [{ name: 'TOKEN', value: 't' }] });
@@ -162,6 +178,60 @@ test('mcpToolName() keeps two servers with the same tool name distinct', () => {
 test('parseMcpToolName() returns undefined for a non-MCP tool name', () => {
 	assert.equal(parseMcpToolName('read_file'), undefined);
 	assert.equal(parseMcpToolName('mcp__'), undefined);
+});
+
+// --- Characterization tests: derived tool ids are NOT a safe key ---
+//
+// sanitizeSegment() folds everything outside [A-Za-z0-9_] to `_`, so the mapping
+// from server name to tool id is not injective. Anything persisted against the
+// derived id (a permission rule in particular) is therefore ambiguous. These
+// tests pin the current behaviour so it cannot change silently.
+
+test('mcpToolName() is not injective: distinct server names collapse to one id', () => {
+	// All three satisfy SERVER_NAME_PATTERN (/^[A-Za-z0-9][A-Za-z0-9_.-]*$/), so these
+	// are names the config parser accepts -- not malformed input.
+	const ids = ['my-server', 'my_server', 'my.server'].map((name) => mcpToolName(name, 'ping'));
+	assert.equal(new Set(ids).size, 1, `expected one id, got ${JSON.stringify(ids)}`);
+	assert.equal(ids[0], 'mcp__my_server__ping');
+});
+
+test('mcpToolName() derives a different id than the CLI for the same server name', () => {
+	// The CLI's slug() keeps `-` and folds `_` to `-` (boxcode: src/mcp.rs, slug()
+	// and server_id_fragment()), so it derives `mcp__my-server__ping` for the same
+	// input. The two repos sanitize in opposite directions; only the raw server
+	// name is shared, not the id derived from it.
+	assert.equal(mcpToolName('my-server', 'ping'), 'mcp__my_server__ping');
+	assert.equal(mcpToolName('my_server', 'ping'), 'mcp__my_server__ping');
+});
+
+test('parseMcpConfig() rejects names that derive the same tool id prefix', () => {
+	// The reachability half of the claim above: three distinct, individually valid
+	// server names collapse to a single tool id. The parser now fails closed on the
+	// two colliders and keeps only the first, so a rule written for one server cannot
+	// be dispatched to the other.
+	const result = parseMcpConfig(
+		{
+			'my-server': { command: 'a' },
+			my_server: { command: 'b' },
+			'my.server': { command: 'c' },
+		},
+		NO_ENV,
+	);
+	assert.equal(result.servers.length, 1);
+	assert.equal(result.servers[0].name, 'my-server');
+	assert.equal(result.diagnostics.length, 2);
+	for (const diagnostic of result.diagnostics) {
+		assert.match(diagnostic.message, /collides with/);
+	}
+});
+
+test('parseMcpToolName() is NOT the inverse of mcpToolName() when a segment contains __', () => {
+	// sanitizeSegment() preserves `_`, but the separator is `__`, so a server name
+	// containing a double underscore does not split back apart. This documents
+	// current, defective behaviour rather than desired behaviour.
+	const name = mcpToolName('my__server', 'ping');
+	assert.equal(name, 'mcp__my__server__ping');
+	assert.deepEqual(parseMcpToolName(name), { serverName: 'my', toolName: 'server__ping' });
 });
 
 test('describeMcpServer() summarises both transports', () => {

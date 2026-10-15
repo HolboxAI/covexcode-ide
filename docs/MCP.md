@@ -1,7 +1,18 @@
 # MCP support — design
 
-Status: **design, not implemented.** Written 2026-09-18 after verifying the seam below.
-Nothing here is built yet.
+**Superseded (2026-10-07).** This document was written 2026-09-18 when nothing was
+built, and the implementation has since landed. It is kept for the reasoning and the
+verified seam, not as a status report. Specifically, the claims below that the CLI
+"ignores" `mcpServers` are no longer true:
+
+- The CLI parses the field into typed server configs (`src/mcp.rs`), and `headless.rs`
+  builds an `McpRegistry` and genuinely connects (`connect_all`).
+- `session/new` passes the configs into `SessionActor::spawn`, which calls
+  `session.connect_mcp()` — off the request path, since handshaking takes seconds.
+- The IDE half is implemented too: `mcpCatalog` / `mcpConfig` / `mcpLoader`, with tests.
+
+For current state see `MCP-permissions.md` (permissions, still an open decision) and
+`MCP-verification.md` (a historical probe against CLI 1.11.40).
 
 ## Why this is smaller than it sounds
 
@@ -11,7 +22,11 @@ The wire slot for MCP already exists and is already reserved. Two verified facts
    ```ts
    const result = (await this.request('session/new', { cwd, mcpServers: [] })) as { sessionId ... }
    ```
-2. The CLI already declares it and ignores it — `src/protocol.rs:245-249`:
+2. The CLI declares the field — `src/protocol.rs:245-249`. **Status note (superseded in
+   part):** the reading that the CLI *ignores* it is out of date. `src/mcp.rs` parses each
+   entry into a server config, and `session/new` hands those configs to
+   `SessionActor::spawn`, which calls `connect_mcp` — so they are genuinely used. The source
+   comment quoted below may itself be stale:
    ```rust
    /// Required by the v1 schema (`required: ["cwd", "mcpServers"]`) --
    /// ... doesn't act as an MCP client yet
@@ -133,9 +148,12 @@ Spec revision **2026-07-28** is current (previous: 2025-11-25). Relevant points:
 - Authorization is defined at the transport level (OAuth-style), which is why hosted
   servers are a different amount of work from local ones.
 
-Rust side: `rmcp` is the official SDK and implements 2026-07-28 while staying
-compatible with 2025-11-25. Use it rather than hand-rolling JSON-RPC framing — the
-version negotiation and header mirroring are exactly where a hand-rolled client rots.
+Rust side: this doc recommended `rmcp` (the official SDK, implementing 2026-07-28 while
+staying compatible with 2025-11-25) over hand-rolled JSON-RPC framing — the version
+negotiation and header mirroring being exactly where a hand-rolled client rots.
+**That is not what shipped.** The CLI hand-rolled the client in `src/mcp.rs`, and
+`streamable-http` is still unimplemented there (`src/mcp.rs:276`, "not implemented
+yet"). Read this as intent, not as a description of the code.
 
 ## Phased plan
 
@@ -156,21 +174,25 @@ most common bug report.
 per-server credential scoping, read-only-by-default where the server allows it, and
 reconciliation with the CLI's existing `config.tools.approval` and PR #102's store.
 
-## Open questions — decide before Phase 1
+## Open questions — status as of 2026-10-07
 
-1. **Which repo first?** The CLI is the load-bearing half, but it is a separate repo
-   (`HolboxAI/boxcode`) whose local clone here is stale. Note the two are different
-   things: the **installed binary** (`/usr/local/bin/boxcode`, `1.11.40`) is current and
-   does accept `--acp`, while the **local worktree** is the stale part. Doing the
-   extension half alone produces config that silently does nothing.
-2. **Is `rmcp` acceptable as a dependency?** It is the fast path and the right call,
-   but it is a real dependency decision for the CLI, not a detail.
-3. **Trust model for tool names.** Two servers can both expose `search`. Namespacing
-   (`github__search`) prevents one server shadowing a built-in — recommend namespacing,
-   but it is user-visible.
-4. **How does this relate to `config.tools.approval`?** Same overlap already flagged on
-   PR #102; MCP makes it sharper, because per-server trust is a natural granularity that
-   a global approval list does not have.
+1. **Which repo first?** *(Both done.)* The CLI was the load-bearing half and it is
+   implemented in `HolboxAI/boxcode` (`src/mcp.rs`); that clone is **no longer stale** — it
+   sits level with `origin/main`, so the worktree is safe to read directly. The extension
+   half is no longer inert either: it sends `mcpServers` in `session/new`, gated on
+   `agentSupportsMcp`, so it is not "config that silently does nothing".
+2. **Is `rmcp` acceptable as a dependency?** *(Decided, differently.)* This doc
+   recommended `rmcp`; the CLI instead **hand-rolled** the client in `src/mcp.rs`, and no
+   manifest carries an `rmcp` dependency. The "Transports" section below therefore
+   describes an intent that was not taken.
+3. **Trust model for tool names.** *(Implemented as recommended, with a caveat.)*
+   Tool ids are namespaced by `mcpToolName` (`mcp__<server>__<tool>`), so two servers'
+   `search` cannot shadow each other. What remains open is not the namespacing but what
+   a *persisted* rule binds to — see `MCP-permissions-decision.md`.
+4. **How does this relate to `config.tools.approval`?** *(Still open — now the single
+   blocking decision.)* Same overlap already flagged on PR #102; MCP makes it sharper,
+   because per-server trust is a natural granularity that a global approval list does
+   not have. Narrowed to a concrete choice in `MCP-permissions-decision.md`.
 5. **Does the earlier "connectors" idea still exist separately?** If MCP covers
    AWS/GCP/GitHub/Gmail, the separate connector registry is probably unnecessary — worth
    confirming rather than building both.

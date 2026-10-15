@@ -2,7 +2,7 @@
   "name": "boxcode-agent",
   "displayName": "boxcode",
   "description": "Chat with boxcode, driven over its ACP stdio interface.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "boxcode",
   "license": "MIT",
   "engines": {
@@ -40,7 +40,8 @@
         "description": "Ask boxcode to read, write, and run things in this workspace.",
         "isDefault": true,
         "locations": [
-          "panel"
+          "panel",
+          "editor"
         ],
         "modes": [
           "ask",
@@ -111,6 +112,11 @@
         "command": "boxcode.trustWorkspace",
         "title": "boxcode: Trust This Folder",
         "category": "boxcode"
+      },
+      {
+        "command": "boxcode.importFromVSCode",
+        "title": "boxcode: Import from VS Code",
+        "category": "boxcode"
       }
     ],
     "authentication": [
@@ -159,6 +165,18 @@
           "default": 0.35,
           "order": 5,
           "markdownDescription": "Blended USD price per million tokens, used for the `~$` estimate in the chat usage footnote. Defaults to a blended DeepSeek input+output estimate; set to 0 to show token totals only. The authoritative per-model figure should come from boxcode itself (see `docs/BACKLOG.md`, cost/usage meter)."
+        },
+        "boxcode.inlineCompletionEnabled": {
+          "type": "boolean",
+          "default": true,
+          "order": 6,
+          "markdownDescription": "Enable boxcode's Tab-style multi-line code completion in the editor. Uses the same endpoint/model/key as chat; disable to stop ghost-text suggestions entirely."
+        },
+        "boxcode.inlineCompletionDebounceMs": {
+          "type": "number",
+          "default": 150,
+          "order": 7,
+          "markdownDescription": "Minimum milliseconds between automatic inline-completion requests. Lower predicts sooner (more requests); higher is cheaper and quieter."
         }
       }
     }

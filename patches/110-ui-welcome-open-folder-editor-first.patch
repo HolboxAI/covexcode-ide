@@ -1,0 +1,41 @@
+diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
+index bea01c2a..57260c55 100644
+--- a/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
++++ b/src/vs/workbench/contrib/welcomeAgentSessions/browser/agentSessionsWelcome.ts
+@@ -494,11 +494,18 @@ export class AgentSessionsWelcomePage extends EditorPane {
+ 
+ 	private async buildStartEntries(container: HTMLElement): Promise<void> {
+ 		const workspaces = await this.getRecentlyOpenedWorkspaces(false);
+-		const openEntry = workspaces.length > 0
+-			? { icon: Codicon.folderOpened, label: localize('openRecent', "Open Recent..."), command: 'workbench.action.openRecent' }
+-			: { icon: Codicon.folderOpened, label: localize('openFolder', "Open Folder..."), command: 'workbench.action.files.openFolder' };
++		// boxcode-ide: "Open Folder" is always visible rather than swapped for
++		// "Open Recent" once the user has any history. Both Cursor and Google
++		// took real user backlash for making the escape hatch out of an
++		// AI-first landing non-obviously-reversible -- the direct
++		// workbench.action.files.openFolder path stays one click away no
++		// matter how much recent-workspace history exists, with "Open Recent"
++		// offered alongside it when there is any.
+ 		const entries = [
+-			openEntry,
++			{ icon: Codicon.folderOpened, label: localize('openFolder', "Open Folder..."), command: 'workbench.action.files.openFolder' },
++			...(workspaces.length > 0
++				? [{ icon: Codicon.history, label: localize('openRecent', "Open Recent..."), command: 'workbench.action.openRecent' }]
++				: []),
+ 			{ icon: Codicon.newFile, label: localize('newFile', "New file..."), command: 'welcome.showNewFileEntries' },
+ 			{ icon: Codicon.repoClone, label: localize('cloneRepo', "Clone Git Repository..."), command: 'git.clone' },
+ 		];
+@@ -1069,7 +1076,12 @@ export class AgentSessionsWelcomePage extends EditorPane {
+ 			icon: Codicon.check,
+ 			actionClassName: 'agentSessionsWelcome-checkbox',
+ 			isChecked: this.configurationService.getValue(configurationKey) === 'agentSessionsWelcomePage',
+-			title: localize('checkboxTitle', "When checked, this page will be shown on startup."),
++			// boxcode-ide: name the editor-first alternative explicitly so the
++			// reversal off this chat-first landing is obvious, not buried in a
++			// passive "show on startup" preference. The checkbox writes the
++			// persistent workbench.startupEditor setting (see below), so the
++			// choice survives restarts.
++			title: localize('checkboxTitle', "When checked, this page opens on startup. Uncheck to open the editor instead (your last folder, or a blank file)."),
+ 			...getToggleStyles({
+ 				inputActiveOptionBackground: 'var(--vscode-descriptionForeground)',
+ 				inputActiveOptionForeground: 'var(--vscode-editor-background)',
