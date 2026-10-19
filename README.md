@@ -18,8 +18,8 @@ On top of the fork, the patch set adds a chat-first landing page, an Integrated 
 covexcode-ide and the `covexcode` CLI are separate installs: this repo is only the editor surface, and the chat participant it ships shells out to a `covexcode` binary already on your `PATH` (see the Architecture section below). Install that binary first:
 
 ```sh
-curl -fsSL https://covexcode.sh/install.sh | bash      # macOS/Linux
-irm https://covexcode.sh/install.ps1 | iex              # Windows (PowerShell)
+curl -fsSL https://covexcode.com/install.sh | bash      # macOS/Linux
+irm https://covexcode.com/install.ps1 | iex              # Windows (PowerShell)
 ```
 
 ### Install the IDE itself (macOS dev builds)

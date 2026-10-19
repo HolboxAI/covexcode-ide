@@ -73,4 +73,4 @@ VSCode-win32-x64\Covexcode.exe
 
 Installers (exe/msi) are still dispatch-only (`generate_assets: true`).
 arm64 Windows packing is dispatch-only too. The `covexcode` CLI is a
-separate install: `irm https://covexcode.sh/install.ps1 | iex`.
+separate install: `irm https://covexcode.com/install.ps1 | iex`.
