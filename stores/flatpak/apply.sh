@@ -5,9 +5,9 @@
 # does not have).
 set -euo pipefail
 
-APP_ID="${FLATPAK_ID:-ai.holbox.Boxcode}"
+APP_ID="${FLATPAK_ID:-com.covexcode.Covexcode}"
 APP_ROOT="${FLATPAK_DEST:-/app}"
-SHARE_NAME="boxcode-ide"
+SHARE_NAME="covexcode-ide"
 
 install_file() {
   local mode="$1" src="$2" dest="$3"
@@ -17,15 +17,15 @@ install_file() {
 }
 
 install_file 644 code.svg "${APP_ROOT}/share/icons/hicolor/scalable/apps/${APP_ID}.svg"
-install_file 644 ai.holbox.Boxcode.metainfo.xml "${APP_ROOT}/share/metainfo/${APP_ID}.metainfo.xml"
-install_file 755 boxcode-ide.sh "${APP_ROOT}/bin/boxcode-ide"
+install_file 644 com.covexcode.Covexcode.metainfo.xml "${APP_ROOT}/share/metainfo/${APP_ID}.metainfo.xml"
+install_file 755 covexcode-ide.sh "${APP_ROOT}/bin/covexcode-ide"
 
-ar x boxcode.deb
+ar x covexcode.deb
 
 shopt -s nullglob
 data_tars=( data.tar.* )
 if [[ ${#data_tars[@]} -eq 0 ]]; then
-  echo "boxcode.deb has no data.tar.*" >&2
+  echo "covexcode.deb has no data.tar.*" >&2
   exit 1
 fi
 tar -xf "${data_tars[0]}"

@@ -10,14 +10,14 @@ WIN_SDK_MAJOR_VERSION="10"
 WIN_SDK_FULL_VERSION="10.0.17763.0"
 
 if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-  PRODUCT_NAME="Boxcode - Insiders"
-  PRODUCT_CODE="BoxcodeInsiders"
+  PRODUCT_NAME="Covexcode - Insiders"
+  PRODUCT_CODE="CovexcodeInsiders"
   PRODUCT_UPGRADE_CODE="01977745-684E-4082-B8B7-4F074A01847A"
   ICON_DIR="..\\..\\..\\src\\insider\\resources\\win32"
   SETUP_RESOURCES_DIR=".\\resources\\insider"
 else
-  PRODUCT_NAME="Boxcode"
-  PRODUCT_CODE="Boxcode"
+  PRODUCT_NAME="Covexcode"
+  PRODUCT_CODE="Covexcode"
   PRODUCT_UPGRADE_CODE="271D5E3A-626E-40FB-9864-FBE4264C0871"
   ICON_DIR="..\\..\\..\\src\\stable\\resources\\win32"
   SETUP_RESOURCES_DIR=".\\resources\\stable"

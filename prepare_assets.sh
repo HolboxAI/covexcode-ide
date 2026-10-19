@@ -42,8 +42,8 @@ if [[ "${SHOULD_BUILD_CLI}" != "no" ]]; then
 
   APPLICATION_NAME="$( node -p "require(\"./vscode/product.json\").applicationName" )"
   # See build_cli.sh: the macOS .app bundle is named after nameLong (per
-  # vscode/build/gulpfile.vscode.ts), not nameShort. boxcode-ide's nameShort
-  # ("Boxcode") and nameLong ("Boxcode IDE") differ, unlike VSCodium's
+  # vscode/build/gulpfile.vscode.ts), not nameShort. covexcode-ide's nameShort
+  # ("Covexcode") and nameLong ("Covexcode IDE") differ, unlike VSCodium's
   # (which are identical), so this must use nameLong to find the bundle.
   NAME_LONG="$( node -p "require(\"./vscode/product.json\").nameLong" )"
   TUNNEL_APPLICATION_NAME="$( node -p "require(\"./vscode/product.json\").tunnelApplicationName" )"

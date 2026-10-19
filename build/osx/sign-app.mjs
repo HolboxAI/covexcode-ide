@@ -70,10 +70,10 @@ async function main() {
 	}
 
 	for (const [key, value] of [
-		['NSAppleEventsUsageDescription', 'An application in Boxcode wants to use AppleScript.'],
-		['NSMicrophoneUsageDescription', 'An application in Boxcode wants to use the Microphone.'],
-		['NSCameraUsageDescription', 'An application in Boxcode wants to use the Camera.'],
-		['NSAudioCaptureUsageDescription', 'An application in Boxcode wants to use Audio Capture.'],
+		['NSAppleEventsUsageDescription', 'An application in Covexcode wants to use AppleScript.'],
+		['NSMicrophoneUsageDescription', 'An application in Covexcode wants to use the Microphone.'],
+		['NSCameraUsageDescription', 'An application in Covexcode wants to use the Camera.'],
+		['NSAudioCaptureUsageDescription', 'An application in Covexcode wants to use Audio Capture.'],
 		['NSLocalNetworkUsageDescription', 'The app uses your local network for DNS resolution and to connect to locally running services.'],
 	]) {
 		const existing = spawnSync('plutil', ['-extract', key, 'raw', '-o', '-', infoPlistPath], {

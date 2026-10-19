@@ -34,7 +34,7 @@ if [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
   fi
 
   echo "+ install @electron/osx-sign (self-contained; does not use vscode/build/darwin/sign.ts)"
-  SIGN_PREFIX="${RUNNER_TEMP}/boxcode-osx-sign"
+  SIGN_PREFIX="${RUNNER_TEMP}/covexcode-osx-sign"
   mkdir -p "${SIGN_PREFIX}"
   npm install --prefix "${SIGN_PREFIX}" --no-save --no-package-lock @electron/osx-sign@^2.0.0
 

@@ -1,8 +1,8 @@
-name: boxcode-ide
-adopt-info: boxcode-ide
+name: covexcode-ide
+adopt-info: covexcode-ide
 summary: Code editing. Redefined.
 description: |
-  Binary releases of boxcode-ide, a Code-OSS based editor for boxcode,
+  Binary releases of covexcode-ide, a Code-OSS based editor for covexcode,
   without Microsoft branding, telemetry, or licensing.
 
 base: core20
@@ -11,7 +11,7 @@ confinement: classic
 compression: lzo
 
 parts:
-  boxcode-ide:
+  covexcode-ide:
     plugin: nil
     override-build: |
       set -eu
@@ -20,7 +20,7 @@ parts:
       DEB_URL=$( jq -r '.assets[].browser_download_url|select(endswith("'"_${SNAPCRAFT_TARGET_ARCH}.deb"'"))' release.json )
       DEB_NAME=$( basename "${DEB_URL}" )
       # Set version from the .deb filename (the release tag is not a version)
-      VERSION=$( printf '%s' "${DEB_NAME}" | sed -n 's/^boxcode-ide_\(.*\)_'"${SNAPCRAFT_TARGET_ARCH}"'\.deb$/\1/p' )
+      VERSION=$( printf '%s' "${DEB_NAME}" | sed -n 's/^covexcode-ide_\(.*\)_'"${SNAPCRAFT_TARGET_ARCH}"'\.deb$/\1/p' )
       snapcraftctl set-version "${VERSION}"
       # Downloading .deb
       wget "${DEB_URL}" -O "${SNAPCRAFT_PART_INSTALL}/${DEB_NAME}"
@@ -31,12 +31,12 @@ parts:
       rm -f "${SNAPCRAFT_PART_INSTALL}/${DEB_NAME}"
       # Prepare GUI
       mkdir -p "${SNAPCRAFT_PART_INSTALL}/meta/gui"
-      cp "${SNAPCRAFT_PART_INSTALL}/usr/share/boxcode-ide/resources/app/resources/linux/code.png" "${SNAPCRAFT_PART_INSTALL}/meta/gui/boxcode-ide.png"
+      cp "${SNAPCRAFT_PART_INSTALL}/usr/share/covexcode-ide/resources/app/resources/linux/code.png" "${SNAPCRAFT_PART_INSTALL}/meta/gui/covexcode-ide.png"
       # Update paths
-      sed -i 's|Exec=/usr/share/boxcode-ide/boxcode-ide|Exec=boxcode-ide --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide.desktop"
-      sed -i 's|Exec=/usr/share/boxcode-ide/boxcode-ide|Exec=boxcode-ide --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide-url-handler.desktop"
-      sed -i 's|Icon=boxcode-ide|Icon=${SNAP}/meta/gui/boxcode-ide.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide.desktop"
-      sed -i 's|Icon=boxcode-ide|Icon=${SNAP}/meta/gui/boxcode-ide.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/boxcode-ide-url-handler.desktop"
+      sed -i 's|Exec=/usr/share/covexcode-ide/covexcode-ide|Exec=covexcode-ide --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/covexcode-ide.desktop"
+      sed -i 's|Exec=/usr/share/covexcode-ide/covexcode-ide|Exec=covexcode-ide --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/covexcode-ide-url-handler.desktop"
+      sed -i 's|Icon=covexcode-ide|Icon=${SNAP}/meta/gui/covexcode-ide.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/covexcode-ide.desktop"
+      sed -i 's|Icon=covexcode-ide|Icon=${SNAP}/meta/gui/covexcode-ide.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/covexcode-ide-url-handler.desktop"
     build-packages:
       - wget
       - jq
@@ -77,7 +77,7 @@ parts:
       - -usr/share/icons
       - -usr/share/lintian
       - -usr/share/man
-      - -usr/share/boxcode-ide/chrome-sandbox
+      - -usr/share/covexcode-ide/chrome-sandbox
     build-attributes:
       - enable-patchelf
     override-prime: |
@@ -90,16 +90,16 @@ parts:
 
   electron-launch:
     after:
-      - boxcode-ide
+      - covexcode-ide
     plugin: dump
     source: snap/local/bin
 
 apps:
-  boxcode-ide:
-    command: electron-launch $SNAP/usr/share/boxcode-ide/bin/boxcode-ide --no-sandbox
-    desktop: usr/share/applications/boxcode-ide.desktop
-    common-id: boxcode-ide.desktop
+  covexcode-ide:
+    command: electron-launch $SNAP/usr/share/covexcode-ide/bin/covexcode-ide --no-sandbox
+    desktop: usr/share/applications/covexcode-ide.desktop
+    common-id: covexcode-ide.desktop
 
   url-handler:
-    command: electron-launch $SNAP/usr/share/boxcode-ide/bin/boxcode-ide --open-url --no-sandbox
-    desktop: usr/share/applications/boxcode-ide-url-handler.desktop
+    command: electron-launch $SNAP/usr/share/covexcode-ide/bin/covexcode-ide --open-url --no-sandbox
+    desktop: usr/share/applications/covexcode-ide-url-handler.desktop

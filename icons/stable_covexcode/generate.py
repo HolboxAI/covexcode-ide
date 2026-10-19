@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generates the boxcode app-icon set as a Python/Pillow fallback for
+Generates the covexcode app-icon set as a Python/Pillow fallback for
 icons/build_icons.sh, whose real toolchain (icns2png, composite, convert,
 png2icns, icotool, rsvg-convert) is unavailable in this environment (no
 Homebrew, no rsvg/imagemagick/icoutils/libicns binaries). Pillow itself
@@ -11,7 +11,7 @@ target is produced directly here instead.
 Mark: a rounded dark "box" tile with an inset amber rounded square (the
 box body) and a smaller bright-amber accent square straddling its
 bottom-right corner (a code-cursor blip breaking out of the box) --
-literal enough for "boxcode", abstract enough to not read as a scaled
+literal enough for "covexcode", abstract enough to not read as a scaled
 wordmark, and simple enough (3 flat shapes, no fine detail) to stay
 legible at 16px.
 """
@@ -19,9 +19,9 @@ import os
 
 from PIL import Image, ImageDraw
 
-DARK = (26, 23, 19, 255)      # #1A1713 -- warm ground, matches boxcode-dark.json
+DARK = (26, 23, 19, 255)      # #1A1713 -- warm ground, matches covexcode-dark.json
 AMBER = (217, 119, 6, 255)    # #D97706 -- primary accent
-BRIGHT = (251, 191, 36, 255)  # #FBBF24 -- cursor-blip accent, matches boxcode-dark.json textLink
+BRIGHT = (251, 191, 36, 255)  # #FBBF24 -- cursor-blip accent, matches covexcode-dark.json textLink
 
 CANVAS = 1024  # master raster size; everything else is downsampled from this
 
@@ -50,7 +50,7 @@ def svg_mark():
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0" y="0" width="1024" height="1024" viewBox="0, 0, 100, 100">
-  <g id="boxcode_mark">
+  <g id="covexcode_mark">
     <rect x="6" y="6" width="88" height="88" rx="20" fill="#1A1713"/>
     <rect x="24" y="24" width="52" height="52" rx="12" fill="#D97706"/>
     <rect x="62" y="62" width="20" height="20" rx="5" fill="#FBBF24"/>
@@ -65,7 +65,7 @@ def letterpress_svg(fill, opacity=None):
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0" y="0" width="40" height="40" viewBox="0, 0, 40, 40">
-  <g id="boxcode_letterpress" fill="{fill}"{opacity_attr}>
+  <g id="covexcode_letterpress" fill="{fill}"{opacity_attr}>
     <rect x="9.6" y="9.6" width="20.8" height="20.8" rx="4.8"/>
     <rect x="24.8" y="24.8" width="8" height="8" rx="2"/>
   </g>
