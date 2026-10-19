@@ -14,13 +14,13 @@ function enoent(): NodeJS.ErrnoException {
 
 test('describeStartupFailure() gives the real install command when the covexcode binary is missing (macOS/Linux)', () => {
 	const message = describeStartupFailure(enoent(), 'darwin');
-	assert.match(message, /curl -fsSL https:\/\/covexcode\.sh\/install\.sh \| bash/);
+	assert.match(message, /curl -fsSL https:\/\/covexcode\.com\/install\.sh \| bash/);
 	assert.doesNotMatch(message, /Make sure `covexcode` is installed/);
 });
 
 test('describeStartupFailure() picks the PowerShell install command on win32', () => {
 	const message = describeStartupFailure(enoent(), 'win32');
-	assert.match(message, /irm https:\/\/covexcode\.sh\/install\.ps1 \| iex/);
+	assert.match(message, /irm https:\/\/covexcode\.com\/install\.ps1 \| iex/);
 });
 
 test('describeStartupFailure() tells an installed-but-old CLI to upgrade, not to reinstall', () => {
