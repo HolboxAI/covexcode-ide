@@ -2,15 +2,15 @@
 
 The macOS workflow's `generate_assets` input is `workflow_dispatch`-only. A
 normal PR compile does **not** zip or sign anything -- it stops after
-`./build.sh` produces `VSCode-darwin-arm64/Boxcode IDE.app`.
+`./build.sh` produces `VSCode-darwin-arm64/Covexcode IDE.app`.
 
 ## Compile, then run the `.app`
 
 From this repo, with Node (see `.nvmrc`), `jq`, Python 3.11, and Rust:
 
 ```sh
-export APP_NAME=Boxcode
-export BINARY_NAME=boxcode-ide
+export APP_NAME=Covexcode
+export BINARY_NAME=covexcode-ide
 export ORG_NAME=HolboxAI
 export OS_NAME=osx
 export VSCODE_ARCH=arm64
@@ -30,7 +30,7 @@ Launch the unsigned tree with:
 
 ```sh
 codesign --force --deep --sign - "VSCode-darwin-${VSCODE_ARCH}"/*.app
-open "VSCode-darwin-${VSCODE_ARCH}/Boxcode IDE.app"
+open "VSCode-darwin-${VSCODE_ARCH}/Covexcode IDE.app"
 ```
 
 The ad-hoc `codesign` is required even for a local tree: Electron's
@@ -40,7 +40,7 @@ before Gatekeeper can show a dialog.
 ## Agent unit tests (no vscode checkout)
 
 ```sh
-cd src/stable/extensions/boxcode-agent
+cd src/stable/extensions/covexcode-agent
 npm ci
 npm test
 ```
@@ -68,9 +68,9 @@ artifact, then:
 
 ```bat
 tar -xzf compiled.tar.gz
-VSCode-win32-x64\Boxcode.exe
+VSCode-win32-x64\Covexcode.exe
 ```
 
 Installers (exe/msi) are still dispatch-only (`generate_assets: true`).
-arm64 Windows packing is dispatch-only too. The `boxcode` CLI is a
-separate install: `irm https://boxcode.sh/install.ps1 | iex`.
+arm64 Windows packing is dispatch-only too. The `covexcode` CLI is a
+separate install: `irm https://covexcode.com/install.ps1 | iex`.

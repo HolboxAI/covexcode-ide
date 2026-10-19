@@ -51,7 +51,7 @@ If the CLI acted on `mcpServers`, the marker file exists. If it ignored them, it
 
 ## Scope and limits
 
-- Tested against the binary at `/usr/local/bin/boxcode`, reporting version `1.11.40`.
+- Tested against the binary at `/usr/local/bin/covexcode`, reporting version `1.11.40`.
 - `--acp` is not listed in `--help`; it was confirmed by running it.
 - This says nothing about how a future MCP-capable CLI will behave. The gate must be
   written against the capability field, not against this binary's observed behaviour.

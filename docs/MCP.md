@@ -94,9 +94,9 @@ Notes:
 - `${secret:...}` resolves against the extension secret store, never into plain files.
   This is the one place the earlier "app-level secrets" backlog row (L107) genuinely
   overlaps — worth reconciling rather than building twice.
-- Committed vs local scope: a repo's `.boxcode/mcp.json` should be committable (shared
+- Committed vs local scope: a repo's `.covexcode/mcp.json` should be committable (shared
   server definitions) while tokens stay in the secret store. Same split as
-  `.boxcode/permissions.json` in PR #102.
+  `.covexcode/permissions.json` in PR #102.
 
 ## Catalog: what developers actually install
 
@@ -159,8 +159,8 @@ reconciliation with the CLI's existing `config.tools.approval` and PR #102's sto
 ## Open questions — decide before Phase 1
 
 1. **Which repo first?** The CLI is the load-bearing half, but it is a separate repo
-   (`HolboxAI/boxcode`) whose local clone here is stale. Note the two are different
-   things: the **installed binary** (`/usr/local/bin/boxcode`, `1.11.40`) is current and
+   (`HolboxAI/covexcode`) whose local clone here is stale. Note the two are different
+   things: the **installed binary** (`/usr/local/bin/covexcode`, `1.11.40`) is current and
    does accept `--acp`, while the **local worktree** is the stale part. Doing the
    extension half alone produces config that silently does nothing.
 2. **Is `rmcp` acceptable as a dependency?** It is the fast path and the right call,

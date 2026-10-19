@@ -188,15 +188,15 @@ review-tools.snap-review --allow-classic codium*.snap
 
 ## <a id="build-flatpak"></a>Build Flatpak
 
-Produces a sideloadable bundle (`assets/Boxcode-x86_64.flatpak`) from the amd64 `.deb`. This is not a Flathub upload — Flathub needs a public `.deb` URL and its own review.
+Produces a sideloadable bundle (`assets/Covexcode-x86_64.flatpak`) from the amd64 `.deb`. This is not a Flathub upload — Flathub needs a public `.deb` URL and its own review.
 
 ```
-# after ./dev/build.sh -p (or any tree that already has assets/boxcode-ide_*_amd64.deb)
+# after ./dev/build.sh -p (or any tree that already has assets/covexcode-ide_*_amd64.deb)
 ./stores/flatpak/build.sh
 
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user assets/Boxcode-x86_64.flatpak
-flatpak run ai.holbox.Boxcode
+flatpak install --user assets/Covexcode-x86_64.flatpak
+flatpak run ai.holbox.Covexcode
 ```
 
 CI does the same wrap when `CI - Build - Linux` is dispatched with `generate_assets: true`. Download the `flatpak-x86_64` artifact from that run. x86_64 only for now, same as AppImage.
