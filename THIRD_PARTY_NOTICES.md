@@ -39,7 +39,7 @@ SOFTWARE.
 ```
 
 We have adapted, not blindly copied, this tooling: naming/branding is
-re-pointed at boxcode identity (see `utils.sh`, `prepare_vscode.sh`, and the
+re-pointed at covexcode identity (see `utils.sh`, `prepare_vscode.sh`, and the
 CI workflow `env:` blocks) rather than reusing VSCodium's own product
 identifiers, bundle IDs, GUIDs, or update infrastructure. The patch logic
 itself (de-branding upstream Code-OSS, the Open VSX marketplace swap, telemetry
@@ -56,8 +56,8 @@ tracked here, and it is applied to a fresh checkout at build time.
 
 ## Overall repo license
 
-This repo's own original code (the boxcode branding overlay content, the
+This repo's own original code (the covexcode branding overlay content, the
 adapted build/CI scripts as modified here, and any future extension code) is
 **not yet under a declared license** — see `README.md` "Open decisions". Do
-not assume MIT applies to boxcode-original contributions beyond what is
+not assume MIT applies to covexcode-original contributions beyond what is
 required to comply with the notices above.

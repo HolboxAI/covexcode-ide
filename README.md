@@ -1,38 +1,38 @@
-# boxcode-ide
+# covexcode-ide
 
-A Code-OSS-based editor for boxcode, aimed at frontend engineers. This repo owns the editor surface only — the agent brain stays in [`HolboxAI/boxcode`](https://github.com/HolboxAI/boxcode) and is reused over a protocol, not reimplemented here.
+A Code-OSS-based editor for covexcode, aimed at frontend engineers. This repo owns the editor surface only — the agent brain stays in [`HolboxAI/covexcode`](https://github.com/HolboxAI/covexcode) and is reused over a protocol, not reimplemented here.
 
-**Status: P1 in progress.** Build tooling (adapted from [VSCodium](https://github.com/VSCodium/vscodium)'s MIT-licensed scripts — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)) has landed: a pinned `microsoft/vscode` checkout, a patch set for de-branding/Open VSX/telemetry, and boxcode's own product identity (`utils.sh`, `prepare_vscode.sh`). The boxcode chat participant and boxcode's own themes ship in-tree, and macOS/Windows/Linux builds compile in CI. See [`docs/howto-build.md`](docs/howto-build.md) to build locally.
+**Status: P1 in progress.** Build tooling (adapted from [VSCodium](https://github.com/VSCodium/vscodium)'s MIT-licensed scripts — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)) has landed: a pinned `microsoft/vscode` checkout, a patch set for de-branding/Open VSX/telemetry, and covexcode's own product identity (`utils.sh`, `prepare_vscode.sh`). The covexcode chat participant and covexcode's own themes ship in-tree, and macOS/Windows/Linux builds compile in CI. See [`docs/howto-build.md`](docs/howto-build.md) to build locally.
 
 ## What ships today
 
-Two boxcode-specific extensions are bundled under `src/stable/extensions/`:
+Two covexcode-specific extensions are bundled under `src/stable/extensions/`:
 
-- **`boxcode-agent`** — the chat participant. Registers `boxcode` as the default chat participant (ask/edit/agent modes) and drives the `boxcode` binary over its ACP stdio interface. Ships commands for undoing a session's file changes, switching provider/model/API key, responding to a permission prompt, and trusting the open folder.
-- **`boxcode-theme`** — boxcode's own color themes ("Boxcode Dark" and "Boxcode Light"), an amber/orange accent on top of Dark Modern / Light Modern.
+- **`covexcode-agent`** — the chat participant. Registers `covexcode` as the default chat participant (ask/edit/agent modes) and drives the `covexcode` binary over its ACP stdio interface. Ships commands for undoing a session's file changes, switching provider/model/API key, responding to a permission prompt, and trusting the open folder.
+- **`covexcode-theme`** — covexcode's own color themes ("Covexcode Dark" and "Covexcode Light"), an amber/orange accent on top of Dark Modern / Light Modern.
 
 On top of the fork, the patch set adds a chat-first landing page, an Integrated Browser pane (with `check_in_browser`), auto-open of localhost dev servers, and the rebrand. What's done vs. planned lives in [`docs/BACKLOG.md`](docs/BACKLOG.md), not here.
 
 ## Install
 
-boxcode-ide and the `boxcode` CLI are separate installs: this repo is only the editor surface, and the chat participant it ships shells out to a `boxcode` binary already on your `PATH` (see the Architecture section below). Install that binary first:
+covexcode-ide and the `covexcode` CLI are separate installs: this repo is only the editor surface, and the chat participant it ships shells out to a `covexcode` binary already on your `PATH` (see the Architecture section below). Install that binary first:
 
 ```sh
-curl -fsSL https://boxcode.sh/install.sh | bash      # macOS/Linux
-irm https://boxcode.sh/install.ps1 | iex              # Windows (PowerShell)
+curl -fsSL https://covexcode.com/install.sh | bash      # macOS/Linux
+irm https://covexcode.com/install.ps1 | iex              # Windows (PowerShell)
 ```
 
 ### Install the IDE itself (macOS dev builds)
 
-Download the latest `.dmg` from the [latest release](https://github.com/HolboxAI/boxcode-ide/releases/latest) and drag **Boxcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
+Download the latest `.dmg` from the [latest release](https://github.com/HolboxAI/boxcode-ide/releases/latest) and drag **Covexcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
 
 ```sh
-xattr -cr "/Applications/Boxcode IDE.app"
+xattr -cr "/Applications/Covexcode IDE.app"
 ```
 
-(Alternative: right-click the app → Open, and confirm the Gatekeeper prompt.) After that, launch Boxcode IDE normally.
+(Alternative: right-click the app → Open, and confirm the Gatekeeper prompt.) After that, launch Covexcode IDE normally.
 
-Then open a folder in boxcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.boxcode/config.toml` doesn't already exist (from using the CLI directly).
+Then open a folder in covexcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.covexcode/config.toml` doesn't already exist (from using the CLI directly).
 
 ### Linux
 
@@ -43,8 +43,8 @@ The `.deb`, `.rpm`, AppImage, Flatpak, and `.tar.gz` packages ship on the [lates
 Download the package for your architecture and install it. The package manager handles updates:
 
 ```sh
-sudo apt install ./boxcode-ide_<version>_amd64.deb   # Debian / Ubuntu
-sudo dnf install ./boxcode-ide-<version>.x86_64.rpm   # Fedora / RHEL
+sudo apt install ./covexcode-ide_<version>_amd64.deb   # Debian / Ubuntu
+sudo dnf install ./covexcode-ide-<version>.x86_64.rpm   # Fedora / RHEL
 ```
 
 #### AppImage
@@ -52,8 +52,8 @@ sudo dnf install ./boxcode-ide-<version>.x86_64.rpm   # Fedora / RHEL
 Download the AppImage, make it executable, and run it. The AppImage updates itself with zsync:
 
 ```sh
-chmod +x Boxcode_IDE-<version>.glibc2.34-x86_64.AppImage
-./Boxcode_IDE-<version>.glibc2.34-x86_64.AppImage
+chmod +x Covexcode_IDE-<version>.glibc2.34-x86_64.AppImage
+./Covexcode_IDE-<version>.glibc2.34-x86_64.AppImage
 ```
 
 #### Flatpak
@@ -62,8 +62,8 @@ The Flatpak is a sideloaded bundle. There is no Flathub listing yet:
 
 ```sh
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./Boxcode-x86_64.flatpak
-flatpak run ai.holbox.Boxcode
+flatpak install --user ./Covexcode-x86_64.flatpak
+flatpak run ai.holbox.Covexcode
 ```
 
 The sandbox can see the host home directory, so the CLI in `~/.local/bin` still works.
@@ -75,14 +75,14 @@ CI does not build the Snap. Build it locally with `snapcraft` and install it wit
 ```sh
 cd stores/snapcraft/stable
 snapcraft
-sudo snap install --dangerous boxcode-ide_<version>_amd64.snap
+sudo snap install --dangerous covexcode-ide_<version>_amd64.snap
 ```
 
 The Snap is a classic-confinement bundle. It downloads the `.deb` from the latest release and wraps it.
 
 ## Release model
 
-boxcode-ide ships versioned releases. Every merge to `main` produces one new release. The release is immutable. It carries every file format for every platform.
+covexcode-ide ships versioned releases. Every merge to `main` produces one new release. The release is immutable. It carries every file format for every platform.
 
 The latest release is always at [`/releases/latest`](https://github.com/HolboxAI/boxcode-ide/releases/latest). Older releases keep their own versioned tags.
 
@@ -122,10 +122,10 @@ Only two formats use the built-in updater:
 
 Two repos, one brain:
 
-- **`HolboxAI/boxcode`** (existing) — the daemon. Agent loop, tool execution, approval gating, all in Rust. Exposes a JSON-RPC-over-NDJSON protocol (`src/protocol.rs`) consumed over stdio.
-- **`boxcode-ide`** (this repo) — the face. A Code-OSS fork with a thin TypeScript extension that talks to the daemon. No agent logic lives here.
+- **`HolboxAI/covexcode`** (existing) — the daemon. Agent loop, tool execution, approval gating, all in Rust. Exposes a JSON-RPC-over-NDJSON protocol (`src/protocol.rs`) consumed over stdio.
+- **`covexcode-ide`** (this repo) — the face. A Code-OSS fork with a thin TypeScript extension that talks to the daemon. No agent logic lives here.
 
-The `boxcode-agent` extension launches `boxcode --acp` and speaks to it over stdio — the same pattern OpenAI's Codex app-server proves across CLI, Desktop, IDE, and Cloud from one backend.
+The `covexcode-agent` extension launches `covexcode --acp` and speaks to it over stdio — the same pattern OpenAI's Codex app-server proves across CLI, Desktop, IDE, and Cloud from one backend.
 
 Full plan: [`docs/PLAN.md`](docs/PLAN.md). Current priority (Tier 1 baseline-IDE verification, Tier 2 on deck, small parallel-track items): [`docs/BACKLOG.md`](docs/BACKLOG.md).
 
@@ -133,14 +133,14 @@ Full plan: [`docs/PLAN.md`](docs/PLAN.md). Current priority (Tier 1 baseline-IDE
 
 | path | what it is |
 |---|---|
-| `src/stable/extensions/` | bundled boxcode extensions (`boxcode-agent`, `boxcode-theme`) |
+| `src/stable/extensions/` | bundled covexcode extensions (`covexcode-agent`, `covexcode-theme`) |
 | `patches/` | VSCodium-style build-time patch set (de-branding, Open VSX, telemetry, UI) |
 | `docs/` | `PLAN.md`, `BACKLOG.md`, and the how-to/usage guides |
 | `build/` | platform packaging (linux/osx/windows/alpine) |
 | `dev/` | dev build helpers (`build.sh`, `patch.sh`, `update_patches.sh`) |
 | `stores/` | snapcraft, winget, and Flatpak packaging metadata |
 | `upstream/` | pinned `microsoft/vscode` tag/commit |
-| `product.json` | boxcode product identity (name, quality, marketplace wiring) |
+| `product.json` | covexcode product identity (name, quality, marketplace wiring) |
 
 ## Building
 
@@ -170,7 +170,7 @@ Full dependency lists (including Windows WiX/MSI and Linux dpkg/rpm/snap/flatpak
 
 These are deliberately **not** decided by this scaffolding commit:
 
-- **License.** Code-OSS itself is MIT. Whatever boxcode-specific code lands in this repo (the extension, any modified `product.json`, build tooling) needs its own explicit license decision — this is a business call, not a default to inherit silently.
+- **License.** Code-OSS itself is MIT. Whatever covexcode-specific code lands in this repo (the extension, any modified `product.json`, build tooling) needs its own explicit license decision — this is a business call, not a default to inherit silently.
 - **Trademark handling.** "Visual Studio Code" and the official product name/icon are Microsoft trademarks. A clean Code-OSS fork (see [VSCodium](https://github.com/VSCodium/vscodium) for precedent) has to strip Microsoft's `product.json` branding, telemetry endpoints, and default-marketplace wiring before any public build ships. Not done yet — do not ship a build with Microsoft's branding/telemetry intact.
 - **Repo visibility.** Made public 2026-09-04 (deliberate decision — nothing confidential was found in the tree, confirmed by a secret-pattern scan before flipping). This was a one-way door: forks/clones from before this point persist even if the repo is re-privated later, so treat "private again" as "newly private," not "back to before."
 

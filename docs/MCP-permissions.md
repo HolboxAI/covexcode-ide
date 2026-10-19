@@ -84,7 +84,7 @@ Consequences worth stating plainly:
    two lifecycles from being confused. Recommendation: same file, distinct `kind`,
    so revocation has one front door.
 2. **Revocation UX.** #102 currently leaves the user hand-editing
-   `.boxcode/permissions.json` to revoke. For rules bound to a config hash, a stale
+   `.covexcode/permissions.json` to revoke. For rules bound to a config hash, a stale
    entry is invisible in the UI but still present on disk. A list/revoke command is
    worth having before MCP rules ship, not after.
 3. **Default grant width for MCP.** A blanket "always allow this server" is the
