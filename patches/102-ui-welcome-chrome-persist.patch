@@ -24,7 +24,7 @@ index 0000000..0000000 100644
  	}
  
 -	/**
--	 * boxcode-ide: the landing page is meant to read as a clean, dedicated
+-	 * covexcode-ide: the landing page is meant to read as a clean, dedicated
 -	 * first-run screen, not a full IDE with an empty sidebar/toolbar already
 -	 * showing -- the activity bar (file/search/git/debug/extensions icons)
 -	 * and the title bar's right-side icon cluster (editor-layout-split
@@ -38,7 +38,7 @@ index 0000000..0000000 100644
 -	override setEditorVisible(visible: boolean): void {
 -		super.setEditorVisible(visible);
 -		this.layoutService.setPartHidden(visible, Parts.ACTIVITYBAR_PART);
--		this.layoutService.getContainer(mainWindow).classList.toggle('boxcode-chrome-minimal', visible);
+-		this.layoutService.getContainer(mainWindow).classList.toggle('covexcode-chrome-minimal', visible);
 -	}
 -
  	private async revealMaximizedChat(): Promise<void> {
@@ -70,7 +70,7 @@ index 0000000..0000000 100644
  }
  
 +/**
-+ * boxcode-ide: the landing page (and, by extension, an active boxcode chat
++ * covexcode-ide: the landing page (and, by extension, an active covexcode chat
 + * session) is meant to read as a clean, dedicated surface, not a full IDE
 + * with an empty sidebar/toolbar already showing -- the activity bar (file/
 + * search/git/debug/extensions icons) and the title bar's right-side icon
@@ -81,19 +81,19 @@ index 0000000..0000000 100644
 + * own `setEditorVisible()` override -- but submitting the first prompt calls
 + * `closeEditorAndMaximizeAuxiliaryBar()`, which *closes* the welcome editor
 + * to reveal the chat view (contributed to the auxiliary bar, not the editor
-+ * area -- see `boxcode-agent/package.json`'s `"locations": ["panel"]`), so
++ * area -- see `covexcode-agent/package.json`'s `"locations": ["panel"]`), so
 + * `setEditorVisible(false)` fired at exactly the moment the user started
 + * using the product, undoing the whole effect on first contact. Keying off
 + * `isAuxiliaryBarMaximized()` (already the real, guarded signal for "a
-+ * boxcode chat session, not just a stray view, has taken over the window" --
++ * covexcode chat session, not just a stray view, has taken over the window" --
 + * see patches/89's fix to `closeEditorAndMaximizeAuxiliaryBar`) as well as
 + * "the welcome page is the active editor" keeps the minimal treatment
 + * through that exact transition, and lets it end naturally the moment the
 + * user opens a real file (which un-maximizes the auxiliary bar) rather than
 + * needing separate logic to detect "the user is coding now."
 + */
-+class BoxcodeMinimalChromeContribution extends Disposable implements IWorkbenchContribution {
-+	static readonly ID = 'workbench.contrib.boxcodeMinimalChrome';
++class CovexcodeMinimalChromeContribution extends Disposable implements IWorkbenchContribution {
++	static readonly ID = 'workbench.contrib.covexcodeMinimalChrome';
 +
 +	// Whether the activity bar was visible immediately before this
 +	// contribution hid it -- restored on the way out instead of
@@ -133,7 +133,7 @@ index 0000000..0000000 100644
 +		}
 +
 +		const container = this.layoutService.getContainer(mainWindow);
-+		container.classList.toggle('boxcode-chrome-minimal', shouldBeMinimal);
++		container.classList.toggle('covexcode-chrome-minimal', shouldBeMinimal);
 +
 +		// titlebarPart.ts renders layout-control actions, editor actions, and
 +		// -- only when workbench.activityBar.location is "top"/"bottom" -- the
@@ -149,13 +149,13 @@ index 0000000..0000000 100644
 +		// placement, and the only one this can hide safely.
 +		const activityBarLocation = this.configurationService.getValue<string>(LayoutSettings.ACTIVITY_BAR_LOCATION);
 +		const safeToHideTitleBarCluster = activityBarLocation !== 'top' && activityBarLocation !== 'bottom';
-+		container.classList.toggle('boxcode-titlebar-minimal', shouldBeMinimal && safeToHideTitleBarCluster);
++		container.classList.toggle('covexcode-titlebar-minimal', shouldBeMinimal && safeToHideTitleBarCluster);
 +	}
 +}
 +
  // Register contributions
  registerWorkbenchContribution2(AgentSessionsWelcomeEditorResolverContribution.ID, AgentSessionsWelcomeEditorResolverContribution, WorkbenchPhase.BlockStartup);
-+registerWorkbenchContribution2(BoxcodeMinimalChromeContribution.ID, BoxcodeMinimalChromeContribution, WorkbenchPhase.AfterRestored);
++registerWorkbenchContribution2(CovexcodeMinimalChromeContribution.ID, CovexcodeMinimalChromeContribution, WorkbenchPhase.AfterRestored);
  registerWorkbenchContribution2(AgentSessionsWelcomeRunnerContribution.ID, AgentSessionsWelcomeRunnerContribution, WorkbenchPhase.AfterRestored);
 
 diff --git a/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css b/src/vs/workbench/contrib/welcomeAgentSessions/browser/media/agentSessionsWelcome.css
@@ -165,7 +165,7 @@ index 0000000..0000000 100644
 @@ -628,17 +628,28 @@
  
  /*
-  * boxcode-ide: hides the title bar's right-side icon cluster (editor
+  * covexcode-ide: hides the title bar's right-side icon cluster (editor
 - * layout/split controls, the Integrated Browser toggle) while this welcome
 - * page is the visible editor -- toggled from agentSessionsWelcome.ts's own
 - * setEditorVisible() override, the same lifecycle hook that hides the
@@ -176,9 +176,9 @@ index 0000000..0000000 100644
 - * without touching .center-adjacent-toolbar-container (the update
 - * indicator) or .window-controls-container (the actual window
 - * minimize/maximize/close buttons), neither of which this is about.
-+ * layout/split controls, the Integrated Browser toggle) while a boxcode chat
++ * layout/split controls, the Integrated Browser toggle) while a covexcode chat
 + * session is the active surface -- toggled from
-+ * BoxcodeMinimalChromeContribution (agentSessionsWelcome.contribution.ts).
++ * CovexcodeMinimalChromeContribution (agentSessionsWelcome.contribution.ts).
 + * .action-toolbar-container is the real element (titlebarPart.ts) that both
 + * MenuId.TitleBar (the browser toggle registers here, see
 + * browserTabManagementFeatures.ts) and MenuId.LayoutControlMenu render into
@@ -187,7 +187,7 @@ index 0000000..0000000 100644
 + * .window-controls-container (the actual window minimize/maximize/close
 + * buttons), neither of which this is about.
 + *
-+ * `.boxcode-titlebar-minimal` (a second, narrower class from the same
++ * `.covexcode-titlebar-minimal` (a second, narrower class from the same
 + * contribution) is deliberately NOT the same class `setPartHidden` gates the
 + * activity bar on: titlebarPart.ts renders layout-control actions, editor
 + * actions, and -- only when workbench.activityBar.location is "top"/
@@ -198,7 +198,7 @@ index 0000000..0000000 100644
 + * default placement), so this blanket display:none can never hide someone's
 + * settings gear or Accounts menu.
   */
--.monaco-workbench.boxcode-chrome-minimal .titlebar-right .action-toolbar-container {
-+.monaco-workbench.boxcode-titlebar-minimal .titlebar-right .action-toolbar-container {
+-.monaco-workbench.covexcode-chrome-minimal .titlebar-right .action-toolbar-container {
++.monaco-workbench.covexcode-titlebar-minimal .titlebar-right .action-toolbar-container {
  	display: none;
  }

@@ -1,0 +1,710 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) HolboxAI. Licensed under the MIT License.
+ *--------------------------------------------------------------------------------------------*/
+
+import * as cp from 'node:child_process';
+import * as readline from 'node:readline';
+import { EventEmitter } from 'node:events';
+import type { toAcpMcpServers } from './mcpConfig';
+
+/**
+ * One entry of ACP v1's `session/new` `mcpServers` array, as built by
+ * `mcpConfig.ts`'s `toAcpMcpServers()`. Derived from that function's own return
+ * type rather than re-declared here, so the two cannot drift apart: the producer
+ * and this consumer are typed by a single source of truth.
+ */
+export type AcpMcpServerConfig = ReturnType<typeof toAcpMcpServers>[number];
+
+/**
+ * Mirrors `protocol.rs`'s agent capabilities. `mcp` is deliberately *not* in the
+ * ACP v1 schema -- covexcode advertises it as a forward-compatible extra so a
+ * client can tell "this build connects MCP servers" apart from "this build
+ * accepts the field and ignores it". ACP v1 makes `mcpServers` required on
+ * `session/new`, so an MCP-less build still accepts a populated array and returns
+ * a session id while connecting nothing (verified by probe -- see
+ * `docs/MCP-verification.md` in the merged design notes). Sending servers to such
+ * a build is therefore a silent no-op, which is precisely what this flag prevents.
+ */
+export interface AgentCapabilities {
+	session?: Record<string, unknown>;
+	mcp?: boolean;
+	promptCapabilities?: { image?: boolean };
+}
+
+export interface InitializeResult {
+	protocolVersion?: number;
+	agentCapabilities?: AgentCapabilities;
+}
+
+/**
+ * Whether the agent we are talking to actually connects the MCP servers it is
+ * handed. Called against the result of `initialize()`; absent capability means
+ * "no", because the failure mode of guessing wrong is a silent no-op that looks
+ * like a working feature.
+ */
+export function agentSupportsMcp(result: InitializeResult | undefined): boolean {
+	return result?.agentCapabilities?.mcp === true;
+}
+
+// Wire types mirror covexcode's own `src/protocol.rs` exactly -- see that
+// module's own doc comments for the ACP v1 schema this implements. Kept to
+// only the request/response/notification shapes this client actually sends
+// or reads; covexcode's schema has more variants than are used here (see
+// `SessionUpdate`'s own doc comment on `protocol.rs` for which of ACP v1's
+// 11 variants it emits).
+
+export interface ContentBlockText {
+	type: 'text';
+	text: string;
+}
+
+/**
+ * Mirrors `protocol.rs`'s own `ContentBlock` exactly -- the two variants
+ * covexcode implements on the *inbound* side (what a `session/prompt` call
+ * sends), as opposed to `ContentBlockText`/`ToolCallContent` above, which
+ * are what covexcode sends back. `Image` requires the `image` prompt
+ * capability covexcode's own `initialize` response advertises (see
+ * `transport.rs`'s handler) -- sending one to an agent that didn't
+ * advertise it would be a protocol violation, not something this client
+ * needs to guard against itself since covexcode always advertises it.
+ */
+export type PromptContentBlock =
+	| { type: 'text'; text: string }
+	| { type: 'image'; data: string; mimeType: string };
+
+export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled';
+
+export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export type DiffLineChange = 'context' | 'added' | 'removed';
+
+/**
+ * Mirrors `protocol.rs`'s own `DiffHunkLine`/`DiffHunk`/`DiffLineChange`
+ * exactly -- the per-hunk split of a file change covexcode pre-computes so a
+ * client can offer per-hunk accept/reject without reimplementing its diff
+ * (see `headless.rs::diff_hunks_for_review`). Line numbers are 1-based;
+ * `oldNo` is absent on an added line and `newNo` absent on a removed line,
+ * matching the gutter of any two-column diff.
+ */
+export interface DiffHunkLine {
+	change: DiffLineChange;
+	oldNo?: number;
+	newNo?: number;
+	text: string;
+}
+
+export interface DiffHunk {
+	lines: DiffHunkLine[];
+}
+
+/**
+ * Mirrors `protocol.rs`'s own `ToolCallContent` exactly -- the three
+ * variants covexcode implements (`content`/`diff` are ACP v1's own; `image`
+ * is covexcode's own extension for `check_in_browser`'s result, same
+ * reasoning as `session/checkInBrowser` not being part of ACP's schema
+ * either). `Diff.oldText` is absent (not empty) for a brand-new file,
+ * matching `preview_change_text`'s own before-is-`None` case rather than
+ * covexcode sending an empty string for it. `Diff.hunks` is absent either
+ * when the change has no hunkable diff (CRLF line endings, an oversized
+ * diff -- see `headless.rs::diff_hunks_for_review`) or from a covexcode that
+ * predates per-hunk review; its absence means "whole-file review only".
+ */
+export type ToolCallContent =
+	| { type: 'content'; text: string }
+	| { type: 'diff'; path: string; oldText?: string; newText: string; hunks?: DiffHunk[] }
+	| { type: 'image'; mimeType: string; data: string }
+	| { type: 'plan'; title: string; summary: string; steps: string[]; notDoing?: string[] };
+
+export interface ToolCallUpdate {
+	toolCallId: string;
+	title?: string;
+	kind?: string;
+	status?: ToolCallStatus;
+	content?: ToolCallContent;
+}
+
+export interface AcpToolCall {
+	toolCallId: string;
+	title: string;
+	kind: string;
+	status: ToolCallStatus;
+}
+
+/**
+ * Deliberately flat rather than a discriminated union keyed on
+ * `sessionUpdate`: covexcode's own ACP schema has more variants (11 in v1,
+ * see `protocol.rs`'s own doc comment) than the three this client renders
+ * inline (`usage_update`, a fourth, is consumed into the turn's token
+ * footnote rather than rendered), and a union with a catch-all
+ * `string`-tagged member for "every other legal variant" defeats
+ * TypeScript's own discriminated-union narrowing (the tag stops being a
+ * set of literals once one member's tag is plain `string`). Every field
+ * here is read defensively in `renderUpdate`/`createTurnUsage`
+ * (typeof/optional-chaining checks, not a trusted cast), which is the
+ * actually-safe way to consume a schema wider than what this reads.
+ *
+ * `content` is widened to both shapes that land in this one wire field:
+ * `agent_message_chunk`'s is a `ContentBlockText`, `tool_call`/
+ * `tool_call_update`'s is a `ToolCallContent` (same field name on the wire
+ * because `protocol.rs`'s tagged enum flattens each variant's own struct
+ * fields onto the notification, per serde's `#[serde(tag = "sessionUpdate")]`
+ * on a newtype variant). `content?.type` still discriminates correctly --
+ * `'text'` is disjoint from `'content'`/`'diff'`.
+ */
+export interface SessionUpdate {
+	sessionUpdate: string;
+	content?: ContentBlockText | ToolCallContent;
+	title?: string;
+	toolCallId?: string;
+	kind?: string;
+	status?: ToolCallStatus;
+	/** `usage_update`'s flattened fields (`used` = token spend of one LLM
+	 * response, `size` = context-window occupancy, `0` while covexcode
+	 * doesn't track the context limit) -- see `turnUsage.ts` for how one
+	 * turn's updates combine. */
+	used?: number;
+	size?: number;
+	[key: string]: unknown;
+}
+
+export interface SessionNotification {
+	sessionId: string;
+	update: SessionUpdate;
+}
+
+export interface PermissionOption {
+	optionId: string;
+	name: string;
+	kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+}
+
+export interface RequestPermissionRequest {
+	sessionId: string;
+	toolCall: ToolCallUpdate;
+	options: PermissionOption[];
+}
+
+export type RequestPermissionOutcome =
+	| { outcome: 'cancelled' }
+	| { outcome: 'selected'; optionId: string }
+	| { outcome: 'partial'; newText: string };
+
+/**
+ * `session/checkInBrowser` -- not part of ACP's own schema (the spec has no
+ * concept of a browser tab), but the same shape and the same deferred-
+ * response mechanism as `session/request_permission`, mirroring
+ * `covexcode`'s own `protocol.rs::CheckInBrowserRequest`/`CheckInBrowserOutcome`
+ * exactly.
+ */
+export interface CheckInBrowserRequest {
+	sessionId: string;
+	url: string;
+}
+
+export type CheckInBrowserOutcome =
+	| { outcome: 'screenshot'; mimeType: string; data: string; axTree?: string }
+	| { outcome: 'failed'; reason: string };
+
+/**
+ * Mirrors `covexcode`'s own `tools::BrowserInteraction` exactly (internally
+ * tagged on `action`, `rename_all = "snake_case"`) -- the smallest safe
+ * first slice of the agent-driven browser loop: click and type only, no
+ * key-press support and no `Runtime.evaluate`/arbitrary JS, both
+ * deliberately deferred to a follow-up.
+ */
+export type BrowserInteraction =
+	| { action: 'click'; x: number; y: number }
+	| { action: 'type'; text: string };
+
+/**
+ * `session/interactInBrowser` -- same non-ACP-spec shape and reasoning as
+ * `session/checkInBrowser` above, mirroring `covexcode`'s own
+ * `protocol.rs::InteractInBrowserRequest`/`InteractInBrowserOutcome`
+ * exactly. Kept as a separate request/outcome pair rather than an optional
+ * field folded onto `CheckInBrowserRequest`, matching the server side's own
+ * stated convention (see `transport.rs`'s `Router` doc comment): a small,
+ * explicit type per real use.
+ */
+export interface InteractInBrowserRequest {
+	sessionId: string;
+	url: string;
+	interaction: BrowserInteraction;
+}
+
+export type InteractInBrowserOutcome =
+	| { outcome: 'screenshot'; mimeType: string; data: string; axTree?: string }
+	| { outcome: 'failed'; reason: string };
+
+/**
+ * One rollback-journal entry, mirroring `protocol.rs::ChangeEntry` exactly.
+ * `action` is the pre-planned undo for this file (`restore` = put the
+ * pre-session text back, `delete` = the file didn't exist before the
+ * session, `blocked` = covexcode only ran a shell command against it, so it
+ * has no before-state to restore and cannot be undone), and `reason` is
+ * only present when the entry is `blocked`.
+ */
+export interface ChangeEntry {
+	path: string;
+	turn: number;
+	touches: number;
+	action: 'restore' | 'delete' | 'blocked';
+	reason?: string;
+}
+
+export interface ListChangesResponse {
+	changes: ChangeEntry[];
+	shellWarning?: string;
+}
+
+interface PendingRequest {
+	resolve: (result: unknown) => void;
+	reject: (error: Error) => void;
+}
+
+type RespondToPermission = (outcome: RequestPermissionOutcome) => void;
+type RespondToBrowserCheck = (outcome: CheckInBrowserOutcome) => void;
+type RespondToBrowserInteract = (outcome: InteractInBrowserOutcome) => void;
+
+/**
+ * A minimal ACP v1 client for a `covexcode --acp` subprocess -- JSON-RPC 2.0
+ * over newline-delimited JSON on stdin/stdout, matching covexcode's own
+ * `src/transport.rs` exactly (that module is the real server side of this
+ * same protocol; see its own doc comments for the full picture, including
+ * why `session/prompt` can take a while to resolve: it blocks until the
+ * whole turn -- including any `session/request_permission` round trip back
+ * through this same client -- is actually done).
+ *
+ * Deliberately not a general-purpose JSON-RPC library: covexcode only ever
+ * speaks this one small, fixed vocabulary (`initialize` / `session/new` /
+ * `session/prompt` sent out; `session/update` / `session/request_permission`
+ * / `session/checkInBrowser` read in), so a hand-rolled dispatcher is
+ * clearer here than a generic layer neither side needs.
+ *
+ * Emits: `update` (`SessionNotification`), `permissionRequest`
+ * (`RequestPermissionRequest`, a callback to answer it),
+ * `browserCheckRequest` (`CheckInBrowserRequest`, a callback to answer it),
+ * `browserInteractRequest` (`InteractInBrowserRequest`, a callback to
+ * answer it), `stderr` (`string`), `exit` (`code`, `signal`), `spawnError`
+ * (`Error`).
+ */
+export class AcpClient extends EventEmitter {
+	private readonly child: cp.ChildProcessWithoutNullStreams;
+	private readonly pending = new Map<number, PendingRequest>();
+	private nextId = 1;
+	private closed = false;
+
+	/**
+	 * `envOverrides` is deliberately layered on top of `process.env` (this
+	 * extension host's own environment, which VS Code has already resolved
+	 * to match the user's login shell -- see `localProcessExtensionHost.ts`)
+	 * rather than replacing it, and only for the keys actually given: an
+	 * empty override here must never blank out a real `COVEXCODE_API_KEY` (or
+	 * an existing `~/.covexcode/config.toml`) the user already has working
+	 * from using the CLI directly.
+	 */
+	constructor(covexcodeCommand: string, cwd: string, envOverrides: NodeJS.ProcessEnv = {}) {
+		super();
+		this.child = cp.spawn(covexcodeCommand, ['--acp'], {
+			cwd,
+			env: { ...process.env, ...envOverrides },
+		});
+
+		const rl = readline.createInterface({ input: this.child.stdout });
+		rl.on('line', line => this.handleLine(line));
+
+		this.child.stderr.on('data', (chunk: Buffer) => this.emit('stderr', chunk.toString()));
+
+		const failEverythingPending = (error: Error) => {
+			this.closed = true;
+			for (const { reject } of this.pending.values()) {
+				reject(error);
+			}
+			this.pending.clear();
+		};
+		// A bad command (ENOENT) or a crash mid-turn both have to reach
+		// whatever's currently `await`ing a `request()` call -- otherwise
+		// that call just hangs forever instead of surfacing the real
+		// failure, which is exactly the kind of bug this session already
+		// found and fixed once on covexcode's own server side (see
+		// transport.rs's docs on why `session/prompt` can't block inline).
+		this.child.on('error', error => {
+			failEverythingPending(error);
+			this.emit('spawnError', error);
+		});
+		this.child.on('exit', (code, signal) => {
+			failEverythingPending(new Error(`covexcode --acp exited (code ${code}, signal ${signal})`));
+			this.emit('exit', code, signal);
+		});
+	}
+
+	private handleLine(line: string): void {
+		if (!line.trim()) {
+			return;
+		}
+		let value: any;
+		try {
+			value = JSON.parse(line);
+		} catch {
+			return; // malformed line -- not this client's job to crash over, mirrors transport.rs's own read loop
+		}
+		if (!isObject(value)) {
+			return; // a JSON-RPC message is always an object; anything else is not for us
+		}
+
+		if (value.method === 'session/update') {
+			// Guard the shape before emitting: `onUpdate` (extension.ts) hands
+			// `notification.update` straight to `renderUpdate`, which switches
+			// on `update.sessionUpdate` -- a `session/update` with a missing or
+			// non-object `params.update` would throw there instead of being
+			// ignored as an unrecognized notification.
+			const params = value.params;
+			const update = isObject(params) ? params.update : undefined;
+			if (isObject(update) && typeof update.sessionUpdate === 'string') {
+				this.emit('update', params as SessionNotification);
+			}
+			return;
+		}
+		if (value.method === 'session/request_permission') {
+			if (!isObject(value.params)) {
+				return;
+			}
+			const respond: RespondToPermission = outcome => {
+				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
+			};
+			this.emit('permissionRequest', value.params as RequestPermissionRequest, respond);
+			return;
+		}
+		if (value.method === 'session/checkInBrowser') {
+			if (!isObject(value.params)) {
+				return;
+			}
+			const respond: RespondToBrowserCheck = outcome => {
+				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
+			};
+			this.emit('browserCheckRequest', value.params as CheckInBrowserRequest, respond);
+			return;
+		}
+		if (value.method === 'session/interactInBrowser') {
+			if (!isObject(value.params)) {
+				return;
+			}
+			const respond: RespondToBrowserInteract = outcome => {
+				this.send({ jsonrpc: '2.0', id: value.id, result: outcome });
+			};
+			this.emit('browserInteractRequest', value.params as InteractInBrowserRequest, respond);
+			return;
+		}
+		if (typeof value.id !== 'undefined' && (value.result !== undefined || value.error !== undefined)) {
+			const pending = this.pending.get(value.id);
+			if (!pending) {
+				return;
+			}
+			this.pending.delete(value.id);
+			if (value.error) {
+				pending.reject(new Error(value.error.message ?? 'covexcode --acp returned an error'));
+			} else {
+				pending.resolve(value.result);
+			}
+			return;
+		}
+		// An unrecognized request/notification from a newer covexcode version
+		// -- ignored, same posture as `transport.rs`'s own handling of a
+		// method it doesn't know: not this client's job to crash over.
+	}
+
+	private send(message: unknown): void {
+		if (this.closed) {
+			return;
+		}
+		try {
+			this.child.stdin.write(`${JSON.stringify(message)}\n`);
+		} catch {
+			// The `error`/`exit` handlers above already fail every pending
+			// request when the child actually goes away; a write racing
+			// that teardown is not a separate failure to report twice.
+		}
+	}
+
+	/**
+	 * Returns `unknown` rather than a generic `T`: a generic executor's
+	 * `resolve` would need casting down from `(value: T | PromiseLike<T>) =>
+	 * void` to the `(result: unknown) => void` shape `pending` stores
+	 * uniformly for every in-flight request regardless of method, which is
+	 * exactly backwards for a function parameter (unsound under variance,
+	 * not just noisy). Casting the other direction -- `unknown` to a known
+	 * shape, at each call site below -- is the safe half of that cast.
+	 */
+	private request(method: string, params: unknown): Promise<unknown> {
+		if (this.closed) {
+			return Promise.reject(new Error('covexcode --acp is not running'));
+		}
+		const id = this.nextId++;
+		return new Promise<unknown>((resolve, reject) => {
+			this.pending.set(id, { resolve, reject });
+			this.send({ jsonrpc: '2.0', id, method, params });
+		});
+	}
+
+	/**
+	 * Performs the ACP handshake and returns the agent's capabilities.
+	 *
+	 * Returning the result rather than discarding it is what makes the MCP
+	 * capability gate possible: the caller needs to know whether this build
+	 * connects servers before sending any. Callers that do not care can keep
+	 * ignoring the return value, as they did when this returned `void`.
+	 */
+	async initialize(): Promise<InitializeResult> {
+		const result = (await this.request('initialize', { protocolVersion: 1 })) as InitializeResult | undefined;
+		return result ?? {};
+	}
+
+	/**
+	 * Opens a session, optionally handing the agent MCP servers to connect.
+	 *
+	 * Defaults to an empty array so existing callers are unaffected, and so the
+	 * "no MCP servers configured" case stays byte-identical on the wire to what
+	 * this client sent before MCP support existed.
+	 */
+	async newSession(cwd: string, mcpServers: readonly AcpMcpServerConfig[] = []): Promise<string> {
+		const result = (await this.request('session/new', { cwd, mcpServers })) as { sessionId: string };
+		return result.sessionId;
+	}
+
+	/**
+	 * Blocks until the whole turn -- including any permission round trip --
+	 * is done, matching ACP v1's own `session/prompt` semantics exactly (it
+	 * is not this client's place to second-guess that and time out early).
+	 *
+	 * Takes a content-block array rather than a plain string so a caller
+	 * can attach images (element-picker screenshots) alongside text --
+	 * `text` stays available as a convenience for the common no-attachment
+	 * case.
+	 *
+	 * `mode` is the optional `PromptRequest.mode` field (covexcode's own
+	 * `tools::Mode`, `snake_case`): `'plan'` runs the turn read-only until a
+	 * proposed plan is approved. Omitted for the default `normal`, so a
+	 * client that never selects Plan sends exactly what it did before.
+	 */
+	async prompt(
+		sessionId: string,
+		content: string | PromptContentBlock[],
+		mode?: 'normal' | 'plan',
+	): Promise<{ stopReason: StopReason; turn: number }> {
+		const prompt: PromptContentBlock[] = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+		const result = (await this.request('session/prompt', {
+			sessionId,
+			prompt,
+			...(mode ? { mode } : {}),
+		})) as { stopReason: StopReason; turn: number };
+		return result;
+	}
+
+	/**
+	 * `session/rollback` -- unlike `prompt`, this is answered synchronously
+	 * on covexcode's own side (local disk I/O, never an LLM round trip), so
+	 * there's nothing to stream here; the returned summary is the whole
+	 * answer.
+	 *
+	 * `options` narrows the rollback to the journal entries covexcode selects:
+	 * `files` spends only the named paths (matched by display or resolved
+	 * path), `turn` spends only files first touched in that turn, and
+	 * `restoreBeforeTurn` puts every file touched at that turn or later back
+	 * to its state just before that turn began (the per-turn form of `turn`,
+	 * which undoes a file edited across turns without half-undoing it). Omit
+	 * all three for the pre-existing all-or-nothing undo. Every field maps
+	 * straight onto `protocol.rs::RollbackRequest`.
+	 */
+	async rollback(sessionId: string, options?: { files?: string[]; turn?: number; restoreBeforeTurn?: number }): Promise<string> {
+		const result = (await this.request('session/rollback', { sessionId, ...options })) as { summary: string };
+		return result.summary;
+	}
+
+	/**
+	 * `session/list_changes` -- reads the rollback journal without spending
+	 * anything, so the UI can offer a per-file/per-turn picker before it
+	 * commits to an undo. Synchronous like `rollback` (local journal read).
+	 */
+	async listChanges(sessionId: string): Promise<ListChangesResponse> {
+		return (await this.request('session/list_changes', { sessionId })) as ListChangesResponse;
+	}
+
+	dispose(): void {
+		if (!this.closed) {
+			this.child.kill();
+		}
+	}
+}
+
+export interface ProviderDescriptor {
+	id: string;
+	label: string;
+	endpoint: string;
+	models: string[];
+}
+
+/**
+ * Whether `covexcodeCommand` actually resolves to a working binary, checked
+ * with the same cheap `--version` flag `covexcode` itself already answers for
+ * this exact purpose (see `main.rs`'s `-V`/`--version` handling, which
+ * returns before touching a terminal or a config file).
+ *
+ * This is deliberately called *before* `ensureCredentials()`'s setup wizard
+ * runs (see `extension.ts`'s `ensureReady()`) -- a fresh install with no
+ * `covexcode` CLI on PATH used to walk a user through three credential
+ * prompts before ever surfacing that the binary itself was missing, which
+ * is exactly what a real tester hit. Failing this check early skips the
+ * wizard entirely and goes straight to `describeStartupFailure`'s install
+ * instructions.
+ */
+export function probeBinaryExists(covexcodeCommand: string, args: string[] = ['--version']): Promise<boolean> {
+	return new Promise(resolve => {
+		let settled = false;
+		const settle = (ok: boolean) => {
+			if (!settled) {
+				settled = true;
+				resolve(ok);
+			}
+		};
+		try {
+			const child = cp.spawn(covexcodeCommand, args);
+			child.on('error', () => settle(false));
+			child.on('exit', code => settle(code === 0));
+			// A hung binary must not block the wizard forever -- this is a
+			// liveness probe, not a real invocation, so a few seconds is
+			// already generous.
+			setTimeout(() => {
+				if (!settled) {
+					child.kill();
+					settle(false);
+				}
+			}, 5_000);
+		} catch {
+			settle(false);
+		}
+	});
+}
+
+/**
+ * Whether this `covexcode` binary actually accepts `--acp`. `--version` is
+ * not enough: a CLI from before ACP landed still prints a version and
+ * still sits on PATH, then `covexcode --acp` exits 2 with "Unknown
+ * argument" -- which used to surface as a PATH error even though the
+ * binary was found. Stdin is left open so a real ACP server waits for
+ * JSON-RPC instead of exiting on EOF; still-running after a short wait
+ * means the flag was accepted. Exit 2 (the unknown-argument code in
+ * `main.rs`) means it was not.
+ */
+export function probeAcpSupported(covexcodeCommand: string, args: string[] = ['--acp'], timeoutMs = 1_000): Promise<boolean> {
+	return new Promise(resolve => {
+		let settled = false;
+		let stderr = '';
+		const settle = (ok: boolean) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			resolve(ok);
+		};
+		try {
+			const child = cp.spawn(covexcodeCommand, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+			child.stderr?.on('data', (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+			child.on('error', () => settle(false));
+			child.on('exit', code => {
+				if (/unknown argument/i.test(stderr) || code === 2) {
+					settle(false);
+					return;
+				}
+				// The flag was recognized. A later config/runtime failure is
+				// a different problem -- this probe only asks whether --acp
+				// exists.
+				settle(true);
+			});
+			setTimeout(() => {
+				if (!settled) {
+					child.kill();
+					settle(true);
+				}
+			}, timeoutMs);
+		} catch {
+			settle(false);
+		}
+	});
+}
+
+/**
+ * Reads `covexcode`'s own provider registry (`providers.rs`) over
+ * `covexcode --providers-json`, so the picker in `extension.ts`'s
+ * `runSetupFlow()` shows the same list `/provider` does in the TUI instead
+ * of a hand-copied table that rots independently (see the registry's own
+ * doc comment on `providers.rs` -- this is exactly how the old placeholder
+ * ended up suggesting a model retired months earlier).
+ *
+ * Only call this after `probeBinaryExists()` has already confirmed the
+ * binary is there -- a missing binary here would just be a second, less
+ * clear way to discover the same ENOENT.
+ *
+ * Bounded the same way `probeBinaryExists` is: a hung `--providers-json`
+ * (an older binary that doesn't know the flag and waits for a TUI, a
+ * stuck process) used to freeze the whole setup wizard with no way out.
+ */
+export function fetchProviders(covexcodeCommand: string, args: string[] = ['--providers-json'], timeoutMs = 5_000): Promise<ProviderDescriptor[]> {
+	return new Promise((resolve, reject) => {
+		let stdout = '';
+		let stderr = '';
+		let settled = false;
+		let child: cp.ChildProcess | undefined;
+		const settle = (fn: () => void) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearTimeout(timer);
+			fn();
+		};
+		const timer = setTimeout(() => {
+			child?.kill();
+			settle(() => reject(new Error(`covexcode --providers-json timed out after ${timeoutMs}ms`)));
+		}, timeoutMs);
+		try {
+			child = cp.spawn(covexcodeCommand, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+		} catch (error) {
+			settle(() => reject(error instanceof Error ? error : new Error(String(error))));
+			return;
+		}
+		child.stdout?.on('data', (chunk: Buffer) => {
+			stdout += chunk.toString();
+		});
+		child.stderr?.on('data', (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		child.on('error', error => settle(() => reject(error)));
+		// `close`, not `exit`: `exit` can fire before stdout is flushed into
+		// the 'data' handler, which would parse an empty string and look like
+		// invalid JSON for a binary that actually printed the registry.
+		child.on('close', code => {
+			if (code !== 0) {
+				settle(() => reject(new Error(`covexcode --providers-json exited ${code}: ${stderr.trim()}`)));
+				return;
+			}
+			try {
+				const parsed = JSON.parse(stdout) as ProviderDescriptor[];
+				settle(() => resolve(parsed));
+			} catch (error) {
+				settle(() => reject(new Error(`covexcode --providers-json did not print valid JSON: ${describeErrorLocal(error)}`)));
+			}
+		});
+	});
+}
+
+function describeErrorLocal(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+// Plain `boolean` on purpose, not a type predicate: `value`/`params` in
+// `handleLine` are `any`, and a predicate would narrow them to
+// `Record<string, unknown>`, breaking the `as` casts the dispatcher relies on.
+function isObject(value: unknown): boolean {
+	return typeof value === 'object' && value !== null;
+}

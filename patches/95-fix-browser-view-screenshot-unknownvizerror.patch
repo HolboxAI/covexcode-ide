@@ -7,7 +7,7 @@ index 15d0433..dee98ee 100644
  	}
  
 +	/**
-+	 * boxcode-ide: extracted from captureScreenshot()'s own guarded toggle
++	 * covexcode-ide: extracted from captureScreenshot()'s own guarded toggle
 +	 * below (unchanged in behavior there) so a raw CDP client capturing via
 +	 * `Page.captureScreenshot` directly -- which bypasses captureScreenshot()
 +	 * entirely, see `BrowserViewGroup.activateTarget` -- can wake a hidden
@@ -37,7 +37,7 @@ index b8a9a3d..755a0b3 100644
  			throw new Error('Can only activate BrowserView targets');
  		}
 -		// TODO@kycutler
-+		// boxcode-ide: a view opened in the background (e.g. an extension's
++		// covexcode-ide: a view opened in the background (e.g. an extension's
 +		// `vscode.window.openBrowserTab(url, { background: true })`) can
 +		// have never produced a single composited frame, which makes a
 +		// later raw CDP `Page.captureScreenshot` over this same target fail

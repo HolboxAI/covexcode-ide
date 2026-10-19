@@ -1,0 +1,71 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) HolboxAI. Licensed under the MIT License.
+ *--------------------------------------------------------------------------------------------*/
+
+/**
+ * No `vscode` import on purpose (see `cdpClient.ts`'s own doc comment for
+ * the same reasoning) -- this stays plain Node so `startupFailure.test.ts`
+ * can exercise it directly instead of needing a real extension host.
+ */
+export function describeError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A fresh covexcode-ide install has no `covexcode` CLI bundled with it -- it's a
+ * separate install (see README.md's own "Install" section, which names the
+ * same two commands as `installCommand` below) that `ensureReady()` (in
+ * `extension.ts`) probes for before ever showing the credential wizard --
+ * see `probeBinaryExists()`. On a machine that's never run that install step
+ * at all, `cp.spawn`
+ * in `acpClient.ts` fails with a plain Node `ENOENT`, which used to surface
+ * as generic prose ("Make sure `covexcode` is installed and on your PATH")
+ * with no actual next step. This gives the one thing that actually gets a
+ * first-time tester unblocked: the real, copy-pasteable install command
+ * from covexcode.com, picked by platform.
+ */
+/**
+ * Thrown when a `covexcode` binary exists and answers `--version`, but
+ * `--acp` is an unknown flag (exit 2 in `main.rs`). That is the first-run
+ * failure a user with an older CLI hits -- the binary is on PATH, chat
+ * still cannot start.
+ */
+export class AcpUnsupportedError extends Error {
+	constructor() {
+		super('covexcode --acp is not supported by this CLI');
+		this.name = 'AcpUnsupportedError';
+	}
+}
+
+export function describeStartupFailure(error: unknown, platform: NodeJS.Platform): string {
+	const isMissingBinary = error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT';
+	if (isAcpUnsupported(error)) {
+		return (
+			"Your `covexcode` CLI is installed, but it's too old for this IDE -- chat needs `covexcode --acp`, " +
+			"which this build doesn't have. Upgrade, then send your message again:\n\n```\ncovexcode --upgrade\n```"
+		);
+	}
+	if (!isMissingBinary) {
+		return `Couldn't start \`covexcode --acp\` (${describeError(error)}). Make sure \`covexcode\` is installed and on your PATH.`;
+	}
+	const installCommand =
+		platform === 'win32'
+			? 'irm https://covexcode.com/install.ps1 | iex'
+			: 'curl -fsSL https://covexcode.com/install.sh | bash';
+	return (
+		"The `covexcode` CLI isn't installed yet -- covexcode IDE and the `covexcode` command are separate installs. " +
+		`Run this in a terminal, then send your message again:\n\n\`\`\`\n${installCommand}\n\`\`\``
+	);
+}
+
+function isAcpUnsupported(error: unknown): boolean {
+	if (error instanceof AcpUnsupportedError) {
+		return true;
+	}
+	const message = describeError(error);
+	// Anchor the exit-2 fallback to the `covexcode --acp` spawn specifically:
+	// exit code 2 only means "unknown argument" when it was `covexcode --acp`
+	// that exited 2 -- the same "exited (code 2)" phrasing from any other
+	// subprocess must not read as "your covexcode CLI is too old".
+	return /unknown argument:\s*--acp/i.test(message) || /covexcode --acp exited \(code 2\b/.test(message);
+}

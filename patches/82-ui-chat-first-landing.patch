@@ -27,7 +27,7 @@ index 48ecad9a..56ec33e7 100644
 -		if (this.chatEntitlementService.sentiment.hidden) {
 -			return;
 -		}
-+		// boxcode-ide: no longer gated on chatEntitlementService.sentiment.hidden.
++		// covexcode-ide: no longer gated on chatEntitlementService.sentiment.hidden.
 +		// That gate exists to respect Microsoft Copilot's own entitlement/consent
 +		// flow (declined it, on a managed plan that blocks it, etc) - this fork
 +		// has no Copilot at all (its adapter code is deleted by

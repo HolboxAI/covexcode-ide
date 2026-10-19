@@ -24,7 +24,7 @@ index 8e94d53..bab2614 100644
  	}
  
 +	/**
-+	 * boxcode-ide: the landing page is meant to read as a clean, dedicated
++	 * covexcode-ide: the landing page is meant to read as a clean, dedicated
 +	 * first-run screen, not a full IDE with an empty sidebar/toolbar already
 +	 * showing -- the activity bar (file/search/git/debug/extensions icons)
 +	 * and the title bar's right-side icon cluster (editor-layout-split
@@ -38,7 +38,7 @@ index 8e94d53..bab2614 100644
 +	override setEditorVisible(visible: boolean): void {
 +		super.setEditorVisible(visible);
 +		this.layoutService.setPartHidden(visible, Parts.ACTIVITYBAR_PART);
-+		this.layoutService.getContainer(mainWindow).classList.toggle('boxcode-chrome-minimal', visible);
++		this.layoutService.getContainer(mainWindow).classList.toggle('covexcode-chrome-minimal', visible);
 +	}
 +
  	private async revealMaximizedChat(): Promise<void> {
@@ -54,7 +54,7 @@ index 1ce3328..bdd7019 100644
  }
 +
 +/*
-+ * boxcode-ide: hides the title bar's right-side icon cluster (editor
++ * covexcode-ide: hides the title bar's right-side icon cluster (editor
 + * layout/split controls, the Integrated Browser toggle) while this welcome
 + * page is the visible editor -- toggled from agentSessionsWelcome.ts's own
 + * setEditorVisible() override, the same lifecycle hook that hides the
@@ -66,6 +66,6 @@ index 1ce3328..bdd7019 100644
 + * indicator) or .window-controls-container (the actual window
 + * minimize/maximize/close buttons), neither of which this is about.
 + */
-+.monaco-workbench.boxcode-chrome-minimal .titlebar-right .action-toolbar-container {
++.monaco-workbench.covexcode-chrome-minimal .titlebar-right .action-toolbar-container {
 +	display: none;
 +}

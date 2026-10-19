@@ -15,7 +15,7 @@ index 888bd75d..8ec0ab73 100644
  const WELCOME_CHAT_INPUT_MAX_HEIGHT_OVERRIDE = WELCOME_CHAT_INPUT_LAYOUT_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT;
  
 +/**
-+ * boxcode-ide: example prompts seeded under the welcome page's chat input.
++ * covexcode-ide: example prompts seeded under the welcome page's chat input.
 + *
 + * A bare prompt box has no more discoverability affordance than a search field:
 + * it tells a first-run user nothing about what the agent can actually do. The
@@ -98,7 +98,7 @@ index 888bd75d..8ec0ab73 100644
  		const chatSection = append(this.contentContainer, $('.agentSessionsWelcome-chatSection'));
  		this.buildChatWidget(chatSection);
  
-+		// boxcode-ide: seeded example prompts directly under the input, so the
++		// covexcode-ide: seeded example prompts directly under the input, so the
 +		// first-run user is shown what to ask for instead of a blank box.
 +		this.buildExamplePrompts(chatSection);
 +
@@ -110,7 +110,7 @@ index 888bd75d..8ec0ab73 100644
  	}
  
 +	/**
-+	 * boxcode-ide: render the example prompt chips under the chat input.
++	 * covexcode-ide: render the example prompt chips under the chat input.
 +	 *
 +	 * Clicking a chip fills the input and focuses it - it deliberately does not
 +	 * submit, so the prompt stays editable and the user can add their own detail
@@ -156,7 +156,7 @@ index e238e6f1..1ce3328d 100644
  }
  
 +/*
-+ * boxcode-ide: example prompt chips rendered under the welcome chat input.
++ * covexcode-ide: example prompt chips rendered under the welcome chat input.
 + * The chip look above already existed in this stylesheet with no renderer
 + * behind it; these rules only adapt it to a <button> in the chat section
 + * (buttons don't inherit the workbench font) and align it left with the

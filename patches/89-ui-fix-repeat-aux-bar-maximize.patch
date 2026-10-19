@@ -20,7 +20,7 @@ index f2424e3..8e94d53 100644
 -		const chatViewLocation = this.viewDescriptorService.getViewLocationById(ChatViewId);
 -		if (chatViewLocation === ViewContainerLocation.AuxiliaryBar) {
 -			this.layoutService.setAuxiliaryBarMaximized(true);
-+		// boxcode-ide: only maximize on the actual landing-page -> chat
++		// covexcode-ide: only maximize on the actual landing-page -> chat
 +		// transition (this call is the one that closed the welcome editor).
 +		// This function is also the body of openSessionInChat, which is
 +		// wired to onDidSubmitRequest and therefore re-runs on *every*

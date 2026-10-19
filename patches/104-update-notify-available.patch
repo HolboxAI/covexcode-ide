@@ -56,7 +56,7 @@ diff --git a/src/vs/workbench/contrib/update/browser/update.ts b/src/vs/workbenc
 +		this.storageService.store(key, version, StorageScope.APPLICATION, StorageTarget.MACHINE);
 +		this.notificationService.prompt(
 +			Severity.Info,
-+			nls.localize('boxcodeUpdateAvailable', "A new version of {0} is available ({1}). Update now?", this.productService.nameLong, version),
++			nls.localize('covexcodeUpdateAvailable', "A new version of {0} is available ({1}). Update now?", this.productService.nameLong, version),
 +			[{
 +				label: nls.localize('updateNow', "Update"),
 +				run: () => this.updateService.downloadUpdate(true)
