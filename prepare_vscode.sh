@@ -9,9 +9,9 @@ else
   cp -rp src/stable/* vscode/
 fi
 
-# boxcode-ide has not made a repo-wide license decision yet (see README.md
+# covexcode-ide has not made a repo-wide license decision yet (see README.md
 # "Open decisions" — deliberately not assumed by this build tooling). Only
-# overwrite upstream Code-OSS's own LICENSE.txt if boxcode-ide has since
+# overwrite upstream Code-OSS's own LICENSE.txt if covexcode-ide has since
 # added its own root LICENSE file; otherwise leave Microsoft's original
 # MIT LICENSE.txt from the microsoft/vscode checkout in place rather than
 # fail the build or silently invent licensing text.
@@ -80,59 +80,59 @@ if [[ "${DISABLE_UPDATE}" != "yes" ]]; then
 fi
 
 if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-  setpath "product" "nameShort" "Boxcode - Insiders"
-  setpath "product" "nameLong" "Boxcode IDE - Insiders"
-  setpath "product" "applicationName" "boxcode-ide-insiders"
-  setpath "product" "dataFolderName" ".boxcode-insiders"
-  setpath "product" "linuxIconName" "boxcode-ide-insiders"
+  setpath "product" "nameShort" "Covexcode - Insiders"
+  setpath "product" "nameLong" "Covexcode IDE - Insiders"
+  setpath "product" "applicationName" "covexcode-ide-insiders"
+  setpath "product" "dataFolderName" ".covexcode-insiders"
+  setpath "product" "linuxIconName" "covexcode-ide-insiders"
   setpath "product" "quality" "insider"
-  setpath "product" "urlProtocol" "boxcode-insiders"
-  setpath "product" "serverApplicationName" "boxcode-ide-server-insiders"
-  setpath "product" "serverDataFolderName" ".boxcode-server-insiders"
-  setpath "product" "darwinBundleIdentifier" "ai.holbox.BoxcodeInsiders"
-  setpath "product" "win32AppUserModelId" "HolboxAI.BoxcodeInsiders"
-  setpath "product" "win32DirName" "Boxcode Insiders"
-  setpath "product" "win32MutexName" "boxcodeinsiders"
-  setpath "product" "win32NameVersion" "Boxcode Insiders"
-  setpath "product" "win32RegValueName" "BoxcodeInsiders"
-  setpath "product" "win32ShellNameShort" "Boxcode Insiders"
+  setpath "product" "urlProtocol" "covexcode-insiders"
+  setpath "product" "serverApplicationName" "covexcode-ide-server-insiders"
+  setpath "product" "serverDataFolderName" ".covexcode-server-insiders"
+  setpath "product" "darwinBundleIdentifier" "com.covexcode.CovexcodeInsiders"
+  setpath "product" "win32AppUserModelId" "Covexcode.CovexcodeInsiders"
+  setpath "product" "win32DirName" "Covexcode Insiders"
+  setpath "product" "win32MutexName" "covexcodeinsiders"
+  setpath "product" "win32NameVersion" "Covexcode Insiders"
+  setpath "product" "win32RegValueName" "CovexcodeInsiders"
+  setpath "product" "win32ShellNameShort" "Covexcode Insiders"
   setpath "product" "win32AppId" "{{1ED69A3A-3504-4067-85F9-979AA8F0C8E0}"
   setpath "product" "win32x64AppId" "{{522B6135-0C01-457B-BB60-2C11F06215FA}"
   setpath "product" "win32arm64AppId" "{{A1BB72B4-F3E8-4280-B5F1-997ECB9CDBE1}"
   setpath "product" "win32UserAppId" "{{7D8C645F-6EBD-4E96-BD2B-4B73C49F7FBB}"
   setpath "product" "win32x64UserAppId" "{{EDC5C6B5-8097-425E-BF19-2C8A93935246}"
   setpath "product" "win32arm64UserAppId" "{{0323923F-6B49-4589-BFB4-77C984B1F291}"
-  setpath "product" "tunnelApplicationName" "boxcode-ide-insiders-tunnel"
-  setpath "product" "win32TunnelServiceMutex" "boxcodeinsiders-tunnelservice"
-  setpath "product" "win32TunnelMutex" "boxcodeinsiders-tunnel"
+  setpath "product" "tunnelApplicationName" "covexcode-ide-insiders-tunnel"
+  setpath "product" "win32TunnelServiceMutex" "covexcodeinsiders-tunnelservice"
+  setpath "product" "win32TunnelMutex" "covexcodeinsiders-tunnel"
   setpath "product" "win32ContextMenu.x64.clsid" "BF823ADB-EB61-47B7-9E3E-78947B4522BB"
   setpath "product" "win32ContextMenu.arm64.clsid" "E458122F-D39E-4F72-A570-2F91CF615953"
 else
-  setpath "product" "nameShort" "Boxcode"
-  setpath "product" "nameLong" "Boxcode IDE"
-  setpath "product" "applicationName" "boxcode-ide"
-  setpath "product" "dataFolderName" ".boxcode-ide"
-  setpath "product" "linuxIconName" "boxcode-ide"
+  setpath "product" "nameShort" "Covexcode"
+  setpath "product" "nameLong" "Covexcode IDE"
+  setpath "product" "applicationName" "covexcode-ide"
+  setpath "product" "dataFolderName" ".covexcode-ide"
+  setpath "product" "linuxIconName" "covexcode-ide"
   setpath "product" "quality" "stable"
-  setpath "product" "urlProtocol" "boxcode"
-  setpath "product" "serverApplicationName" "boxcode-ide-server"
-  setpath "product" "serverDataFolderName" ".boxcode-server"
-  setpath "product" "darwinBundleIdentifier" "ai.holbox.Boxcode"
-  setpath "product" "win32AppUserModelId" "HolboxAI.Boxcode"
-  setpath "product" "win32DirName" "Boxcode"
-  setpath "product" "win32MutexName" "boxcode"
-  setpath "product" "win32NameVersion" "Boxcode"
-  setpath "product" "win32RegValueName" "Boxcode"
-  setpath "product" "win32ShellNameShort" "Boxcode"
+  setpath "product" "urlProtocol" "covexcode"
+  setpath "product" "serverApplicationName" "covexcode-ide-server"
+  setpath "product" "serverDataFolderName" ".covexcode-server"
+  setpath "product" "darwinBundleIdentifier" "com.covexcode.Covexcode"
+  setpath "product" "win32AppUserModelId" "Covexcode.Covexcode"
+  setpath "product" "win32DirName" "Covexcode"
+  setpath "product" "win32MutexName" "covexcode"
+  setpath "product" "win32NameVersion" "Covexcode"
+  setpath "product" "win32RegValueName" "Covexcode"
+  setpath "product" "win32ShellNameShort" "Covexcode"
   setpath "product" "win32AppId" "{{1BB64F8C-D6A1-4012-8856-19CBC142E7CE}"
   setpath "product" "win32x64AppId" "{{0A1CD48C-3BFA-4D4F-BFC8-3E432AC46414}"
   setpath "product" "win32arm64AppId" "{{6E25C63C-5501-42FC-BE37-FEFC69DA318C}"
   setpath "product" "win32UserAppId" "{{D42402AC-1340-4084-BAC3-387909BB4468}"
   setpath "product" "win32x64UserAppId" "{{FC6C829C-A360-4320-B78E-88B5974FE5D8}"
   setpath "product" "win32arm64UserAppId" "{{BFFCB1F9-FEF4-4E3B-960A-6A214E2797EC}"
-  setpath "product" "tunnelApplicationName" "boxcode-ide-tunnel"
-  setpath "product" "win32TunnelServiceMutex" "boxcode-tunnelservice"
-  setpath "product" "win32TunnelMutex" "boxcode-tunnel"
+  setpath "product" "tunnelApplicationName" "covexcode-ide-tunnel"
+  setpath "product" "win32TunnelServiceMutex" "covexcode-tunnelservice"
+  setpath "product" "win32TunnelMutex" "covexcode-tunnel"
   setpath "product" "win32ContextMenu.x64.clsid" "153DFF8C-5B51-4F05-8D58-73C44F595C20"
   setpath "product" "win32ContextMenu.arm64.clsid" "B0C0086C-1EBE-41D7-9145-AD3EF1D0F1F4"
 fi
@@ -163,7 +163,7 @@ if [[ "${DISABLE_UPDATE}" == "yes" ]] && [[ -f ../patches/00-update-disable.patc
   mv ../patches/00-update-disable.patch.yet ../patches/00-update-disable.patch
 fi
 
-# boxcode-ide: a plain glob (`../patches/*.patch`) expands in lexicographic
+# covexcode-ide: a plain glob (`../patches/*.patch`) expands in lexicographic
 # (ASCII string) order, not numeric order -- "100-foo.patch" sorts between
 # "10-bar.patch" and "11-baz.patch" (compare char-by-char: "-" (0x2D) sorts
 # before "0" (0x30)), so a 3-digit patch would apply before the 2-digit
@@ -285,11 +285,11 @@ replace 's|Microsoft Corporation|HolboxAI|' package.json
 cp resources/server/manifest.json{,.bak}
 
 if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-  setpath "resources/server/manifest" "name" "Boxcode - Insiders"
-  setpath "resources/server/manifest" "short_name" "Boxcode - Insiders"
+  setpath "resources/server/manifest" "name" "Covexcode - Insiders"
+  setpath "resources/server/manifest" "short_name" "Covexcode - Insiders"
 else
-  setpath "resources/server/manifest" "name" "Boxcode"
-  setpath "resources/server/manifest" "short_name" "Boxcode"
+  setpath "resources/server/manifest" "name" "Covexcode"
+  setpath "resources/server/manifest" "short_name" "Covexcode"
 fi
 
 # announcements
@@ -303,36 +303,36 @@ replace 's|([0-9]) Microsoft|\1 HolboxAI|' build/lib/electron.ts
 if [[ "${OS_NAME}" == "linux" ]]; then
   # microsoft adds their apt repo to sources
   # unless the app name is code-oss
-  # as we are renaming the application to boxcode
+  # as we are renaming the application to covexcode
   # we need to edit a line in the post install template
   if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-    sed -i "s/code-oss/boxcode-ide-insiders/" resources/linux/debian/postinst.template
+    sed -i "s/code-oss/covexcode-ide-insiders/" resources/linux/debian/postinst.template
   else
-    sed -i "s/code-oss/boxcode-ide/" resources/linux/debian/postinst.template
+    sed -i "s/code-oss/covexcode-ide/" resources/linux/debian/postinst.template
   fi
 
   # fix the packages metadata
   # code.appdata.xml
-  sed -i 's|Visual Studio Code|Boxcode|g' resources/linux/code.appdata.xml
+  sed -i 's|Visual Studio Code|Covexcode|g' resources/linux/code.appdata.xml
   sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/boxcode-ide#readme|' resources/linux/code.appdata.xml
   sed -i 's|https://code.visualstudio.com/home/home-screenshot-linux-lg.png||' resources/linux/code.appdata.xml
   sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/boxcode-ide|' resources/linux/code.appdata.xml
 
   # control.template
   sed -i 's|Microsoft Corporation <vscode-linux@microsoft.com>|HolboxAI https://github.com/HolboxAI/boxcode-ide/graphs/contributors|'  resources/linux/debian/control.template
-  sed -i 's|Visual Studio Code|Boxcode|g' resources/linux/debian/control.template
+  sed -i 's|Visual Studio Code|Covexcode|g' resources/linux/debian/control.template
   sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/boxcode-ide#readme|' resources/linux/debian/control.template
   sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/boxcode-ide|' resources/linux/debian/control.template
 
   # code.spec.template
   sed -i 's|Microsoft Corporation|HolboxAI|' resources/linux/rpm/code.spec.template
   sed -i 's|Visual Studio Code Team <vscode-linux@microsoft.com>|HolboxAI https://github.com/HolboxAI/boxcode-ide/graphs/contributors|' resources/linux/rpm/code.spec.template
-  sed -i 's|Visual Studio Code|Boxcode|' resources/linux/rpm/code.spec.template
+  sed -i 's|Visual Studio Code|Covexcode|' resources/linux/rpm/code.spec.template
   sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/boxcode-ide#readme|' resources/linux/rpm/code.spec.template
   sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/boxcode-ide|' resources/linux/rpm/code.spec.template
 
   # snapcraft.yaml
-  sed -i 's|Visual Studio Code|Boxcode|' resources/linux/rpm/code.spec.template
+  sed -i 's|Visual Studio Code|Covexcode|' resources/linux/rpm/code.spec.template
 elif [[ "${OS_NAME}" == "windows" ]]; then
   # code.iss
   sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/boxcode-ide|' build/win32/code.iss
