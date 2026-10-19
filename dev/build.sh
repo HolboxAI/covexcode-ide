@@ -5,9 +5,9 @@
 # to run with Bash: "C:\Program Files\Git\bin\bash.exe" ./dev/build.sh
 ###
 
-export APP_NAME="Boxcode"
+export APP_NAME="Covexcode"
 export ASSETS_REPOSITORY="HolboxAI/boxcode-ide"
-export BINARY_NAME="boxcode-ide"
+export BINARY_NAME="covexcode-ide"
 export CI_BUILD="no"
 export DISABLE_UPDATE="yes"
 export GH_REPO_PATH="HolboxAI/boxcode-ide"

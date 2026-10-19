@@ -5,9 +5,9 @@
 	<project_license>@@LICENSE@@</project_license>
 	<name>@@NAME_LONG@@</name>
 	<url type="homepage">https://github.com/HolboxAI/boxcode-ide</url>
-	<summary>Boxcode. Code editing for frontend engineers.</summary>
+	<summary>Covexcode. Code editing for frontend engineers.</summary>
 	<description>
-		<p>Boxcode is a HolboxAI binary distribution of the open-source Code-OSS editor, distributed via Open VSX instead of the Microsoft Marketplace.</p>
+		<p>Covexcode is a HolboxAI binary distribution of the open-source Code-OSS editor, distributed via Open VSX instead of the Microsoft Marketplace.</p>
 	</description>
 	<screenshots>
 	</screenshots>

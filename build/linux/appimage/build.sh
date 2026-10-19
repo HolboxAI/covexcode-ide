@@ -23,9 +23,9 @@ if [[ "${VSCODE_ARCH}" == "x64" ]]; then
 
   # add update's url
   if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-    sed -i 's/generate_type2_appimage/generate_type2_appimage -u "gh-releases-zsync|HolboxAI|boxcode-ide-insiders|latest|*.AppImage.zsync"/' pkg2appimage.AppDir/AppRun
+    sed -i 's/generate_type2_appimage/generate_type2_appimage -u "gh-releases-zsync|HolboxAI|covexcode-ide-insiders|latest|*.AppImage.zsync"/' pkg2appimage.AppDir/AppRun
   else
-    sed -i 's/generate_type2_appimage/generate_type2_appimage -u "gh-releases-zsync|HolboxAI|boxcode-ide|latest|*.AppImage.zsync"/' pkg2appimage.AppDir/AppRun
+    sed -i 's/generate_type2_appimage/generate_type2_appimage -u "gh-releases-zsync|HolboxAI|covexcode-ide|latest|*.AppImage.zsync"/' pkg2appimage.AppDir/AppRun
   fi
   # remove check so build in docker can succeed
   sed -i 's/grep docker/# grep docker/' pkg2appimage.AppDir/usr/share/pkg2appimage/functions.sh
@@ -33,7 +33,7 @@ if [[ "${VSCODE_ARCH}" == "x64" ]]; then
   APP_NAME_LC="$( echo "${APP_NAME}" | awk '{print tolower($0)}' )"
 
   # The .deb names its desktop icon after product.json's linuxIconName
-  # ("boxcode-ide"), not APP_NAME_LC ("boxcode") -- see prepare_vscode.sh.
+  # ("covexcode-ide"), not APP_NAME_LC ("covexcode") -- see prepare_vscode.sh.
   # Substituting the icon from APP_NAME_LC produced a path the .deb never
   # installs, so the recipe's `cp usr/share/pixmaps/<icon>.png` aborted the
   # whole prepare_assets run and no .deb/.rpm/AppImage ever got uploaded.

@@ -20,7 +20,7 @@ fi
 GITHUB_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN}}"
 REPO="${GITHUB_REPOSITORY:-HolboxAI/boxcode-ide}"
 FEED_BRANCH="${UPDATE_FEED_BRANCH:-update-feed}"
-APP_NAME="${APP_NAME:-Boxcode}"
+APP_NAME="${APP_NAME:-Covexcode}"
 OS_NAME="${OS_NAME:-osx}"
 GH_HOST="${GH_HOST:-github.com}"
 

@@ -9,4 +9,4 @@ NoDisplay=true
 StartupNotify=true
 Categories=Utility;TextEditor;Development;IDE;
 MimeType=x-scheme-handler/@@URLPROTOCOL@@;
-Keywords=boxcode;boxcode-ide;vscode;
+Keywords=covexcode;covexcode-ide;vscode;

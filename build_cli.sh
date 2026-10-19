@@ -25,8 +25,8 @@ TUNNEL_APPLICATION_NAME="$( node -p "require(\"../product.json\").tunnelApplicat
 # after nameLong, not nameShort -- e.g. real VS Code ships
 # "Visual Studio Code.app", not "Code.app". VSCodium's own nameShort and
 # nameLong happen to be identical, which is why their build_cli.sh got away
-# with nameShort here; boxcode-ide's nameShort ("Boxcode") and nameLong
-# ("Boxcode IDE") differ, so this must reference nameLong to find the
+# with nameShort here; covexcode-ide's nameShort ("Covexcode") and nameLong
+# ("Covexcode IDE") differ, so this must reference nameLong to find the
 # bundle that vscode-darwin-*-min-packing actually produced.
 NAME_LONG="$( node -p "require(\"../product.json\").nameLong" )"
 

@@ -4,16 +4,16 @@
 # install with `flatpak install --user`.
 #
 # App id matches prepare_vscode.sh's darwinBundleIdentifier.
-id: ai.holbox.Boxcode
+id: com.covexcode.Covexcode
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
-command: boxcode-ide
+command: covexcode-ide
 separate-locales: false
 finish-args:
   # Coding IDE: open any folder, talk to the host CLI, and run tools.
   # --filesystem=host is the same trade-off the VS Code / VSCodium
-  # Flatpaks make; without it chat cannot see the project or ~/.boxcode.
+  # Flatpaks make; without it chat cannot see the project or ~/.covexcode.
   - --share=ipc
   - --share=network
   - --socket=wayland
@@ -25,7 +25,7 @@ finish-args:
   - --filesystem=host
   - --filesystem=xdg-run/gnupg:ro
   - --filesystem=xdg-config/kdeglobals:ro
-  - --persist=.boxcode-ide
+  - --persist=.covexcode-ide
   - --talk-name=org.freedesktop.secrets
   - --talk-name=org.freedesktop.Flatpak
   - --talk-name=org.kde.kwalletd5
@@ -38,18 +38,18 @@ cleanup:
   - /share/gtk-doc
   - '*.la'
 modules:
-  - name: boxcode-ide
+  - name: covexcode-ide
     buildsystem: simple
     build-commands:
       - bash apply.sh
     sources:
       - type: file
-        path: boxcode.deb
+        path: covexcode.deb
       - type: file
         path: apply.sh
       - type: file
-        path: boxcode-ide.sh
+        path: covexcode-ide.sh
       - type: file
         path: code.svg
       - type: file
-        path: ai.holbox.Boxcode.metainfo.xml
+        path: com.covexcode.Covexcode.metainfo.xml
