@@ -196,7 +196,7 @@ Produces a sideloadable bundle (`assets/Covexcode-x86_64.flatpak`) from the amd6
 
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user assets/Covexcode-x86_64.flatpak
-flatpak run ai.holbox.Covexcode
+flatpak run com.covexcode.Covexcode
 ```
 
 CI does the same wrap when `CI - Build - Linux` is dispatched with `generate_assets: true`. Download the `flatpak-x86_64` artifact from that run. x86_64 only for now, same as AppImage.
