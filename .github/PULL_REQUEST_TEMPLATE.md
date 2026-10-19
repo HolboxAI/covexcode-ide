@@ -12,4 +12,4 @@
 
 ## Agent logic check
 
-<!-- Confirm this PR doesn't duplicate something the Rust daemon (HolboxAI/boxcode) already does. -->
+<!-- Confirm this PR doesn't duplicate something the Rust daemon (HolboxAI/covexcode) already does. -->
