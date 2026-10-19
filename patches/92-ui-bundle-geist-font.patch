@@ -6,7 +6,7 @@ index c6dc23c..1a415c4 100644
  
  import './codicon/codicon.css';
  import './codicon/codicon-modifiers.css';
-+// boxcode-ide: piggybacking on this file's own always-loaded wiring (every
++// covexcode-ide: piggybacking on this file's own always-loaded wiring (every
 +// codiconStyles.ts import site) rather than adding a new one, purely to
 +// keep this a one-line change -- see ../fonts/geist/geist.css for the
 +// @font-face itself and workbench.contribution.ts for where it's set as
@@ -20,7 +20,7 @@ index caa2021..91c36ba 100644
  				],
  				'included': isMacintosh
  			},
-+			// boxcode-ide: defaults for the six font-family settings below
++			// covexcode-ide: defaults for the six font-family settings below
 +			// point at Geist (bundled -- see src/vs/base/browser/ui/fonts/geist)
 +			// with a real system-font fallback stack, instead of upstream's own
 +			// empty default (workbench.experimental.fontFamily) or '' (the

@@ -5,11 +5,11 @@ index 59d9b27..ca2d8dd 100644
 @@ -44,7 +44,9 @@ export namespace ThemeSettingDefaults {
  	// instead, which is a violet accent layered on Dark Modern's base via
  	// that theme's own `include`, not a from-scratch palette.
- 	export const COLOR_THEME_DARK = 'Boxcode Dark';
+ 	export const COLOR_THEME_DARK = 'Covexcode Dark';
 -	export const COLOR_THEME_LIGHT = 'Light 2026';
-+	// boxcode-ide: same rationale as COLOR_THEME_DARK above -- point new
-+	// installs at boxcode's own light theme instead of upstream's 'Light 2026'.
-+	export const COLOR_THEME_LIGHT = 'Boxcode Light';
++	// covexcode-ide: same rationale as COLOR_THEME_DARK above -- point new
++	// installs at covexcode's own light theme instead of upstream's 'Light 2026'.
++	export const COLOR_THEME_LIGHT = 'Covexcode Light';
  	export const COLOR_THEME_HC_DARK = 'Default High Contrast';
  	export const COLOR_THEME_HC_LIGHT = 'Default High Contrast Light';
  
@@ -19,7 +19,7 @@ index 59d9b27..ca2d8dd 100644
  // need it there.
 +// dropdown.background/editorWidget.background/input.background are also
 +// nudged a few points toward violet from upstream's flat grays, mirroring the same
-+// three keys in boxcode-dark.json -- a slight hue bias toward the accent is
++// three keys in covexcode-dark.json -- a slight hue bias toward the accent is
 +// what actually reads as "elevated surface" rather than the accent color
 +// itself.
  export const COLOR_THEME_DARK_INITIAL_COLORS = {
@@ -53,8 +53,8 @@ index 59d9b27..ca2d8dd 100644
  	'widget.border': '#313131'
  };
  
-+// boxcode-ide: same treatment as COLOR_THEME_DARK_INITIAL_COLORS above,
-+// mirroring extensions/boxcode-theme/themes/boxcode-light.json's own colors
++// covexcode-ide: same treatment as COLOR_THEME_DARK_INITIAL_COLORS above,
++// mirroring extensions/covexcode-theme/themes/covexcode-light.json's own colors
 +// block -- textLink.foreground/activeForeground use a darker violet-800
 +// (#5B21B6) rather than the brand's usual #7C3AED, since link text sits
 +// directly on a near-white background and needs the extra contrast; every

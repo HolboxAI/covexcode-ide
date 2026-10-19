@@ -1,0 +1,37 @@
+{
+  "name": "covexcode-theme",
+  "displayName": "Covexcode Theme",
+  "description": "covexcode's own color themes -- a violet accent on top of Dark Modern and Light Modern's bases.",
+  "version": "1.0.0",
+  "publisher": "covexcode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.126.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "id": "Covexcode Dark",
+        "label": "Covexcode Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/covexcode-dark.json"
+      },
+      {
+        "id": "Covexcode Light",
+        "label": "Covexcode Light",
+        "uiTheme": "vs",
+        "path": "./themes/covexcode-light.json"
+      }
+    ],
+    "configurationDefaults": {
+      "window.autoDetectColorScheme": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HolboxAI/boxcode-ide.git"
+  }
+}

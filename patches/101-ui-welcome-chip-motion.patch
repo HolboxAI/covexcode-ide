@@ -7,12 +7,12 @@ index c2556cf..fc951ab 100644
  }
  
 +/*
-+ * boxcode-ide: entrance + hover motion for the welcome chat input's example
++ * covexcode-ide: entrance + hover motion for the welcome chat input's example
 + * prompt chips. A one-shot mount animation (not a loop), so there's nothing
 + * to pause on visibility change -- unlike the title-bar/activity-bar
 + * chrome-hiding above, this needs no hook into setEditorVisible().
 + */
-+@keyframes boxcodeChipEnter {
++@keyframes covexcodeChipEnter {
 +	from {
 +		opacity: 0;
 +		transform: translateY(4px);
@@ -24,7 +24,7 @@ index c2556cf..fc951ab 100644
 +}
 +
 +.agentSessionsWelcome-chatSection .agentSessionsWelcome-suggestedPrompt {
-+	animation: boxcodeChipEnter 200ms ease-out backwards;
++	animation: covexcodeChipEnter 200ms ease-out backwards;
 +	transition: transform 120ms ease-out, background-color 120ms ease-out;
 +}
 +

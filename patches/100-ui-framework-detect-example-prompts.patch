@@ -17,7 +17,7 @@ index 0000000..0000000 100644
 +type WelcomeFrameworkId = 'next' | 'nuxt' | 'astro' | 'react' | 'vue' | 'svelte' | 'angular' | 'node';
 +
 +/**
-+ * boxcode-ide: framework-specific overrides of OPEN_WORKSPACE_EXAMPLE_PROMPTS.
++ * covexcode-ide: framework-specific overrides of OPEN_WORKSPACE_EXAMPLE_PROMPTS.
 + * Each set keeps the two prompts above that hold regardless of framework
 + * (Tailwind, responsive) and swaps only the framework-shaped ones, so a
 + * detected project gets chips that name its actual stack instead of the
@@ -153,7 +153,7 @@ index 0000000..0000000 100644
  		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
 @@ -339,7 +467,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
  
- 		// boxcode-ide: seeded example prompts directly under the input, so the
+ 		// covexcode-ide: seeded example prompts directly under the input, so the
  		// first-run user is shown what to ask for instead of a blank box.
 -		this.buildExamplePrompts(chatSection);
 +		await this.buildExamplePrompts(chatSection);
@@ -165,7 +165,7 @@ index 0000000..0000000 100644
  	}
  
 +	/**
-+	 * boxcode-ide: best-effort framework detection for the open-workspace
++	 * covexcode-ide: best-effort framework detection for the open-workspace
 +	 * example prompts. Keep this order in lockstep with frameworkDetector.ts
 +	 * (the agent overlay) -- that module cannot be imported from core, and a
 +	 * Vite+React app used to show Vite chips here while the status bar said
@@ -215,7 +215,7 @@ index 0000000..0000000 100644
 +	}
 +
  	/**
- 	 * boxcode-ide: render the example prompt chips under the chat input.
+ 	 * covexcode-ide: render the example prompt chips under the chat input.
  	 *
 @@ -536,8 +714,14 @@ export class AgentSessionsWelcomePage extends EditorPane {
  	 * submit, so the prompt stays editable and the user can add their own detail

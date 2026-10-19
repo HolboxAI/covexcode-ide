@@ -6,11 +6,11 @@ index b783ac1..bf36c2f 100644
  
  // ------ Corner Radii
  
-+// boxcode-ide: bumped a couple of px across the board (upstream's own
++// covexcode-ide: bumped a couple of px across the board (upstream's own
 +// values noted in comments) for a softer, more "Linear/Cursor-style"
 +// geometric feel -- this is a single, systemic lever: 85 CSS files already
 +// read these via var(--vscode-cornerRadius-*), including the chat
-+// widget/input surfaces that are boxcode's primary UI, so retuning it here
++// widget/input surfaces that are covexcode's primary UI, so retuning it here
 +// reaches all of them at once instead of hand-patching each file.
 +// cornerRadius.xSmall and cornerRadius.circle are untouched -- very compact
 +// controls and fully round elements (avatars) don't read as more "premium"
@@ -49,7 +49,7 @@ index a7c88ff..f7d0477 100644
  	width: 100%;
  	padding: 4px 8px;
 -	border-radius: 4px;
-+	border-radius: var(--vscode-cornerRadius-medium); /* boxcode-ide: was a hardcoded 4px, now tracks the same token dropdown/chat surfaces already use */
++	border-radius: var(--vscode-cornerRadius-medium); /* covexcode-ide: was a hardcoded 4px, now tracks the same token dropdown/chat surfaces already use */
  	text-align: center;
  	cursor: pointer;
  	justify-content: center;
@@ -58,7 +58,7 @@ index a7c88ff..f7d0477 100644
  	border: 1px solid var(--vscode-button-border, transparent);
  	border-left-width: 0 !important;
 -	border-radius: 0 4px 4px 0;
-+	border-radius: 0 var(--vscode-cornerRadius-medium) var(--vscode-cornerRadius-medium) 0; /* boxcode-ide: was 0 4px 4px 0 */
++	border-radius: 0 var(--vscode-cornerRadius-medium) var(--vscode-cornerRadius-medium) 0; /* covexcode-ide: was 0 4px 4px 0 */
  	padding: 0 4px;
  	display: flex;
  	align-items: center;
@@ -67,7 +67,7 @@ index a7c88ff..f7d0477 100644
  
  .monaco-button-dropdown > .monaco-button.monaco-text-button {
 -	border-radius: 4px 0 0 4px;
-+	border-radius: var(--vscode-cornerRadius-medium) 0 0 var(--vscode-cornerRadius-medium); /* boxcode-ide: was 4px 0 0 4px */
++	border-radius: var(--vscode-cornerRadius-medium) 0 0 var(--vscode-cornerRadius-medium); /* covexcode-ide: was 4px 0 0 4px */
  }
  
  .monaco-description-button {
@@ -80,7 +80,7 @@ index b580762..28188a9 100644
  	padding: 0;
  	box-sizing:	border-box;
 -	border-radius: 4px;
-+	border-radius: var(--vscode-cornerRadius-medium); /* boxcode-ide: was a hardcoded 4px, now tracks the same token dropdown/chat surfaces already use */
++	border-radius: var(--vscode-cornerRadius-medium); /* covexcode-ide: was a hardcoded 4px, now tracks the same token dropdown/chat surfaces already use */
  
  	/* Customizable */
  	font-size: inherit;
@@ -93,7 +93,7 @@ index 7c70f37..64d05dd 100644
  	display: flex !important;
  	flex-direction: row;
 -	border-radius: 5px;
-+	border-radius: var(--vscode-cornerRadius-medium); /* boxcode-ide: was a hardcoded 5px, now matches the button/input radius it wraps */
++	border-radius: var(--vscode-cornerRadius-medium); /* covexcode-ide: was a hardcoded 5px, now matches the button/input radius it wraps */
  }
  
  .monaco-dropdown-with-primary > .action-container > .action-label {

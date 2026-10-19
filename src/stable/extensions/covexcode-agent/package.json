@@ -1,0 +1,174 @@
+{
+  "name": "covexcode-agent",
+  "displayName": "covexcode",
+  "description": "Chat with covexcode, driven over its ACP stdio interface.",
+  "version": "1.1.1",
+  "publisher": "covexcode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.126.0"
+  },
+  "enabledApiProposals": [
+    "chatParticipantAdditions",
+    "defaultChatParticipant",
+    "browser",
+    "chatReferenceBinaryData",
+    "chatParticipantPrivate"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Chat stays available in Restricted Mode. covexcode will not read, write, or run commands until this folder is trusted."
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension",
+  "scripts": {
+    "compile": "gulp compile-extension:covexcode-agent",
+    "watch": "gulp watch-extension:covexcode-agent",
+    "test": "tsc -p tsconfig.test.json && node --test out-test/*.test.js"
+  },
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "covexcode.agent",
+        "name": "covexcode",
+        "fullName": "covexcode",
+        "description": "Ask covexcode to read, write, and run things in this workspace.",
+        "isDefault": true,
+        "locations": [
+          "panel"
+        ],
+        "modes": [
+          "ask",
+          "edit",
+          "agent",
+          "plan"
+        ],
+        "commands": [
+          {
+            "name": "provider",
+            "description": "Pick a provider, model, and API key (same as the covexcode CLI /provider flow)."
+          },
+          {
+            "name": "model",
+            "description": "Switch model for the current provider without changing the API key."
+          }
+        ]
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "covexcode",
+        "displayName": "covexcode"
+      }
+    ],
+    "commands": [
+      {
+        "command": "covexcode.rollback",
+        "title": "covexcode: Undo Session's File Changes",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.signIn",
+        "title": "covexcode: Sign In to covexcode.com",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.signOut",
+        "title": "covexcode: Sign Out of covexcode.com",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.showAccount",
+        "title": "covexcode: Show Account",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.changeProvider",
+        "title": "covexcode: Change Provider / Model / API Key",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.setApiKey",
+        "title": "covexcode: Set API Key",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.permission.respond",
+        "title": "covexcode: Respond to Permission",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.permission.review",
+        "title": "covexcode: Review Permission Hunks",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.trustWorkspace",
+        "title": "covexcode: Trust This Folder",
+        "category": "covexcode"
+      }
+    ],
+    "authentication": [
+      {
+        "id": "covexcode",
+        "label": "covexcode.com"
+      }
+    ],
+    "configurationDefaults": {
+      "security.workspace.trust.banner": "always"
+    },
+    "configuration": {
+      "title": "covexcode",
+      "properties": {
+        "covexcode.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `covexcode` CLI binary, if it isn't on the PATH this app was launched with. Leave empty to resolve `covexcode` off PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.covexcode/bin` (the locations `install.sh` actually writes to, which a Finder-launched app's PATH often misses)."
+        },
+        "covexcode.provider": {
+          "type": "string",
+          "default": "",
+          "order": 1,
+          "markdownDescription": "LLM provider registry id (e.g. `deepseek`), or empty for a custom endpoint. Prefer **Sign In to covexcode.com** (Accounts / profile menu), chat `/provider`, or [Change Provider / Model / API Key](command:covexcode.changeProvider)."
+        },
+        "covexcode.endpoint": {
+          "type": "string",
+          "default": "",
+          "order": 2,
+          "markdownDescription": "Base URL for covexcode's OpenAI-compatible LLM endpoint (e.g. `https://api.deepseek.com` or `https://llm.covexcode.com/v1`). Set automatically by Sign In / `/provider`; leave empty to use `~/.covexcode/config.toml` from the CLI when no IDE override is stored."
+        },
+        "covexcode.model": {
+          "type": "string",
+          "default": "",
+          "order": 3,
+          "markdownDescription": "Model name for the configured provider/endpoint. Use chat `/model` to pick from the provider's list, `/provider` to change provider + model + key, or [Change Provider / Model / API Key](command:covexcode.changeProvider)."
+        },
+        "covexcode.apiKey": {
+          "type": "boolean",
+          "default": true,
+          "order": 4,
+          "markdownDescription": "API keys are stored in the OS secure store (never in `settings.json`). Prefer [Sign In to covexcode.com](command:covexcode.signIn), [Set API Key](command:covexcode.setApiKey), or [Change Provider / Model / API Key](command:covexcode.changeProvider)."
+        },
+        "covexcode.costPerMillionTokens": {
+          "type": "number",
+          "default": 0.35,
+          "order": 5,
+          "markdownDescription": "Blended USD price per million tokens, used for the `~$` estimate in the chat usage footnote. Defaults to a blended DeepSeek input+output estimate; set to 0 to show token totals only. The authoritative per-model figure should come from covexcode itself (see `docs/BACKLOG.md`, cost/usage meter)."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "24.x",
+    "typescript": "^5.9.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HolboxAI/boxcode-ide.git"
+  }
+}

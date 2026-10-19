@@ -3,7 +3,7 @@ index ca2d8dd..57ed5ac 100644
 --- a/src/vs/workbench/services/themes/common/workbenchThemeService.ts
 +++ b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
 @@ -92,6 +92,14 @@ export function migrateThemeSettingsId(settingsId: string): string {
- // three keys in boxcode-dark.json -- a slight hue bias toward the accent is
+ // three keys in covexcode-dark.json -- a slight hue bias toward the accent is
  // what actually reads as "elevated surface" rather than the accent color
  // itself.
 +// activityBarBadge.background/button.background/menu.selectionBackground/
@@ -54,7 +54,7 @@ index ca2d8dd..57ed5ac 100644
  	'tab.activeBackground': '#1F1F1F',
  	'tab.activeBorder': '#1F1F1F',
 @@ -238,9 +246,13 @@ export const COLOR_THEME_DARK_INITIAL_COLORS = {
- // mirroring extensions/boxcode-theme/themes/boxcode-light.json's own colors
+ // mirroring extensions/covexcode-theme/themes/covexcode-light.json's own colors
  // block -- textLink.foreground/activeForeground use a darker violet-800
  // (#5B21B6) rather than the brand's usual #7C3AED, since link text sits
 -// directly on a near-white background and needs the extra contrast; every

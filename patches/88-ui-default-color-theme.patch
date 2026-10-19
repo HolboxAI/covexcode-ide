@@ -7,11 +7,11 @@ index 88deb0af..59d9b273 100644
  
  export namespace ThemeSettingDefaults {
 -	export const COLOR_THEME_DARK = 'Dark 2026';
-+	// boxcode-ide: the stock default is upstream's own 'Dark 2026' -- this
-+	// points new installs at boxcode's own theme (extensions/boxcode-theme)
++	// covexcode-ide: the stock default is upstream's own 'Dark 2026' -- this
++	// points new installs at covexcode's own theme (extensions/covexcode-theme)
 +	// instead, which is a violet accent layered on Dark Modern's base via
 +	// that theme's own `include`, not a from-scratch palette.
-+	export const COLOR_THEME_DARK = 'Boxcode Dark';
++	export const COLOR_THEME_DARK = 'Covexcode Dark';
  	export const COLOR_THEME_LIGHT = 'Light 2026';
  	export const COLOR_THEME_HC_DARK = 'Default High Contrast';
  	export const COLOR_THEME_HC_LIGHT = 'Default High Contrast Light';
@@ -19,8 +19,8 @@ index 88deb0af..59d9b273 100644
  	return settingsId;
  }
  
-+// boxcode-ide: 19 keys below are violet (#A78BFA/#6D28D9/#C4B5FD) instead of
-+// upstream's own #0078D4-family blue, mirroring extensions/boxcode-theme's
++// covexcode-ide: 19 keys below are violet (#A78BFA/#6D28D9/#C4B5FD) instead of
++// upstream's own #0078D4-family blue, mirroring extensions/covexcode-theme's
 +// own colors block exactly -- without this, a brand-new install still
 +// flashes the old blue for the instant before that theme file loads
 +// asynchronously (see this constant's own use in workbenchThemeService.ts,

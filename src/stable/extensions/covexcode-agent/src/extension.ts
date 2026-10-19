@@ -1,0 +1,2330 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) HolboxAI. Licensed under the MIT License.
+ *--------------------------------------------------------------------------------------------*/
+
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+	PERMISSION_STORE_RELATIVE_PATH,
+	PermissionStore,
+	parsePermissionStore,
+	serializePermissionStore,
+} from './permissionStore';
+import * as vscode from 'vscode';
+import {
+	AcpClient,
+	BrowserInteraction,
+	ChangeEntry,
+	CheckInBrowserOutcome,
+	CheckInBrowserRequest,
+	DiffHunk,
+	fetchProviders,
+	InteractInBrowserOutcome,
+	InteractInBrowserRequest,
+	probeAcpSupported,
+	probeBinaryExists,
+	ProviderDescriptor,
+	PromptContentBlock,
+	RequestPermissionOutcome,
+	RequestPermissionRequest,
+	SessionNotification,
+	SessionUpdate,
+	ToolCallContent,
+	ToolCallStatus,
+} from './acpClient';
+import { CdpClient } from './cdpClient';
+import { serializeAxTree, AxNode } from './axTree';
+import { covexcodeBinaryCandidates } from './covexcodeBinary';
+import {
+	parsePermissionCommandArgs,
+	parseReviewCommandArgs,
+	permissionCommandUri,
+	permissionOutcomeFromGate,
+	PermissionGate,
+	PERMISSION_COMMAND,
+	REVIEW_COMMAND,
+	reviewCommandUri,
+} from './chatPermission';
+import { isFreshChat } from './freshChat';
+import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
+import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
+import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
+import {
+	missingRecommendedExtensions,
+	recommendationPrompt,
+	recommendationSkipKey,
+} from './frameworkRecommendations';
+import { findLocalhostUrl, findReusableBrowserTab, localhostOrigin } from './localhostUrl';
+import { agentSupportsMcp, loadMcpConfig, mcpServersForSession } from './mcpLoader';
+import { referenceContextSection } from './referenceContent';
+import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
+import { createTurnUsage, TurnUsage } from './turnUsage';
+import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter, SessionUsage } from './sessionUsage';
+import {
+	describeRestrictedMode,
+	folderTrustKey,
+	shouldPromptForWorkspaceTrust,
+	TRUST_COMMAND,
+	TRUST_TOAST_ACTION,
+	TRUST_TOAST_MESSAGE,
+} from './workspaceTrust';
+import {
+	prependWorkspacePrefix,
+	resolvePathAgainstCwd,
+	resolveWorkspaceCwd,
+	workspacePromptPrefix,
+	type WorkspaceContext,
+} from './workspaceContext';
+import {
+	DeviceLoginError,
+	heartbeatOnce,
+	logoutLocal,
+	readAccountStatus,
+	saveAccountCredentials,
+	type AccountCredentials,
+} from './accountLogin';
+import {
+	AUTH_PROVIDER_ID,
+	registerCovexcodeAuthProvider,
+	runBrowserDeviceLogin,
+} from './covexcodeAuthProvider';
+
+const PARTICIPANT_ID = 'covexcode.agent';
+const COVEXCODE_COMMAND = 'covexcode';
+const SECRET_API_KEY = 'covexcode.apiKey';
+const DIFF_SCHEME = 'covexcode-diff';
+const SIGN_IN_WITH_COVEXCODE = 'Sign in with covexcode.com (browser)…';
+
+/**
+ * The per-hunk review state for an in-flight permission request, keyed by the
+ * gate id `askPermission` handed the review link. Lives at module scope (not
+ * inside `activate`) because both `askPermission` and the `REVIEW_COMMAND`
+ * handler -- one inside `activate`, one outside -- reach it, and a permission
+ * request can only ever be answered once, so entries are short-lived and
+ * cleared on the answer (or, defensively, on `discardSession`).
+ */
+const pendingReviews = new Map<string, { newText: string; hunks: DiffHunk[] }>();
+
+/** The configured `covexcode.path` setting if set, otherwise the bare command
+ * name plus the locations `install.sh` writes to -- an escape hatch for a
+ * binary installed somewhere a GUI-launched app's inherited PATH doesn't
+ * reach (e.g. `~/.local/bin` on macOS, invisible to a Finder-launched app
+ * even though a login shell sees it fine). */
+function configuredCovexcodePath(): string {
+	return vscode.workspace.getConfiguration('covexcode').get<string>('path', '').trim();
+}
+
+/** USD per 1M tokens for the cost half of the usage footer, or `undefined`
+ * when the setting is <= 0 so the footer falls back to tokens-only rather
+ * than fabricating a dollar figure. A blended estimate, not an invoice --
+ * the authoritative per-model figure should come from covexcode itself (see
+ * `docs/BACKLOG.md`, cost/usage meter). */
+function sessionCostRate(): number | undefined {
+	const value = vscode.workspace.getConfiguration('covexcode').get<number>('costPerMillionTokens', 0.35);
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+		return undefined;
+	}
+	return value;
+}
+
+/** Thrown by `ensureCredentials` when the user cancels the setup prompt -- distinguished from a real launch failure so the chat message shown for each reads correctly. */
+class SetupCancelled extends Error {}
+
+/**
+ * A do-nothing `vscode.LanguageModelChat` provider, registered purely to
+ * satisfy a check this extension never otherwise touches: VS Code core's
+ * `$invokeAgent` (`extHostChatAgents2.ts`) resolves a default language model
+ * for *every* chat participant request before calling that participant's
+ * handler at all, regardless of whether the handler reads `request.model` --
+ * this one never does, since it talks to the `covexcode` CLI directly over
+ * ACP. Upstream's own default-resolution only ever picks a model whose
+ * vendor is Copilot's (`languageModels.ts`'s `COPILOT_VENDOR_ID`), and
+ * Copilot's extension is deleted from this fork, so without *some* model
+ * registered under any vendor, every chat request fails before it starts
+ * with "Language model unavailable" -- see this repo's own
+ * `87-ext-language-model-default-fallback.patch`, which is the other half of
+ * this fix: it makes VS Code fall back to the first available model of any
+ * vendor when no Copilot one exists, which is what actually lets a request
+ * carrying *this* stub through.
+ *
+ * `provideLanguageModelChatResponse`/`provideTokenCount` are never expected
+ * to run -- if they do, some other code path started routing a real request
+ * through `request.model` after all, which is worth knowing about loudly
+ * rather than silently returning something plausible-looking.
+ */
+class StubLanguageModelProvider implements vscode.LanguageModelChatProvider {
+	provideLanguageModelChatInformation(): vscode.LanguageModelChatInformation[] {
+		return [
+			{
+				id: 'covexcode',
+				name: 'covexcode',
+				family: 'covexcode',
+				version: '1.0.0',
+				maxInputTokens: 128_000,
+				maxOutputTokens: 8_192,
+				capabilities: {},
+			},
+		];
+	}
+
+	provideLanguageModelChatResponse(): never {
+		throw new Error('StubLanguageModelProvider was invoked for a real request -- covexcode.agent should never route through request.model.');
+	}
+
+	provideTokenCount(): never {
+		throw new Error('StubLanguageModelProvider was invoked for a real request -- covexcode.agent should never route through request.model.');
+	}
+}
+
+/**
+ * The minimal-path wiring recorded in covexcode-ide's own `docs/BACKLOG.md`:
+ * rather than implementing the full `IAgent` interface the real agentHost
+ * backends (`ClaudeAgent`, `CodexAgent`) use -- 1000-2500 lines each,
+ * session persistence and turn-history reconstruction included, and both
+ * already deleted from this fork by `patches/52-ext-copilot-remove-it.json`
+ * -- this registers `covexcode --acp` as an ordinary chat participant via the
+ * stable `vscode.chat` API, the same extension surface any third-party AI
+ * chat extension uses. `isDefault: true` in this extension's own
+ * `package.json` (gated by the `defaultChatParticipant` proposed API,
+ * enabled there) is what lets a plain, unmentioned prompt on the chat-first
+ * landing page reach this participant at all -- with Copilot's own
+ * `isDefault` contribution removed along with the rest of that extension,
+ * nothing else claims that slot in this fork.
+ *
+ * One `AcpClient` (one subprocess, one ACP session) is shared across every
+ * turn for the life of this extension host, not recreated per chat message
+ * -- `HeadlessSession` on the other end already keeps its own conversation
+ * history across `session/prompt` calls, so reusing one session here is
+ * what lets that continuity actually work.
+ *
+ * Known limitation, stated rather than hidden: VS Code's own "New Chat"
+ * action used to keep the same `covexcode` ACP session -- every turn in this
+ * window shared the one session opened on the first message. An empty
+ * `ChatContext.history` now disposes that session before `ensureReady`, so
+ * "New Chat" actually starts fresh. Follow-up turns in the same thread keep
+ * the session because their history is non-empty.
+ *
+ * First-run configuration: a fresh install has no `~/.covexcode/config.toml`
+ * and no `covexcode.endpoint`/`covexcode.model` settings, so the very first
+ * message would otherwise fail with a raw connection error (`headless.rs`
+ * now fails fast on a missing API key specifically, but has no equivalent
+ * for a missing endpoint/model, and no way to *collect* any of the three
+ * from inside a headless subprocess either way). `ensureCredentials` below
+ * prompts once, storing the endpoint/model as ordinary settings and the API
+ * key in `SecretStorage` (never plain settings.json), and is skipped
+ * entirely when `~/.covexcode/config.toml` already exists -- someone who's
+ * already configured `covexcode` from the CLI must not be nagged to repeat
+ * that inside the IDE.
+ */
+interface RollbackPickItem extends vscode.QuickPickItem {
+	/** What picking this item means, so the command never has to guess
+	 * between "undo everything" (no filter) and a blocked file (no undo). */
+	scope: RollbackScope;
+}
+
+type RollbackScope =
+	| { kind: 'all' }
+	| { kind: 'turn'; turn: number }
+	| { kind: 'files'; files: string[] }
+	| { kind: 'blocked'; reason?: string };
+
+function rollbackActionVerb(action: ChangeEntry['action']): string {
+	switch (action) {
+		case 'restore': return 'restore pre-session text';
+		case 'delete': return 'delete (new file)';
+		case 'blocked': return 'blocked (shell only)';
+	}
+}
+
+/**
+ * Turns a `session/list_changes` result into the one-shot `showQuickPick`
+ * that makes per-file/per-turn undo work: an "undo everything" item, one
+ * per-turn grouping, then the individual files. Blocked entries (covexcode
+ * only ran a shell command against the path, so there is no before-state to
+ * restore) stay listed so the "why" is visible, but map to a `blocked` scope
+ * the caller turns into a no-op. Returns the selection's scope, or
+ * `undefined` when the picker is dismissed.
+ */
+async function pickRollbackScope(changes: ChangeEntry[]): Promise<RollbackScope | undefined> {
+	const undoable = changes.filter(c => c.action !== 'blocked');
+	const items: RollbackPickItem[] = [];
+
+	items.push({
+		label: '$(undo) Undo everything covexcode wrote',
+		description: `${undoable.length} file${undoable.length === 1 ? '' : 's'}`,
+		scope: { kind: 'all' },
+	});
+
+	const turns = [...new Set(changes.map(c => c.turn))].sort((a, b) => a - b);
+	for (const turn of turns) {
+		const count = changes.filter(c => c.turn === turn && c.action !== 'blocked').length;
+		if (count > 0) {
+			items.push({
+				label: `Undo turn ${turn}`,
+				description: `${count} file${count === 1 ? '' : 's'}`,
+				scope: { kind: 'turn', turn },
+			});
+		}
+	}
+
+	for (const entry of changes) {
+		if (entry.action === 'blocked') {
+			items.push({
+				label: entry.path,
+				description: `turn ${entry.turn} · ${rollbackActionVerb(entry.action)}`,
+				detail: entry.reason,
+				scope: { kind: 'blocked', reason: entry.reason },
+			});
+		} else {
+			items.push({
+				label: entry.path,
+				description: `turn ${entry.turn} · ${rollbackActionVerb(entry.action)}`,
+				scope: { kind: 'files', files: [entry.path] },
+			});
+		}
+	}
+
+	const picked = await vscode.window.showQuickPick(items, {
+		title: 'covexcode: choose what to undo',
+		ignoreFocusOut: true,
+		matchOnDescription: true,
+	});
+	return picked?.scope;
+}
+
+export function activate(context: vscode.ExtensionContext): void {
+	let client: AcpClient | undefined;
+	let sessionId: string | undefined;
+	let ready: Promise<void> | undefined;
+	// Last cwd handed to `session/new`. Compared at the start of each turn
+	// so File > Open Folder (or switching roots in a multi-root window)
+	// actually starts a new ACP session instead of keeping the one spawned
+	// against `$HOME` on the chat-first landing page.
+	let sessionCwd: string | undefined;
+	// Running token total for the current ACP session -- the cumulative half
+	// of the end-of-turn usage footer, reset alongside the session in
+	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
+	const sessionUsage = createSessionUsage();
+	const permissionGate = new PermissionGate();
+	const promptedTrustFolders = new Set<string>();
+	// Persists for the life of the extension host, not just one turn -- a
+	// dev server started earlier in the conversation is still running, and
+	// re-popping the browser open every time its URL appears again in later
+	// command output (e.g. a second `curl` check) would be exactly the kind
+	// of over-eager behavior the auto-open feature needs to avoid. See
+	// renderUpdate's own doc comment on this whole mechanism.
+	const openedDevServerUrls = new Set<string>();
+
+	const diffContentProvider = new DiffContentProvider();
+	context.subscriptions.push(
+		vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME, diffContentProvider),
+	);
+	context.subscriptions.push(
+		vscode.lm.registerLanguageModelChatProvider('covexcode', new StubLanguageModelProvider()),
+	);
+
+	// Detected once per cwd and reused by both the status-bar badge and the
+	// agent's hidden context, so the two can't disagree about what framework
+	// the workspace is and we don't re-read package.json every turn.
+	// Invalidated when package.json changes -- a cache that never expires
+	// would keep showing React after the user added `next`.
+	const frameworkCache = new Map<string, Framework | undefined>();
+	const frameworkFor = async (cwd: string): Promise<Framework | undefined> => {
+		if (!frameworkCache.has(cwd)) {
+			frameworkCache.set(cwd, await detectWorkspaceFramework(cwd));
+		}
+		return frameworkCache.get(cwd);
+	};
+
+	const frameworkIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+	frameworkIndicator.name = 'covexcode: framework';
+	context.subscriptions.push(frameworkIndicator);
+	const updateFrameworkIndicator = async (workspace: WorkspaceContext): Promise<void> => {
+		const framework = workspace.hasFolder ? await frameworkFor(workspace.cwd) : undefined;
+		if (framework) {
+			const label = FRAMEWORK_LABELS[framework];
+			frameworkIndicator.text = `$(package) ${label}`;
+			frameworkIndicator.tooltip = `covexcode detected ${label}`;
+			frameworkIndicator.show();
+		} else {
+			frameworkIndicator.hide();
+		}
+	};
+
+	const usageIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 101);
+	usageIndicator.name = 'covexcode: usage';
+	context.subscriptions.push(usageIndicator);
+	const updateUsageIndicator = (): void => {
+		const label = sessionUsageMeter(sessionUsage.total(), sessionCostRate());
+		if (label) {
+			usageIndicator.text = `$(graph) ${label}`;
+			usageIndicator.tooltip = `covexcode usage this session — ${label}`;
+			usageIndicator.show();
+		} else {
+			usageIndicator.hide();
+		}
+	};
+
+	const accountIndicator = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+	accountIndicator.name = 'covexcode: account';
+	context.subscriptions.push(accountIndicator);
+	const updateAccountIndicator = (): void => {
+		const status = readAccountStatus();
+		if (status.signedIn) {
+			const who = status.email || 'covexcode.com';
+			accountIndicator.text = `$(account) ${who}`;
+			accountIndicator.tooltip = `Signed in to covexcode.com as ${who}. Click for account.`;
+			accountIndicator.command = 'covexcode.showAccount';
+		} else {
+			accountIndicator.text = '$(account) Sign in';
+			accountIndicator.tooltip = 'Sign in to covexcode.com (Settings → Accounts → covexcode.com)';
+			accountIndicator.command = 'covexcode.signIn';
+		}
+		accountIndicator.show();
+	};
+
+	const applyAccountCredentials = async (creds: AccountCredentials): Promise<void> => {
+		await persistSetupResult(context, {
+			provider: creds.provider,
+			endpoint: creds.endpoint,
+			model: creds.model,
+			apiKey: creds.apiKey,
+		});
+		discardSession();
+		updateAccountIndicator();
+	};
+
+	const clearAccountCredentials = async (): Promise<void> => {
+		await context.secrets.delete(SECRET_API_KEY);
+		const config = vscode.workspace.getConfiguration('covexcode');
+		const endpoint = (config.get<string>('endpoint', '') || '').toLowerCase();
+		if (endpoint.includes('llm.covexcode.com')) {
+			await config.update('endpoint', '', vscode.ConfigurationTarget.Global);
+			await config.update('model', '', vscode.ConfigurationTarget.Global);
+			await config.update('provider', '', vscode.ConfigurationTarget.Global);
+		}
+		discardSession();
+		updateAccountIndicator();
+	};
+
+	const authProvider = registerCovexcodeAuthProvider(context, {
+		onCredentialsSaved: applyAccountCredentials,
+		onLoggedOut: clearAccountCredentials,
+	});
+	updateAccountIndicator();
+	void heartbeatOnce();
+	const heartbeatTimer = setInterval(() => {
+		void heartbeatOnce();
+	}, 5 * 60 * 1000);
+	context.subscriptions.push({ dispose: () => clearInterval(heartbeatTimer) });
+
+	const RECS_SKIP_STATE = 'covexcode.frameworkRecommendationSkips';
+	const INSTALL_RECS_ACTION = 'Install';
+	const LATER_RECS_ACTION = 'Later';
+
+	async function promptFrameworkRecommendations(workspace: WorkspaceContext): Promise<void> {
+		if (!workspace.hasFolder) {
+			return;
+		}
+		const framework = await frameworkFor(workspace.cwd);
+		if (!framework) {
+			return;
+		}
+		const skipKey = recommendationSkipKey(workspace.cwd, framework);
+		const skipped = context.workspaceState.get<string[]>(RECS_SKIP_STATE, []);
+		if (skipped.includes(skipKey)) {
+			return;
+		}
+		const installed = vscode.extensions.all.map(ext => ext.id);
+		const missing = missingRecommendedExtensions(installed, framework);
+		if (missing.length === 0) {
+			return;
+		}
+		const choice = await vscode.window.showInformationMessage(
+			recommendationPrompt(framework, missing),
+			INSTALL_RECS_ACTION,
+			LATER_RECS_ACTION,
+		);
+		if (choice !== INSTALL_RECS_ACTION) {
+			await context.workspaceState.update(RECS_SKIP_STATE, [...skipped, skipKey]);
+			return;
+		}
+		for (const id of missing) {
+			try {
+				await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+			} catch {
+				// Gallery miss or the user cancelled one id -- keep going.
+			}
+		}
+		await context.workspaceState.update(RECS_SKIP_STATE, [...skipped, skipKey]);
+	}
+
+	async function refreshFrameworkSurfaces(invalidate = false): Promise<void> {
+		const workspace = currentWorkspace();
+		if (invalidate && workspace.hasFolder) {
+			frameworkCache.delete(workspace.cwd);
+		}
+		await updateFrameworkIndicator(workspace);
+		await promptFrameworkRecommendations(workspace);
+	}
+
+	let packageJsonWatchers: vscode.Disposable[] = [];
+	function watchPackageJsonFiles(): void {
+		for (const watcher of packageJsonWatchers) {
+			watcher.dispose();
+		}
+		packageJsonWatchers = [];
+		for (const folder of vscode.workspace.workspaceFolders ?? []) {
+			const watcher = vscode.workspace.createFileSystemWatcher(
+				new vscode.RelativePattern(folder, 'package.json'),
+			);
+			const onPackageJson = () => {
+				frameworkCache.delete(folder.uri.fsPath);
+				void refreshFrameworkSurfaces();
+			};
+			watcher.onDidChange(onPackageJson);
+			watcher.onDidCreate(onPackageJson);
+			watcher.onDidDelete(onPackageJson);
+			packageJsonWatchers.push(watcher);
+		}
+	}
+
+	function currentWorkspace(): WorkspaceContext {
+		const folders = vscode.workspace.workspaceFolders?.map(folder => ({ fsPath: folder.uri.fsPath }));
+		const activeUri = vscode.window.activeTextEditor?.document.uri;
+		const activeFilePath = activeUri?.scheme === 'file' ? activeUri.fsPath : undefined;
+		return resolveWorkspaceCwd(folders, activeFilePath, os.homedir());
+	}
+
+	function discardSession(): void {
+		permissionGate.cancelAll();
+		pendingReviews.clear();
+		client?.dispose();
+		client = undefined;
+		sessionId = undefined;
+		ready = undefined;
+		sessionCwd = undefined;
+		sessionUsage.reset();
+		updateUsageIndicator();
+	}
+
+	async function requestFolderTrust(): Promise<void> {
+		const requestTrust = (vscode.workspace as { requestWorkspaceTrust?: (options?: { message?: string }) => Thenable<boolean | undefined> }).requestWorkspaceTrust;
+		if (typeof requestTrust === 'function') {
+			await requestTrust({
+				message: 'covexcode needs trust to read, write, and run commands in this folder.',
+			});
+			return;
+		}
+		await vscode.commands.executeCommand('workbench.trust.manage');
+	}
+
+	/**
+	 * Chat-first is a trusted empty window. Opening a folder does not
+	 * always show VS Code's own startup trust prompt, so Restricted Mode
+	 * used to arrive silently and disable the agent. Ask immediately,
+	 * with a non-modal toast -- not a center-screen system dialog -- and
+	 * only once per folder set.
+	 */
+	async function promptTrustIfNeeded(): Promise<void> {
+		const folders = vscode.workspace.workspaceFolders ?? [];
+		if (!shouldPromptForWorkspaceTrust(vscode.workspace.isTrusted, folders.length)) {
+			return;
+		}
+		const key = folderTrustKey(folders.map(folder => folder.uri.toString()));
+		if (promptedTrustFolders.has(key)) {
+			return;
+		}
+		promptedTrustFolders.add(key);
+		const choice = await vscode.window.showInformationMessage(TRUST_TOAST_MESSAGE, TRUST_TOAST_ACTION);
+		if (choice === TRUST_TOAST_ACTION) {
+			await requestFolderTrust();
+		}
+	}
+
+	function ensureReady(workspace: WorkspaceContext): Promise<void> {
+		if (!ready) {
+			ready = (async () => {
+				const candidates = covexcodeBinaryCandidates(configuredCovexcodePath(), os.homedir());
+				let covexcodeCommand: string | undefined;
+				for (const candidate of candidates) {
+					if (await probeBinaryExists(candidate)) {
+						covexcodeCommand = candidate;
+						break;
+					}
+				}
+				// Checked before ensureCredentials() runs at all -- a fresh
+				// install with no `covexcode` CLI used to walk through three
+				// credential prompts before ever learning the binary itself
+				// was missing. Thrown with `code: 'ENOENT'` so it lands on
+				// the exact branch `describeStartupFailure` already handles.
+				if (!covexcodeCommand) {
+					const notFound = new Error(`spawn ${candidates[0] ?? COVEXCODE_COMMAND} ENOENT`) as NodeJS.ErrnoException;
+					notFound.code = 'ENOENT';
+					throw notFound;
+				}
+				if (!(await probeAcpSupported(covexcodeCommand))) {
+					throw new AcpUnsupportedError();
+				}
+				const cwd = workspace.cwd;
+				const envOverrides = await ensureCredentials(context, covexcodeCommand);
+				const acp = new AcpClient(covexcodeCommand, cwd, envOverrides);
+				client = acp;
+				// A crash mid-session must not leave the participant dead until
+				// the window reloads. AcpClient already emits 'exit' when the
+				// subprocess dies; tear the session down so the next message
+				// re-launches (ensureReady re-runs because `ready` is cleared).
+				acp.on('exit', () => discardSession());
+				const initResult = await acp.initialize();
+				const mcpLoaded = loadMcpConfig({
+					readFile: (file) => {
+						try {
+							return fs.readFileSync(file, 'utf8');
+						} catch {
+							return undefined;
+						}
+					},
+					workspaceFolder: cwd,
+					home: os.homedir(),
+					env: process.env,
+				});
+				sessionId = await acp.newSession(
+					cwd,
+					mcpServersForSession(mcpLoaded, agentSupportsMcp(initResult)),
+				);
+				sessionCwd = cwd;
+			})().catch(error => {
+				// A failed launch must not wedge every later message behind
+				// the same rejected promise forever -- clear the memoized
+				// attempt so the next chat message gets a fresh try, not a
+				// permanently broken participant until the window reloads.
+				ready = undefined;
+				// `client` was assigned *before* the step that can fail
+				// (`acp.initialize()` / `acp.newSession()`), so by the time we
+				// get here the subprocess is running with no owner. Dispose it
+				// rather than orphan it: its later `exit` fires
+				// `discardSession()`, which would tear down whatever *healthy*
+				// session a later message establishes, and a second process
+				// would be spawned next turn.
+				client?.dispose();
+				client = undefined;
+				sessionCwd = undefined;
+				throw error;
+			});
+		}
+		return ready;
+	}
+
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeWorkspaceFolders(() => {
+			discardSession();
+			watchPackageJsonFiles();
+			void promptTrustIfNeeded();
+			void refreshFrameworkSurfaces(true);
+		}),
+		vscode.commands.registerCommand(PERMISSION_COMMAND, (...args: unknown[]) => {
+			const parsed = parsePermissionCommandArgs(args);
+			if (!parsed) {
+				return;
+			}
+			if (permissionGate.respond(parsed.id, parsed.choice)) {
+				rememberPermissionChoice(parsed.id, parsed.choice);
+			}
+		}),
+		vscode.commands.registerCommand(REVIEW_COMMAND, async (...args: unknown[]) => {
+			const id = parseReviewCommandArgs(args);
+			if (id === undefined) {
+				return;
+			}
+			const review = pendingReviews.get(id);
+			if (!review) {
+				return;
+			}
+			pendingReviews.delete(id);
+			const merged = await pickHunks(review.newText, review.hunks);
+			if (merged === undefined) {
+				// QuickPick dismissed (Escape) -- the Allow/Reject links are
+				// still live, so re-register in case they open the picker again.
+				pendingReviews.set(id, review);
+				return;
+			}
+			permissionGate.respond(id, 'partial', merged);
+		}),
+		vscode.commands.registerCommand(TRUST_COMMAND, async () => {
+			await requestFolderTrust();
+		}),
+		vscode.workspace.onDidGrantWorkspaceTrust(() => {
+			void vscode.commands.executeCommand('workbench.action.chat.open');
+			void vscode.window.showInformationMessage('This folder is trusted. Chat can read, write, and run here now.');
+		}),
+		{ dispose: () => {
+			for (const watcher of packageJsonWatchers) {
+				watcher.dispose();
+			}
+		} },
+	);
+	watchPackageJsonFiles();
+	void promptTrustIfNeeded();
+	// The badge used to refresh only on folder change, so a window that
+	// launched already inside a project never showed it.
+	void refreshFrameworkSurfaces();
+
+	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
+		if (!vscode.workspace.isTrusted) {
+			stream.markdown(restrictedModeMarkdown());
+			return;
+		}
+
+		// Slash commands (`/provider`, `/model`) are local UI flows -- they must
+		// not be forwarded to ACP as ordinary chat prompts.
+		if (request.command === 'provider') {
+			const outcome = await changeProviderFlow(context, discardSession);
+			stream.markdown(providerCommandMarkdown(outcome));
+			return;
+		}
+		if (request.command === 'model') {
+			const outcome = await changeModelFlow(context, discardSession);
+			stream.markdown(modelCommandMarkdown(outcome));
+			return;
+		}
+
+		if (isFreshChat(chatContext.history.length) && client) {
+			// VS Code's "New Chat" reuses this extension host, so without
+			// this the next empty-history request would keep talking to the
+			// previous HeadlessSession -- every "new chat" was the same
+			// conversation on the daemon side.
+			discardSession();
+		}
+		const workspace = currentWorkspace();
+		// Attach the detected framework so workspacePromptPrefix() hides the
+		// stack in the model's own context (see that function's comment on the
+		// framework line). Memoized per cwd by frameworkFor() above, so this is
+		// one package.json read per workspace, not per turn.
+		const workspaceWithFramework = { ...workspace, framework: await frameworkFor(workspace.cwd) };
+		if (sessionCwd !== undefined && sessionCwd !== workspace.cwd) {
+			discardSession();
+		}
+		try {
+			await ensureReady(workspace);
+		} catch (error) {
+			if (error instanceof SetupCancelled) {
+				stream.markdown('Configuration needed -- send another message when you\'re ready to set covexcode up.');
+			} else {
+				stream.markdown(describeStartupFailure(error, process.platform));
+			}
+			return;
+		}
+		if (!client || !sessionId) {
+			stream.markdown("covexcode isn't ready yet -- try again in a moment.");
+			return;
+		}
+		if (!workspace.hasFolder) {
+			stream.markdown(
+				'No folder is open in this window, so I don\'t have a project working directory. ' +
+					'Use **File > Open Folder**, then send your message again if you want me to work in a project.\n\n',
+			);
+		}
+		const activeClient = client;
+		const activeSessionId = sessionId;
+		// `tool_call_update`'s own `title` is usually absent (headless.rs
+		// only sets it on the initial `tool_call`) -- without remembering
+		// it here, the completion/failure line renderUpdate shows would
+		// have no label at all. Scoped to one turn, not the whole session:
+		// a fresh Map per requestHandler call, same lifetime as `stream`.
+		const toolCallTitles = new Map<string, string>();
+		const shownBrowserPreviews = new Set<string>();
+		const turnUsage = createTurnUsage();
+
+		const onUpdate = (notification: SessionNotification) => {
+			if (notification.sessionId === activeSessionId) {
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage);
+				updateUsageIndicator();
+			}
+		};
+		const onPermissionRequest = (
+			permissionRequest: RequestPermissionRequest,
+			respond: (outcome: RequestPermissionOutcome) => void,
+		) => {
+			if (permissionRequest.sessionId === activeSessionId) {
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd).then(respond);
+			} else {
+				respond({ outcome: 'cancelled' });
+			}
+		};
+		const onBrowserCheckRequest = (
+			browserRequest: CheckInBrowserRequest,
+			respond: (outcome: CheckInBrowserOutcome) => void,
+		) => {
+			if (browserRequest.sessionId === activeSessionId) {
+				void checkInBrowser(browserRequest.url).then(respond);
+			} else {
+				respond({ outcome: 'failed', reason: 'browser check arrived for a different session' });
+			}
+		};
+		const onBrowserInteractRequest = (
+			interactRequest: InteractInBrowserRequest,
+			respond: (outcome: InteractInBrowserOutcome) => void,
+		) => {
+			if (interactRequest.sessionId === activeSessionId) {
+				void interactInBrowser(interactRequest.url, interactRequest.interaction).then(respond);
+			} else {
+				respond({ outcome: 'failed', reason: 'browser interaction arrived for a different session' });
+			}
+		};
+
+		const content = await attachReferencesToPrompt(request, workspaceWithFramework);
+		// Registered *after* the `await` above so a throw while reading an
+		// attachment (e.g. a binary reference whose bytes can't be loaded)
+		// can't leak these: they were previously added before any `try`, so
+		// that failure path skipped the `finally` that removes them, and each
+		// such turn piled another four listeners + `onCancel` onto the shared,
+		// long-lived `activeClient`.
+		activeClient.on('update', onUpdate);
+		activeClient.on('permissionRequest', onPermissionRequest);
+		activeClient.on('browserCheckRequest', onBrowserCheckRequest);
+		activeClient.on('browserInteractRequest', onBrowserInteractRequest);
+		// v1 has no cancellation plumbing into HeadlessSession yet -- see
+		// covexcode's own transport.rs docs on `session/cancel`. A cancelled
+		// request here still waits for the in-flight turn to finish rather
+		// than abandoning it silently.
+		const onCancel = token.onCancellationRequested(() => {
+			permissionGate.cancelAll();
+		});
+		try {
+			// `request.mode` only exists once the fork's `chatParticipantPrivate`
+			// proposal is on (see `patches/109-...`); read it defensively so the
+			// extension still builds against the stable `vscode.ChatRequest`.
+			const mode = (request as vscode.ChatRequest & { mode?: string }).mode;
+			await activeClient.prompt(activeSessionId, content, mode === 'plan' ? 'plan' : undefined);
+			// Rendered only on a clean turn end, never after an error -- a
+			// failed turn's partial usage would be a misleading number. One
+			// line regardless of how many `usage_update`s arrived, since a
+			// multi-response turn emits one per LLM response. The session
+			// total is cumulative and includes partial spend from an earlier
+			// failed turn, which is the honest number for cost.
+			const footnote = [turnUsage.footnote(), sessionUsageFootnote(sessionUsage.total(), sessionCostRate())]
+				.filter((line): line is string => line !== undefined)
+				.join(' · ');
+			if (footnote) {
+				stream.markdown(`\n\n*${footnote}*\n`);
+			}
+		} catch (error) {
+			stream.markdown(`covexcode stopped responding: ${describeError(error)}`);
+		} finally {
+			activeClient.off('update', onUpdate);
+			activeClient.off('permissionRequest', onPermissionRequest);
+			activeClient.off('browserCheckRequest', onBrowserCheckRequest);
+			activeClient.off('browserInteractRequest', onBrowserInteractRequest);
+			onCancel.dispose();
+		}
+	};
+
+	const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, requestHandler);
+	context.subscriptions.push(participant);
+	context.subscriptions.push({ dispose: () => discardSession() });
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.rollback', async () => {
+			// Reads client/sessionId fresh on each invocation, not a value
+			// captured at registration time -- both are only set once the
+			// first chat message actually establishes a session.
+			if (!client || !sessionId) {
+				void vscode.window.showInformationMessage("covexcode: no session yet -- send a message first.");
+				return;
+			}
+			const activeClient = client;
+			const activeSessionId = sessionId;
+			try {
+				// Peek at the journal first so the picker reflects exactly what
+				// an undo would touch, then confirm by *choosing* the scope --
+				// same posture as the TUI's own /rollback: decide before
+				// touching disk, not after.
+				const { changes, shellWarning } = await activeClient.listChanges(activeSessionId);
+				if (!changes.some(c => c.action !== 'blocked')) {
+					const hint = shellWarning ? ` ${shellWarning}` : '';
+					void vscode.window.showInformationMessage(`covexcode: nothing to undo.${hint}`);
+					return;
+				}
+				const scope = await pickRollbackScope(changes);
+				if (!scope) {
+					return;
+				}
+				if (scope.kind === 'blocked') {
+					const why = scope.reason ? ` ${scope.reason}` : '';
+					void vscode.window.showInformationMessage(`covexcode: can't undo that file.${why}`);
+					return;
+				}
+				const options = scope.kind === 'all'
+					? undefined
+					: scope.kind === 'turn'
+						? { turn: scope.turn }
+						: { files: scope.files };
+				const summary = await activeClient.rollback(activeSessionId, options);
+				void vscode.window.showInformationMessage(`covexcode: ${summary}`);
+			} catch (error) {
+				void vscode.window.showErrorMessage(`covexcode: couldn't roll back (${describeError(error)})`);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		// Invoked by the native "Restore Checkpoint" button rendered above each
+		// user message (MenuId.ChatMessageCheckpoint). VS Code's own restore path
+		// is a no-op for covexcode chat -- there's no IChatEditingSession -- so the
+		// core patch 108-chat-restore-checkpoint-covexcode.patch detects a covexcode
+		// request and delegates here with its 1-based turn number.
+		//
+		// "Restore to before `turn`" = put every file touched at this turn or
+		// later back to the state it held just before this turn began, so an
+		// edit in turn 2 is undone while turn 1's edit survives. covexcode's
+		// journal keeps the per-turn before-state for exactly this; the request
+		// uses `restoreBeforeTurn`, not the first-touch `turn` filter.
+		vscode.commands.registerCommand('covexcode.restoreCheckpoint', async (turn?: number) => {
+			if (!client || !sessionId) {
+				void vscode.window.showInformationMessage("covexcode: no session yet -- send a message first.");
+				return;
+			}
+			// No turn argument (e.g. invoked from the command palette) means
+			// there's no checkpoint to scope to -- defer to the full picker.
+			if (turn === undefined) {
+				await vscode.commands.executeCommand('covexcode.rollback');
+				return;
+			}
+			const activeClient = client;
+			const activeSessionId = sessionId;
+			try {
+				// The journal records files, not chat messages, so this restores
+				// workspace content only -- same limitation as the picker's own
+				// "undo turn N" entries.
+				const summary = await activeClient.rollback(activeSessionId, { restoreBeforeTurn: turn });
+				if (!summary.startsWith("Rolled back nothing")) {
+					void vscode.window.showInformationMessage(`covexcode: [turn ${turn}] ${summary}`);
+					return;
+				}
+				// A "nothing" here is ambiguous: the turn made no file edits, or it
+				// changed files through a shell command (`run_command`), which the
+				// journal tracks by name but cannot undo. Surface that context so
+				// the message explains itself instead of leaving the user guessing.
+				try {
+					const { shellWarning } = await activeClient.listChanges(activeSessionId);
+					void vscode.window.showWarningMessage(`covexcode: [turn ${turn}] ${summary}${shellWarning ? ` ${shellWarning}` : ''}`);
+				} catch {
+					void vscode.window.showWarningMessage(`covexcode: [turn ${turn}] ${summary}`);
+				}
+			} catch (error) {
+				void vscode.window.showErrorMessage(`covexcode: couldn't restore checkpoint (${describeError(error)})`);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		// Closes a real gap: before this, a mistyped API key (or a switch to
+		// a different provider) had no in-product fix -- `ensureCredentials`
+		// only re-prompts when a value is *missing*, never when it's wrong,
+		// so the only recovery was hand-editing settings.json and clearing
+		// SecretStorage by hand. Runs the setup wizard immediately (same as
+		// chat `/provider`) rather than asking the user to send another
+		// message -- and forces a prompt even when `~/.covexcode/config.toml`
+		// already exists, because clearing IDE settings alone would otherwise
+		// silently fall through to that file.
+		vscode.commands.registerCommand('covexcode.changeProvider', async () => {
+			const outcome = await changeProviderFlow(context, discardSession);
+			if (outcome.kind === 'ok') {
+				void vscode.window.showInformationMessage(
+					`covexcode: using ${outcome.summary}. Send a chat message to start a session with the new credentials.`,
+				);
+			} else if (outcome.kind === 'cancelled') {
+				void vscode.window.showInformationMessage('covexcode: provider change cancelled.');
+			} else if (outcome.kind === 'no-binary') {
+				void vscode.window.showErrorMessage(
+					"covexcode: couldn't find the `covexcode` CLI. Install it first, or set `covexcode.path` in Settings.",
+				);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.setApiKey', async () => {
+			const outcome = await setApiKeyFlow(context, discardSession);
+			if (outcome === 'ok') {
+				void vscode.window.showInformationMessage(
+					'covexcode: API key saved securely. Send a chat message to use it.',
+				);
+			} else if (outcome === 'cancelled') {
+				void vscode.window.showInformationMessage('covexcode: API key change cancelled.');
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.signIn', async () => {
+			try {
+				const session = await vscode.authentication.getSession(AUTH_PROVIDER_ID, [], {
+					createIfNone: true,
+				});
+				authProvider.refreshFromDisk();
+				updateAccountIndicator();
+				const who = session.account.label;
+				void vscode.window.showInformationMessage(
+					`covexcode: signed in as ${who}. Credentials saved to ~/.covexcode — same as \`covexcode login\`.`,
+				);
+			} catch (err) {
+				if (err instanceof DeviceLoginError && /cancelled/i.test(err.message)) {
+					void vscode.window.showInformationMessage('covexcode: sign-in cancelled.');
+					return;
+				}
+				const message = err instanceof Error ? err.message : String(err);
+				void vscode.window.showErrorMessage(`covexcode: sign-in failed — ${message}`);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.signOut', async () => {
+			logoutLocal();
+			await clearAccountCredentials();
+			authProvider.refreshFromDisk();
+			void vscode.window.showInformationMessage('covexcode: signed out of covexcode.com.');
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.showAccount', async () => {
+			const status = readAccountStatus();
+			if (!status.signedIn) {
+				const choice = await vscode.window.showInformationMessage(
+					'Not signed in to covexcode.com. Sign in opens the browser (Settings → Accounts → covexcode.com).',
+					'Sign In',
+				);
+				if (choice === 'Sign In') {
+					await vscode.commands.executeCommand('covexcode.signIn');
+				}
+				return;
+			}
+			const who = status.email || 'covexcode.com account';
+			const detail = [
+				`Account:  ${who}`,
+				status.endpoint ? `Endpoint: ${status.endpoint}` : undefined,
+				status.model ? `Model:    ${status.model}` : undefined,
+				'',
+				'Manage from Accounts (profile icon) → covexcode.com, or Sign Out below.',
+			]
+				.filter(line => line !== undefined)
+				.join('\n');
+			const choice = await vscode.window.showInformationMessage(detail, 'Sign Out', 'Open Account Page');
+			if (choice === 'Sign Out') {
+				await vscode.commands.executeCommand('covexcode.signOut');
+			} else if (choice === 'Open Account Page') {
+				await vscode.env.openExternal(vscode.Uri.parse('https://covexcode.com/account'));
+			}
+		}),
+	);
+}
+
+/**
+ * Folds `request.references` -- context the user attached via `@`-mentions
+ * or the Integrated Browser's element-picker / console-log-to-chat /
+ * screenshot features (`browserEditorChatFeatures.ts`, upstream and
+ * unpatched in this fork) -- into the content blocks `AcpClient.prompt`
+ * actually sends. covexcode never built any attachment UI: every one of these
+ * arrives as an ordinary `ChatPromptReference`, the same mechanism any chat
+ * participant gets once `covexcode.agent` is the active default agent.
+ *
+ * Two reference shapes carry real content and are read from disk here: a
+ * `Uri` (a `#file`/`@`-mentioned file or doc) and a `Location` (a
+ * `#sym`-attached symbol). Both become a structured markdown section --
+ * path, language fence, and the file's text (or the symbol's line range) --
+ * rather than the bare path string an earlier version emitted, which is what
+ * makes `@file`/`@symbol` context actually useful to the model. Image
+ * attachments are `ContentBlock::Image` blocks (`ChatReferenceBinaryData`
+ * `.data()` is async, which is why this function is `async`); raw string
+ * references (console logs, CSS selectors) pass through unchanged, and
+ * anything `referenceContextSection` can't resolve is skipped rather than
+ * injected as a "[unrecognized]" marker.
+ */
+async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: WorkspaceContext): Promise<PromptContentBlock[]> {
+	const sections: string[] = [];
+	const images: PromptContentBlock[] = [];
+	// Reads a workspace file's text for a `Uri`/`Location` reference. Only
+	// `file:` references reach this -- `referenceContextSection` filters on
+	// scheme before calling -- and an unreadable path (directory, deleted
+	// file) throws, which `referenceContextSection` turns into a path-only
+	// fallback rather than failing the whole prompt.
+	const readTextFile = async (fsPath: string): Promise<string> => {
+		const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(fsPath));
+		return new TextDecoder().decode(bytes);
+	};
+
+	for (const reference of request.references) {
+		if (reference.value instanceof vscode.ChatReferenceBinaryData) {
+			const bytes = await reference.value.data();
+			images.push({
+				type: 'image',
+				data: Buffer.from(bytes).toString('base64'),
+				mimeType: reference.value.mimeType,
+			});
+			continue;
+		}
+		const section = await referenceContextSection(reference, readTextFile);
+		if (section) {
+			sections.push(section);
+		}
+	}
+
+	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
+	const text = prependWorkspacePrefix(userText, workspacePromptPrefix(workspace));
+	return [{ type: 'text', text }, ...images];
+}
+
+function restrictedModeMarkdown(): vscode.MarkdownString {
+	const line = new vscode.MarkdownString(undefined, true);
+	line.isTrusted = { enabledCommands: [TRUST_COMMAND] };
+	line.appendMarkdown(`${describeRestrictedMode()}\n\n`);
+	line.appendMarkdown(`[$(shield) Trust this folder](command:${TRUST_COMMAND})\n\n`);
+	return line;
+}
+
+/**
+ * A codicon per `ToolCallStatus`, matching the pattern VS Code's own
+ * built-in chat participants already use for tool-call rendering (a
+ * spinning icon that becomes a check or an error, not plain text) --
+ * `stream.markdown` renders `$(name)` codicon syntax natively as long as
+ * the `MarkdownString` passed to it has `supportThemeIcons` set, which
+ * `stream.markdown(someString)` alone does not (see the call site below).
+ */
+function toolCallStatusIcon(status: ToolCallStatus | undefined): string {
+	switch (status) {
+		case 'pending':
+			return '$(circle-outline)';
+		case 'in_progress':
+			return '$(loading~spin)';
+		case 'completed':
+			return '$(check)';
+		case 'failed':
+			return '$(error)';
+		default:
+			return '$(circle-outline)';
+	}
+}
+
+/**
+ * Appends a tool-call title, working around a real gap in `appendText()`'s
+ * own escaping rather than a hypothetical one -- confirmed live in a built
+ * dmg, not just reasoned about, and confirmed again here against the real
+ * bundled `marked` + KaTeX extension (`src/vs/base/common/marked/marked.js`,
+ * `markedKatexExtension.ts`), not just by re-reading the code a second time.
+ *
+ * A command's title starts with a literal "$ " (`tools.rs`'s
+ * `Action::label`); `appendText()`'s escaping calls `escapeIcons()`, which
+ * only escapes text shaped like `$(word)` (protecting prose that happens to
+ * mention a real icon), never a bare "$" with no parens after it. That "$ "
+ * sails through unescaped, lands right after this icon's own "$(...)"
+ * syntax, and the chat renderer's KaTeX math support reads everything
+ * between the two "$"s as inline math -- silently swallowing the icon and
+ * however much of the title comes before the next "$", which is exactly the
+ * "$ " itself.
+ *
+ * A first attempt at fixing this wrapped a `$`-containing title in an inline
+ * code span instead, on the theory that code spans are tokenized before any
+ * later inline rule gets to look inside them -- verified false by actually
+ * running the real tokenizer: `marked`'s inline-token loop tries registered
+ * extensions (including the KaTeX one) *before* its own code-span rule, so
+ * the backtick fence is just an ordinary character to the math regex, and
+ * the span never exists. It also leaked a stray backtick into the next
+ * markdown link. Left as a cautionary comment, not a second version to
+ * maintain: the actual fix is to escape the character `appendText()` misses,
+ * not to route around its escaping with a different construct.
+ *
+ * `escapeMarkdownSyntaxTokens`'s own character class (`\`*_{}[]()#+!~`, see
+ * `htmlContent.ts`) never included `$` -- there was never a supported way to
+ * ask `appendText()` to do this for us. This runs the real `appendText()`
+ * first (for everything it already escapes correctly) via a throwaway
+ * `MarkdownString`, then escapes the one remaining gap by hand.
+ */
+function appendTitleSafely(line: vscode.MarkdownString, title: string): void {
+	const escaped = new vscode.MarkdownString(undefined, true);
+	escaped.appendText(title);
+	line.appendMarkdown(escaped.value.replace(/\$/g, '\\$&'));
+}
+
+/**
+ * Renders one tool call as a native `ChatToolInvocationPart` instead of a
+ * markdown line. This is the fix for the spinner/check duplication:
+ * `stream.markdown` only ever *appends* a new part, so the in-progress
+ * `$(loading~spin)` line stayed visible underneath the `$(check)` line once
+ * the tool completed. A tool-invocation part carrying `enablePartialUpdate`
+ * is matched by `toolCallId` on the model side
+ * (`ChatModel._handleExternalToolInvocationUpdate`), which flips the *same*
+ * row from its running spinner to a check in place rather than pushing a
+ * second row.
+ *
+ * The spinner/check icons are drawn by the chat renderer itself (see
+ * `BaseChatToolInvocationSubPart.getIcon`), so the message is just the title
+ * -- no manual `$(...)` codicon, unlike the old markdown path. `toolName` is
+ * only used to key/name the invocation and is not shown for a generic
+ * (non-terminal, non-MCP) tool; `toolCallId` is the field that correlates the
+ * completion update back to this row.
+ */
+function pushToolInvocation(
+	toolCallId: string,
+	title: string,
+	kind: string | undefined,
+	status: ToolCallStatus | undefined,
+	stream: vscode.ChatResponseStream,
+): void {
+	const message = new vscode.MarkdownString(undefined, true);
+	appendTitleSafely(message, title);
+
+	const part = new vscode.ChatToolInvocationPart(kind ?? 'covexcode', toolCallId);
+	part.enablePartialUpdate = true;
+	part.isComplete = status === 'completed' || status === 'failed';
+	part.invocationMessage = message;
+	if (part.isComplete) {
+		part.pastTenseMessage = message;
+	}
+	stream.push(part);
+}
+
+function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
+	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream);
+}
+
+/**
+ * Auto-opens the Integrated Browser the moment a shell command's own output
+ * mentions a dev server it just started (a "Local: http://localhost:5173/"
+ * line, the same shape `npm run dev`/`vite`/`python3 -m http.server` all
+ * print) -- without the model needing to decide to call `check_in_browser`
+ * first. Cursor's own equivalent (`autoOpenLocalhostUrls`) does the same
+ * thing for exactly the same reason: a human watching an agent scaffold a
+ * project expects to *see* it the moment it's running, not only once the
+ * model separately decides that's worth doing.
+ *
+ * Scoped deliberately narrow to avoid the false-positive class this could
+ * otherwise cause:
+ * - Only from a shell command's (`run_command`, title `"$ ..."`) own
+ *   *plain-text* output (`ToolCallContent`'s `content` variant) -- never
+ *   from a file read/write, whose content could just as easily be a URL
+ *   *string* the code happens to contain (a comment, a config value)
+ *   rather than a server this session actually started.
+ * - `findLocalhostUrl` itself only ever matches `localhost`/`127.0.0.1`/
+ *   `0.0.0.0` (see that module's own doc comment) -- never a real,
+ *   non-local URL a command's output might mention (a deploy target, a
+ *   README link, a curl target).
+ * - Each URL only triggers this once per extension-host lifetime
+ *   (`openedDevServerUrls`), not once per line of matching output -- a dev
+ *   server's own log output often repeats its own "Local:" URL, and
+ *   `ensureBrowserTab` reuses the Integrated Browser pane rather than
+ *   opening a second one, but there's no reason to redo that work every
+ *   time the server reprints its Local: line.
+ * - Fire-and-forget, failure swallowed: this is a convenience layered on
+ *   top of whatever the command's own result already is, never something
+ *   that should turn a successful command into a failed turn.
+ */
+function autoOpenDevServerUrl(update: SessionUpdate, title: string | undefined, openedDevServerUrls: Set<string>): void {
+	if (update.content?.type !== 'content' || !title?.startsWith('$ ')) {
+		return;
+	}
+	const url = findLocalhostUrl(update.content.text);
+	if (!url || openedDevServerUrls.has(url)) {
+		return;
+	}
+	openedDevServerUrls.add(url);
+	// Reveal only. `checkInBrowser` used to run here too, which opened a
+	// second editor group beside the one `LocalhostLinkOpenerContribution`
+	// already created from the same terminal "Local:" line.
+	// The `.catch` is the whole point of "failure swallowed" in the doc
+	// comment above: `ensureBrowserTab` rejects with `Browser tab did not
+	// open.`, and the bare `void` left that rejection unhandled in the
+	// extension host.
+	void ensureBrowserTab(url).catch(() => {});
+}
+
+function renderUpdate(
+	update: SessionUpdate,
+	stream: vscode.ChatResponseStream,
+	toolCallTitles: Map<string, string>,
+	openedDevServerUrls: Set<string>,
+	shownBrowserPreviews: Set<string>,
+	turnUsage: TurnUsage,
+	sessionUsage: SessionUsage,
+): void {
+	switch (update.sessionUpdate) {
+		case 'agent_message_chunk': {
+			const content = update.content;
+			if (content?.type === 'text') {
+				stream.markdown(stripOversizedDataUris(content.text));
+			}
+			break;
+		}
+		case 'tool_call':
+		case 'tool_call_update': {
+			if (update.toolCallId && update.title) {
+				toolCallTitles.set(update.toolCallId, update.title);
+			}
+			const title = update.title ?? (update.toolCallId ? toolCallTitles.get(update.toolCallId) : undefined);
+			if (title && update.toolCallId) {
+				renderToolCallInvocation(update, title, stream);
+			} else if (title) {
+				// Fallback for a tool call that arrived without a toolCallId
+				// (nothing to correlate a completion against): the old
+				// markdown line, which still renders a status icon but cannot
+				// replace itself in place.
+				const line = new vscode.MarkdownString(undefined, true);
+				line.appendMarkdown(`${toolCallStatusIcon(update.status)} `);
+				appendTitleSafely(line, title);
+				line.appendMarkdown('\n\n');
+				stream.markdown(line);
+			}
+			// check_in_browser's screenshot is for the model (ACP image
+			// block). Putting it in chat as a data URI used to flood the
+			// panel with raw base64 -- the renderer does not treat a
+			// hundreds-of-KB data URI as an image. The live page is already
+			// in the Integrated Browser; tell the human that once per tool.
+			if (update.content?.type === 'image') {
+				const previewKey = update.toolCallId ?? 'browser-preview';
+				if (!shownBrowserPreviews.has(previewKey)) {
+					shownBrowserPreviews.add(previewKey);
+					const line = new vscode.MarkdownString(undefined, true);
+					line.appendMarkdown(`$(globe) ${describeBrowserPreview()}\n\n`);
+					stream.markdown(line);
+				}
+			}
+			autoOpenDevServerUrl(update, title, openedDevServerUrls);
+			break;
+		}
+		case 'usage_update':
+			// Consumed, not rendered: one footnote at end of turn (see
+			// createTurnUsage / sessionUsage) rather than a line per update,
+			// because a multi-response turn would otherwise print several
+			// counts mid-stream.
+			turnUsage.record(update);
+			sessionUsage.record(update);
+			break;
+		default:
+			// Every other legal ACP v1 variant covexcode doesn't emit yet --
+			// see protocol.rs's own doc comment on SessionUpdate. Nothing to
+			// render, not an error.
+			break;
+	}
+}
+
+interface SetupResult {
+	/** Registry id from `providers.rs` (e.g. "deepseek"), or '' for a
+	 * manually-entered custom endpoint -- same meaning as `LlmConfig.provider`
+	 * on the Rust side, see that field's own doc comment on why it matters
+	 * (it's what makes a provider's `default_temperature()` apply). */
+	provider: string;
+	endpoint: string;
+	model: string;
+	apiKey: string;
+}
+
+type ProviderFlowOutcome =
+	| { kind: 'ok'; summary: string }
+	| { kind: 'cancelled' }
+	| { kind: 'no-binary' };
+
+type ModelFlowOutcome =
+	| { kind: 'ok'; summary: string }
+	| { kind: 'cancelled' }
+	| { kind: 'no-binary' }
+	| { kind: 'no-provider' };
+
+/** Resolve the `covexcode` binary the same way `ensureReady` does, without
+ * spawning an ACP session -- needed by `/provider` and `/model`, which only
+ * need `--providers-json`. */
+async function resolveCovexcodeBinary(): Promise<string | undefined> {
+	const candidates = covexcodeBinaryCandidates(configuredCovexcodePath(), os.homedir());
+	for (const candidate of candidates) {
+		if (await probeBinaryExists(candidate)) {
+			return candidate;
+		}
+	}
+	return undefined;
+}
+
+async function persistSetupResult(context: vscode.ExtensionContext, entered: SetupResult): Promise<void> {
+	const config = vscode.workspace.getConfiguration('covexcode');
+	await config.update('provider', entered.provider, vscode.ConfigurationTarget.Global);
+	await config.update('endpoint', entered.endpoint, vscode.ConfigurationTarget.Global);
+	await config.update('model', entered.model, vscode.ConfigurationTarget.Global);
+	await context.secrets.store(SECRET_API_KEY, entered.apiKey);
+}
+
+function setupSummary(entered: SetupResult): string {
+	const providerLabel = entered.provider || 'custom endpoint';
+	return `${providerLabel} / ${entered.model}`;
+}
+
+/**
+ * Full provider → model → API key wizard, then persist + discard any live
+ * ACP session. Used by chat `/provider` and `covexcode.changeProvider`.
+ */
+async function changeProviderFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<ProviderFlowOutcome> {
+	const covexcodeCommand = await resolveCovexcodeBinary();
+	if (!covexcodeCommand) {
+		return { kind: 'no-binary' };
+	}
+	const entered = await runSetupFlow(covexcodeCommand);
+	if (!entered) {
+		return { kind: 'cancelled' };
+	}
+	await persistSetupResult(context, entered);
+	discardSession();
+	return { kind: 'ok', summary: setupSummary(entered) };
+}
+
+/**
+ * Model-only switch for the currently configured provider. Keeps the stored
+ * API key; updates `covexcode.model` (and endpoint if the registry entry
+ * differs). Falls back to the full provider flow when no provider is set.
+ */
+async function changeModelFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<ModelFlowOutcome> {
+	const covexcodeCommand = await resolveCovexcodeBinary();
+	if (!covexcodeCommand) {
+		return { kind: 'no-binary' };
+	}
+	const config = vscode.workspace.getConfiguration('covexcode');
+	const providerId = config.get<string>('provider', '').trim();
+	if (!providerId) {
+		// Custom endpoint or unset -- can't list registry models; offer the
+		// full provider flow instead of a dead-end QuickPick.
+		const entered = await runSetupFlow(covexcodeCommand);
+		if (!entered) {
+			return { kind: 'cancelled' };
+		}
+		await persistSetupResult(context, entered);
+		discardSession();
+		return { kind: 'ok', summary: setupSummary(entered) };
+	}
+
+	let providers: ProviderDescriptor[];
+	try {
+		providers = await fetchProviders(covexcodeCommand);
+	} catch {
+		return { kind: 'no-provider' };
+	}
+	const provider = providers.find(p => p.id === providerId);
+	if (!provider || provider.models.length === 0) {
+		return { kind: 'no-provider' };
+	}
+
+	const currentModel = config.get<string>('model', '');
+	const model = await vscode.window.showQuickPick(provider.models, {
+		title: `covexcode -- pick a model for ${provider.label}`,
+		placeHolder: currentModel || undefined,
+		ignoreFocusOut: true,
+	});
+	if (!model) {
+		return { kind: 'cancelled' };
+	}
+
+	await config.update('endpoint', provider.endpoint, vscode.ConfigurationTarget.Global);
+	await config.update('model', model, vscode.ConfigurationTarget.Global);
+	discardSession();
+	return { kind: 'ok', summary: `${provider.id} / ${model}` };
+}
+
+/** Prompt for an API key only and store it in SecretStorage. */
+async function setApiKeyFlow(
+	context: vscode.ExtensionContext,
+	discardSession: () => void,
+): Promise<'ok' | 'cancelled'> {
+	const config = vscode.workspace.getConfiguration('covexcode');
+	const providerId = config.get<string>('provider', '').trim();
+	const envHint = providerId ? ` (or export ${providerEnvVarName(providerId)})` : '';
+	const apiKey = await vscode.window.showInputBox({
+		title: 'covexcode -- set API key',
+		prompt: `API key stored securely, never written to settings.json${envHint}`,
+		password: true,
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An API key is required.'),
+	});
+	if (!apiKey) {
+		return 'cancelled';
+	}
+	await context.secrets.store(SECRET_API_KEY, apiKey.trim());
+	discardSession();
+	return 'ok';
+}
+
+function providerCommandMarkdown(outcome: ProviderFlowOutcome): string {
+	switch (outcome.kind) {
+		case 'ok':
+			return `Provider updated to **${outcome.summary}**. Send a normal chat message to use it.\n\n` +
+				`You can also change this later with \`/provider\`, \`/model\`, or in **Settings → covexcode**.`;
+		case 'cancelled':
+			return 'Provider change cancelled -- existing credentials are unchanged.';
+		case 'no-binary':
+			return "Couldn't find the `covexcode` CLI. Install it, or set `covexcode.path` in Settings, then run `/provider` again.";
+	}
+}
+
+function modelCommandMarkdown(outcome: ModelFlowOutcome): string {
+	switch (outcome.kind) {
+		case 'ok':
+			return `Model updated to **${outcome.summary}**. Send a normal chat message to use it.`;
+		case 'cancelled':
+			return 'Model change cancelled -- existing model is unchanged.';
+		case 'no-binary':
+			return "Couldn't find the `covexcode` CLI. Install it, or set `covexcode.path` in Settings, then run `/model` again.";
+		case 'no-provider':
+			return 'No provider is configured yet (or the registry has no models for it). Run `/provider` to pick a provider, model, and API key.';
+	}
+}
+
+/**
+ * Resolves the env-var overrides to hand `covexcode --acp` (see
+ * `AcpClient`'s own doc comment on why these are additive, never blanking):
+ * whatever this extension already has stored (settings + `SecretStorage`)
+ * is used as-is; if nothing is stored yet AND `~/.covexcode/config.toml`
+ * doesn't exist either (the file-existence check is a deliberately simple
+ * proxy for "has this person configured covexcode from the CLI before" --
+ * no need to actually parse the TOML just to decide whether to prompt),
+ * this runs a one-time setup prompt and persists the result. Throws
+ * `SetupCancelled` if the user backs out of that prompt.
+ */
+async function ensureCredentials(context: vscode.ExtensionContext, covexcodeCommand: string): Promise<NodeJS.ProcessEnv> {
+	const config = vscode.workspace.getConfiguration('covexcode');
+	let provider = config.get<string>('provider', '');
+	let endpoint = config.get<string>('endpoint', '');
+	let model = config.get<string>('model', '');
+	let apiKey = (await context.secrets.get(SECRET_API_KEY)) ?? '';
+
+	if ((!endpoint || !model || !apiKey) && !configTomlExists()) {
+		const entered = await runSetupFlow(covexcodeCommand);
+		if (!entered) {
+			throw new SetupCancelled('covexcode setup was cancelled');
+		}
+		provider = entered.provider;
+		endpoint = entered.endpoint;
+		model = entered.model;
+		apiKey = entered.apiKey;
+		await persistSetupResult(context, entered);
+	}
+
+	const overrides: NodeJS.ProcessEnv = {};
+	if (provider) {
+		overrides.COVEXCODE_PROVIDER = provider;
+	}
+	if (endpoint) {
+		overrides.COVEXCODE_ENDPOINT = endpoint;
+	}
+	if (model) {
+		overrides.COVEXCODE_MODEL = model;
+	}
+	if (apiKey) {
+		overrides.COVEXCODE_API_KEY = apiKey;
+	}
+	return overrides;
+}
+
+function configTomlExists(): boolean {
+	try {
+		return fs.existsSync(path.join(os.homedir(), '.covexcode', 'config.toml'));
+	} catch {
+		return false;
+	}
+}
+
+/** Mirrors `providers.rs`'s `env_var_name()` exactly -- "deepseek" ->
+ * "DEEPSEEK_API_KEY" -- so a key a user already has exported for a
+ * provider's own conventional env var is picked up here without asking
+ * again, the same way `/provider` in the TUI does. */
+function providerEnvVarName(providerId: string): string {
+	return `${providerId.toUpperCase()}_API_KEY`;
+}
+
+const CUSTOM_ENDPOINT_ITEM = 'Custom endpoint…';
+
+/** Browser device login → SetupResult, also writing ~/.covexcode like the CLI. */
+async function signInSetupResult(): Promise<SetupResult | undefined> {
+	try {
+		const creds = await runBrowserDeviceLogin();
+		saveAccountCredentials(creds);
+		void heartbeatOnce();
+		return {
+			provider: creds.provider,
+			endpoint: creds.endpoint,
+			model: creds.model,
+			apiKey: creds.apiKey,
+		};
+	} catch (err) {
+		if (err instanceof DeviceLoginError && /cancelled/i.test(err.message)) {
+			return undefined;
+		}
+		const message = err instanceof Error ? err.message : String(err);
+		void vscode.window.showErrorMessage(`covexcode: sign-in failed — ${message}`);
+		return undefined;
+	}
+}
+
+/**
+ * Provider -> model -> API key, mirroring the TUI's own `/provider` overlay
+ * flow (`ProviderPicker`/`ModelPicker`/`ApiKeyPrompt` in `app.rs`) instead
+ * of asking for a raw endpoint URL -- see this function's own git history
+ * for why: a real tester hit the old three-bare-textbox version and asked
+ * "why do you need an endpoint? it should be pick a provider and model and
+ * enter an API key," which is exactly what the TUI already had.
+ *
+ * First offers Sign in with covexcode.com (browser device login, same as
+ * Accounts → covexcode.com / `covexcode login`), then falls through to the
+ * provider picker for BYOK.
+ *
+ * Falls back to the old raw endpoint/model/key flow (renamed
+ * `runCustomEndpointFlow` below) both for "Custom endpoint…" and, silently,
+ * if `covexcode --providers-json` fails for any reason -- an older `covexcode`
+ * binary predating this flag must still be onboardable, not just a binary
+ * that doesn't exist at all (that case is `probeBinaryExists`'s, checked
+ * before this ever runs).
+ */
+async function runSetupFlow(covexcodeCommand: string): Promise<SetupResult | undefined> {
+	const accountPick = await vscode.window.showQuickPick(
+		[
+			{
+				label: SIGN_IN_WITH_COVEXCODE,
+				description: 'Google sign-in in the browser — promo key via covexcode.com',
+			},
+			{
+				label: 'Use your own API key…',
+				description: 'Pick a provider and enter a key (BYOK)',
+			},
+		],
+		{
+			title: 'covexcode setup — how do you want to connect?',
+			ignoreFocusOut: true,
+		},
+	);
+	if (!accountPick) {
+		return undefined;
+	}
+	if (accountPick.label === SIGN_IN_WITH_COVEXCODE) {
+		return signInSetupResult();
+	}
+
+	let providers: ProviderDescriptor[];
+	try {
+		providers = await fetchProviders(covexcodeCommand);
+	} catch {
+		const custom = await runCustomEndpointFlow('covexcode setup');
+		return custom && { provider: '', ...custom };
+	}
+	if (providers.length === 0) {
+		const custom = await runCustomEndpointFlow('covexcode setup');
+		return custom && { provider: '', ...custom };
+	}
+
+	const providerPick = await vscode.window.showQuickPick(
+		[...providers.map(p => p.label), CUSTOM_ENDPOINT_ITEM],
+		{
+			title: 'covexcode setup (1/3) -- pick a provider',
+			ignoreFocusOut: true,
+		},
+	);
+	if (!providerPick) {
+		return undefined;
+	}
+	if (providerPick === CUSTOM_ENDPOINT_ITEM) {
+		const custom = await runCustomEndpointFlow('covexcode setup (custom endpoint)');
+		return custom && { provider: '', ...custom };
+	}
+	const provider = providers.find(p => p.label === providerPick);
+	if (!provider) {
+		return undefined;
+	}
+
+	const model = await vscode.window.showQuickPick(provider.models, {
+		title: `covexcode setup (2/3) -- pick a model for ${provider.label}`,
+		ignoreFocusOut: true,
+	});
+	if (!model) {
+		return undefined;
+	}
+
+	const envName = providerEnvVarName(provider.id);
+	const envKey = process.env[envName]?.trim();
+	if (envKey) {
+		return { provider: provider.id, endpoint: provider.endpoint, model, apiKey: envKey };
+	}
+
+	const apiKey = await vscode.window.showInputBox({
+		title: `covexcode setup (3/3) -- API key for ${provider.label}`,
+		prompt: `API key for ${provider.label} -- stored securely, never written to settings.json. ` +
+			`Tip: export ${envName} in your shell and this step is skipped next time.`,
+		password: true,
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An API key is required.'),
+	});
+	if (!apiKey) {
+		return undefined;
+	}
+
+	return { provider: provider.id, endpoint: provider.endpoint, model, apiKey: apiKey.trim() };
+}
+
+/** The original raw endpoint/model/key flow -- kept as the escape hatch for
+ * "Custom endpoint…" and as a fallback for a `covexcode` binary too old to
+ * support `--providers-json`. `titlePrefix` lets callers distinguish "the
+ * whole setup is a custom endpoint" from "the picker itself fell back". */
+async function runCustomEndpointFlow(
+	titlePrefix: string,
+): Promise<{ endpoint: string; model: string; apiKey: string } | undefined> {
+	const endpoint = await vscode.window.showInputBox({
+		title: `${titlePrefix} (1/3)`,
+		prompt: "covexcode's LLM endpoint -- an OpenAI-compatible base URL",
+		placeHolder: 'https://api.deepseek.com',
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An endpoint is required.'),
+	});
+	if (!endpoint) {
+		return undefined;
+	}
+
+	const model = await vscode.window.showInputBox({
+		title: `${titlePrefix} (2/3)`,
+		prompt: 'Model name to request from that endpoint',
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'A model name is required.'),
+	});
+	if (!model) {
+		return undefined;
+	}
+
+	const apiKey = await vscode.window.showInputBox({
+		title: `${titlePrefix} (3/3)`,
+		prompt: 'API key for that endpoint -- stored securely, never written to settings.json',
+		password: true,
+		ignoreFocusOut: true,
+		validateInput: value => (value.trim() ? undefined : 'An API key is required.'),
+	});
+	if (!apiKey) {
+		return undefined;
+	}
+
+	return { endpoint: endpoint.trim(), model: model.trim(), apiKey: apiKey.trim() };
+}
+
+/**
+ * A developer approving a write/edit over ACP was approving blind -- only a
+ * title string, never what would actually change (see `HeadlessSession::
+ * ask_permission`'s own doc comment on `protocol.rs`'s `ToolCallContent::
+ * Diff` for the wire side of this). The diff still opens in `vscode.changes`
+ * (a stable *viewer*, not an approval workflow). The Allow/Reject choice
+ * itself used to be `showWarningMessage({ modal: true })`, a system-level
+ * dialog in the middle of the screen, outside chat. That blocks the whole
+ * window and is easy to miss as "not part of this conversation." The
+ * decision now lives on the in-flight chat response as trusted command
+ * links -- `session/prompt` is still awaiting, so a follow-up ChatRequest
+ * (`stream.confirmation`) would deadlock behind VS Code's one-request-at-a-
+ * time Send button.
+ */
+/** Where a project's accumulated permission rules live. */
+function permissionStoreFile(cwd: string): string {
+	return path.join(cwd, PERMISSION_STORE_RELATIVE_PATH);
+}
+
+/**
+ * Reads the project's permission rules. A missing or unreadable file is not
+ * an error -- it just means nothing has been granted yet.
+ */
+function loadPermissionStore(cwd: string): PermissionStore {
+	try {
+		return new PermissionStore(
+			parsePermissionStore(fs.readFileSync(permissionStoreFile(cwd), 'utf8')).rules,
+		);
+	} catch {
+		return new PermissionStore([]);
+	}
+}
+
+/** Details a pending prompt needs so a later "always" choice can be stored. */
+const pendingPermissionContext = new Map<string, { cwd: string; action: string }>();
+
+/**
+ * Records an "Always allow" / "Deny always" choice against the project.
+ *
+ * Rules match the action exactly and never as a substring, so granting one
+ * command cannot silently authorise a different command that merely starts
+ * the same way.
+ */
+function rememberPermissionChoice(id: string, choice: string): void {
+	const context = pendingPermissionContext.get(id);
+	pendingPermissionContext.delete(id);
+	if (!context || (choice !== 'allow-always' && choice !== 'deny-always')) {
+		return;
+	}
+	try {
+		const store = loadPermissionStore(context.cwd);
+		const added = store.addRule({
+			kind: '',
+			match: 'exact',
+			pattern: context.action,
+			decision: choice === 'allow-always' ? 'allow' : 'deny',
+			createdAt: new Date().toISOString(),
+			source: 'user',
+		});
+		if (!added) {
+			return;
+		}
+		const file = permissionStoreFile(context.cwd);
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, serializePermissionStore(store.toFile()), 'utf8');
+	} catch {
+		// A permission file we cannot write must never break the tool call.
+	}
+}
+
+async function askPermission(
+	request: RequestPermissionRequest,
+	diffContentProvider: DiffContentProvider,
+	stream: vscode.ChatResponseStream,
+	permissionGate: PermissionGate,
+	cwd: string,
+): Promise<RequestPermissionOutcome> {
+	const action = request.toolCall.title ?? 'run this action';
+	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
+	const reject = request.options.find(option => option.kind === 'reject_once') ?? request.options.at(-1);
+	const allowLabel = allow?.name ?? 'Allow';
+	const rejectLabel = reject?.name ?? 'Reject';
+
+	const diff = request.toolCall.content;
+	const hunks = diff?.type === 'diff' && diff.hunks && diff.hunks.length > 0 ? diff.hunks : undefined;
+	if (diff?.type === 'diff') {
+		await showDiff(diff, diffContentProvider, cwd);
+	}
+
+	// Incremental permissions: if the user already granted (or refused) this
+	// exact action, answer from the stored rule instead of prompting again.
+	const remembered = loadPermissionStore(cwd).decide({ kind: '', action });
+	if (remembered === 'allow' && allow) {
+		return { outcome: 'selected', optionId: allow.optionId };
+	}
+	if (remembered === 'deny' && reject) {
+		return { outcome: 'selected', optionId: reject.optionId };
+	}
+
+	const { id, wait } = permissionGate.create();
+	if (diff?.type === 'diff' && hunks) {
+		pendingReviews.set(id, { newText: diff.newText, hunks });
+	}
+	// The pending call is rendered as a `ChatToolInvocationPart` before the
+	// prompt. That part doubles as the anchor `clearToPreviousToolInvocation`
+	// below needs: it is the last tool invocation on the stream, so clearing
+	// "to the previous tool invocation" removes exactly the prompt markdown
+	// that follows it and nothing else, leaving the pending row in place for
+	// covexcode's later completed update to flip in place (same `toolCallId`).
+	const pending = request.toolCall;
+	if (pending.toolCallId && pending.title) {
+		pushToolInvocation(pending.toolCallId, pending.title, pending.kind, pending.status, stream);
+	}
+	// The Allow/Reject choice is the in-chat markdown command links below.
+	// A `stream.confirmation()` card would deadlock here: its click arrives
+	// as a follow-up ChatRequest while `session/prompt` is still awaiting, so
+	// VS Code keeps Send disabled until this handler settles (see
+	// `chatPermission.ts`'s own doc comment). The links instead invoke
+	// `covexcode.permission.respond` (or `.review`) and resolve the gate on the
+	// same turn.
+	if (diff?.type === 'plan') {
+		stream.markdown(planDecisionMarkdown(diff, allowLabel, rejectLabel, id));
+	} else {
+		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks));
+	}
+	const answer = await wait;
+	pendingReviews.delete(id);
+	// The user answered (Allow/Reject/Review). Remove the prompt from chat:
+	// `clearToPreviousToolInvocation` slices the response back to the pending
+	// row pushed above, so the question -- and its now-dead links -- vanish
+	// rather than lingering as an unclickable card for the rest of the turn.
+	stream.clearToPreviousToolInvocation(vscode.ChatResponseClearToPreviousToolInvocationReason.NoReason);
+	return permissionOutcomeFromGate(answer, allow, reject);
+}
+
+function escapeMarkdownLinkLabel(label: string): string {
+	return label.replace(/[[\]()]/g, '\\$&');
+}
+
+function permissionDecisionMarkdown(
+	action: string,
+	allowLabel: string,
+	rejectLabel: string,
+	id: string,
+	hunks?: DiffHunk[],
+): vscode.MarkdownString {
+	const line = new vscode.MarkdownString(undefined, true);
+	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND, REVIEW_COMMAND] };
+	line.appendMarkdown('$(warning) **covexcode needs permission**\n\ncovexcode wants to ');
+	line.appendText(action);
+	line.appendMarkdown('.\n\n');
+	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	if (hunks) {
+		line.appendMarkdown(`&nbsp;&nbsp;[$(list-selection) Review hunks…](${reviewCommandUri(id)})`);
+	}
+	line.appendMarkdown('\n\n');
+	if (hunks) {
+		line.appendMarkdown(renderHunksMarkdown(hunks));
+		line.appendMarkdown('\n');
+	}
+	return line;
+}
+
+/**
+ * The plan card covexcode renders in place of a file diff when the turn ran in
+ * plan mode and the model called `exit_plan_mode`: title, summary, a numbered
+ * step list, and the explicitly-out-of-scope items, followed by the same
+ * Approve/Reject command links `permissionDecisionMarkdown` uses. Approving
+ * maps to `Decision::Allowed` (covexcode writes `plan.md`, leaves plan mode,
+ * implements); rejecting maps to `Decision::Refused` (covexcode stays in plan
+ * mode and revises) -- no new wire outcome, just a different card on the
+ * existing `request_permission` channel.
+ *
+ * The title/summary/steps/notDoing are the *model's own* proposal text, so
+ * they go through `appendText` (the same escaping `permissionDecisionMarkdown`
+ * uses for `action`) rather than raw `appendMarkdown` -- a `]` or `(` in a
+ * proposed step name must not be able to smuggle a command link into the card.
+ */
+function planDecisionMarkdown(
+	plan: { title: string; summary: string; steps: string[]; notDoing?: string[] },
+	allowLabel: string,
+	rejectLabel: string,
+	id: string,
+): vscode.MarkdownString {
+	const line = new vscode.MarkdownString(undefined, true);
+	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND] };
+	line.appendMarkdown('$(checklist) **covexcode proposes a plan**\n\n');
+	line.appendMarkdown('**');
+	line.appendText(plan.title);
+	line.appendMarkdown('**\n\n');
+	line.appendText(plan.summary);
+	if (plan.steps.length > 0) {
+		line.appendMarkdown('\n\n**Steps**\n');
+		for (const step of plan.steps) {
+			line.appendMarkdown('1. ');
+			line.appendText(step);
+			line.appendMarkdown('\n');
+		}
+	}
+	if (plan.notDoing && plan.notDoing.length > 0) {
+		line.appendMarkdown('\n**Out of scope**\n');
+		for (const item of plan.notDoing) {
+			line.appendMarkdown('- ');
+			line.appendText(item);
+			line.appendMarkdown('\n');
+		}
+	}
+	line.appendMarkdown(`\n[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
+	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	line.appendMarkdown('\n\n');
+	return line;
+}
+
+/**
+ * The per-hunk accept/reject picker. Opens a multi-select QuickPick over the
+ * hunks -- all pre-selected, so "review" means choosing which to *drop*,
+ * matching how the whole-file Allow already accepts everything -- and returns
+ * the merged text, or `undefined` if the picker was dismissed (which the
+ * caller treats as "no answer yet", leaving the Allow/Reject links live).
+ *
+ * `showQuickPick` is safe where `stream.confirmation()` is not: it is a plain
+ * modal that resolves its own promise, not a follow-up ChatRequest, so it
+ * cannot deadlock behind VS Code's Send button while `session/prompt` is
+ * still awaiting (see `chatPermission.ts`'s own doc comment).
+ */
+async function pickHunks(newText: string, hunks: DiffHunk[]): Promise<string | undefined> {
+	const items = hunks.map((hunk, index): vscode.QuickPickItem & { hunkIndex: number } => ({
+		label: `$(diff) Hunk ${index + 1}`,
+		description: summarizeHunk(hunk),
+		picked: true,
+		hunkIndex: index,
+	}));
+	const selected = await vscode.window.showQuickPick(items, {
+		placeHolder: 'Choose which hunks to apply (unchecked hunks are reverted)',
+		canPickMany: true,
+		matchOnDescription: true,
+	});
+	if (selected === undefined) {
+		return undefined;
+	}
+	const accepted = hunks.map((_, index) => selected.some(item => item.hunkIndex === index));
+	return applyHunkSelection(newText, hunks, accepted);
+}
+
+/**
+ * Backs the virtual `covexcode-diff:` documents `showDiff` hands to
+ * `vscode.changes` -- a document provider is the only stable way to give
+ * VS Code's own diff viewer text that doesn't exist as a real file (the
+ * "before" side of an edit, in particular, is what's on disk *right now*,
+ * not a file `showDiff` is meant to create). One provider instance for the
+ * whole extension host, registered once in `activate()`; each diff gets
+ * its own pair of URIs so two overlapping permission requests (there
+ * should never really be more than one in flight, but nothing enforces
+ * that here) can't clobber each other's content.
+ */
+class DiffContentProvider implements vscode.TextDocumentContentProvider {
+	private readonly documents = new Map<string, string>();
+	private nextId = 1;
+
+	provideTextDocumentContent(uri: vscode.Uri): string {
+		return this.documents.get(uri.toString()) ?? '';
+	}
+
+	/** Registers `content` under a fresh URI and returns it. Never removed -- see the class doc comment; the extension host's lifetime is short enough that this isn't worth the bookkeeping to garbage-collect. */
+	register(content: string): vscode.Uri {
+		const uri = vscode.Uri.from({ scheme: DIFF_SCHEME, path: `/${this.nextId++}` });
+		this.documents.set(uri.toString(), content);
+		return uri;
+	}
+}
+
+/**
+ * Opens covexcode's own diff via VS Code's stable `vscode.changes` command --
+ * the same multi-file diff viewer Source Control's own Changes panel uses
+ * (confirmed against this tree's real `extHostApiCommands.ts`, not a
+ * proposed API). It's a viewer, not an approval workflow -- see
+ * `askPermission`'s own doc comment for why this stops at "show the diff"
+ * rather than attempting per-hunk accept/reject here.
+ */
+async function showDiff(
+	diff: Extract<ToolCallContent, { type: 'diff' }>,
+	diffContentProvider: DiffContentProvider,
+	cwd: string,
+): Promise<void> {
+	const labelUri = vscode.Uri.file(resolvePathAgainstCwd(cwd, diff.path));
+	const leftUri = diffContentProvider.register(diff.oldText ?? '');
+	const rightUri = diffContentProvider.register(diff.newText);
+	try {
+		await vscode.commands.executeCommand('vscode.changes', `covexcode: ${diff.path}`, [
+			[labelUri, leftUri, rightUri],
+		]);
+	} catch {
+		// Never block the actual Allow/Reject decision on the diff viewer
+		// failing to open -- the in-chat buttons that follow are still the
+		// real approval gate, this is a courtesy on top of it.
+	}
+}
+
+/**
+ * Fulfills `check_in_browser` on the client side: finds or opens the tab at
+ * `url`, forces a fresh navigation (a reused tab could otherwise show
+ * stale content for a page with no hot-reload of its own), and screenshots
+ * it via raw CDP -- `vscode.proposed.browser`'s `BrowserCDPSession` is a
+ * bare bidirectional message channel, not a request/response API, so
+ * `CdpClient` below does the request-id correlation `covexcode`'s own ACP
+ * client (`AcpClient`) already does for a different protocol.
+ *
+ * A `BrowserCDPSession` starts out attached to nothing but the *browser*
+ * level of the CDP proxy (`platform/browserView/common/cdp/proxy.ts`'s
+ * `CDPBrowserProxy`), which only understands a handful of `Browser.*`/
+ * `Target.*` methods -- not `Page.*`. Every `Page.*` call needs a real
+ * page-session `sessionId`, obtained by listing the tab's own CDP targets
+ * and explicitly attaching to the page one (`flatten: true` is required,
+ * the proxy rejects `attachToTarget` without it). Skipping this and
+ * sending `Page.enable` bare is what silently makes it come back
+ * `Method not found` -- indistinguishable from the method genuinely not
+ * existing, which is what made this take a while to actually root-cause.
+ *
+ * Never throws: a failure becomes `{ outcome: 'failed', reason }`, which
+ * `HeadlessSession::check_browser` on the other end already knows how to
+ * turn into text the model can react to (see its own doc comment) --
+ * this function's job is only to describe what went wrong, not to decide
+ * what the model does about it.
+ */
+interface BrowserPageAttachment {
+	session: vscode.BrowserCDPSession;
+	cdp: CdpClient;
+	sessionId: string;
+	targetId: string;
+}
+
+/**
+ * The find-or-open-tab, attach-to-its-page-target preamble both
+ * `checkInBrowser` and `interactInBrowser` need identically -- factored out
+ * once both existed, rather than duplicated, per this same doc comment's own
+ * explanation (still accurate, read it below) of why `flatten: true` and an
+ * explicit page-session `sessionId` are required at all.
+ *
+ * Deliberately does NOT navigate -- that is `checkInBrowser`'s own next
+ * step, not this shared preamble's job. `interactInBrowser` acts on
+ * whatever the tab already shows (the same tab a prior `check_in_browser`
+ * call already looked at); forcing a fresh `Page.navigate` here would
+ * reload the page out from under it and destroy the exact state -- a
+ * filled-in form, a clicked-open menu -- the interaction exists to act on.
+ *
+ * A `BrowserCDPSession` starts out attached to nothing but the *browser*
+ * level of the CDP proxy (`platform/browserView/common/cdp/proxy.ts`'s
+ * `CDPBrowserProxy`), which only understands a handful of `Browser.*`/
+ * `Target.*` methods -- not `Page.*`/`Input.*`. Every such call needs a real
+ * page-session `sessionId`, obtained by listing the tab's own CDP targets
+ * and explicitly attaching to the page one (`flatten: true` is required,
+ * the proxy rejects `attachToTarget` without it). Skipping this and
+ * sending `Page.enable` bare is what silently makes it come back
+ * `Method not found` -- indistinguishable from the method genuinely not
+ * existing, which is what made this take a while to actually root-cause.
+ */
+async function attachToBrowserTab(url: string): Promise<BrowserPageAttachment> {
+	const tab = await ensureBrowserTab(url);
+	const session = await tab.startCDPSession();
+	const cdp = new CdpClient(session);
+
+	try {
+		// The tab itself is always the first `type: 'page'` target -- iframes
+		// and workers the page happens to have loaded also show up here, so
+		// this can't just take targetInfos[0].
+		const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>('Target.getTargets');
+		const page = targetInfos.find(t => t.type === 'page');
+		if (!page) {
+			throw new Error('No page target attached to this browser tab.');
+		}
+		const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
+		await cdp.send('Page.enable', undefined, sessionId);
+
+		return { session, cdp, sessionId, targetId: page.targetId };
+	} catch (error) {
+		// Any of the CDP calls above can throw; only the `!page` branch used
+		// to clean up, so a throw from `getTargets`/`attachToTarget`/
+		// `Page.enable` leaked both the `CdpClient` and the `BrowserCDPSession`
+		// (the caller's own `finally` only disposes the attachment once this
+		// has returned, so it never saw these). Tear them down here, then
+		// rethrow so the caller still reports `{ outcome: 'failed' }`.
+		cdp.dispose();
+		void session.close();
+		throw error;
+	}
+}
+
+/**
+ * Immediately before capturing, not immediately after attaching --
+ * matching exactly where VS Code's own BrowserView.captureScreenshot()
+ * does the identical toggle for its internal callers (its own comment:
+ * "ensures the webContents rendering pipeline is ready"). A tab opened
+ * with `background: true` can leave the view without a single composited
+ * frame, which makes `Page.captureScreenshot` fail with Electron's own
+ * "UnknownVizError" -- confirmed live, then root-caused against that exact
+ * method. Raw CDP never goes through captureScreenshot() at all, so it
+ * never got that protection until this call -- see the core patch
+ * implementing `Target.activateTarget` (previously an empty
+ * `// TODO@kycutler` stub) for the actual mechanism. Harmless if the tab is
+ * already visible: `wakeCompositorIfHidden()` on the other end is a no-op
+ * once the view already is.
+ */
+async function captureScreenshot(attachment: BrowserPageAttachment): Promise<string> {
+	await attachment.cdp.send('Target.activateTarget', { targetId: attachment.targetId });
+	const { data } = await attachment.cdp.send<{ data: string }>(
+		'Page.captureScreenshot',
+		{ format: 'png' },
+		attachment.sessionId,
+	);
+	return data;
+}
+
+/**
+ * Captures the page's accessibility tree and serializes it to the compact
+ * text snapshot the model reads. This is the token-efficient counterpart to
+ * `captureScreenshot`: the human sees the PNG, the model reads roles/labels/
+ * text — the page's *meaning* — without paying image-token cost on every
+ * verification step.
+ *
+ * Best-effort by design: an AX failure must not break the check. The
+ * screenshot path is already complete by the time this runs, so any error
+ * (an unsupported domain on some CDP target, a page that never computed a
+ * tree) simply degrades to the existing screenshot-only result and the model
+ * still gets its "screenshot captured" receipt. `Accessibility.enable` is
+ * called first defensively — some Chromium builds do not compute the tree
+ * until asked — and is harmless when already enabled.
+ */
+async function captureAccessibilityTree(attachment: BrowserPageAttachment): Promise<string | undefined> {
+	try {
+		await attachment.cdp.send('Accessibility.enable', undefined, attachment.sessionId);
+		const { nodes } = await attachment.cdp.send<{ nodes: AxNode[] }>(
+			'Accessibility.getFullAXTree',
+			undefined,
+			attachment.sessionId,
+		);
+		const text = serializeAxTree(nodes ?? []);
+		return text.length > 0 ? text : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Fulfills `check_in_browser` on the client side: finds or opens the tab at
+ * `url`, forces a fresh navigation (a reused tab could otherwise show
+ * stale content for a page with no hot-reload of its own), and screenshots
+ * it via raw CDP -- `vscode.proposed.browser`'s `BrowserCDPSession` is a
+ * bare bidirectional message channel, not a request/response API, so
+ * `CdpClient` does the request-id correlation `covexcode`'s own ACP client
+ * (`AcpClient`) already does for a different protocol.
+ *
+ * Never throws: a failure becomes `{ outcome: 'failed', reason }`, which
+ * `HeadlessSession::check_browser` on the other end already knows how to
+ * turn into text the model can react to (see its own doc comment) --
+ * this function's job is only to describe what went wrong, not to decide
+ * what the model does about it.
+ */
+async function checkInBrowser(url: string): Promise<CheckInBrowserOutcome> {
+	let attachment: BrowserPageAttachment | undefined;
+	try {
+		attachment = await attachToBrowserTab(url);
+		// Catch immediately, not only after navigate succeeds: the finally
+		// below dispose()s the client, and waitForEvent now rejects on
+		// dispose. Awaiting loaded only after navigate used to leave that
+		// rejection unhandled when navigate itself threw.
+		const loaded = attachment.cdp.waitForEvent('Page.loadEventFired', 10_000).catch(() => undefined);
+		await attachment.cdp.send('Page.navigate', { url }, attachment.sessionId);
+		// A page that never fires the load event (a script error, an
+		// infinite spinner) still gets screenshotted as-is below -- that is
+		// itself useful evidence, not a reason to fail the whole check.
+		await loaded;
+
+		const data = await captureScreenshot(attachment);
+		const axTree = await captureAccessibilityTree(attachment);
+		if (axTree) {
+			return { outcome: 'screenshot', mimeType: 'image/png', data, axTree };
+		}
+		return { outcome: 'screenshot', mimeType: 'image/png', data };
+	} catch (error) {
+		return { outcome: 'failed', reason: describeError(error) };
+	} finally {
+		attachment?.cdp.dispose();
+		void attachment?.session.close();
+	}
+}
+
+/**
+ * Fulfills `interact_in_browser` on the client side: clicks or types into
+ * the SAME tab `checkInBrowser` already looked at (no fresh navigation --
+ * see `attachToBrowserTab`'s own doc comment for why), via CDP's `Input`
+ * domain, then screenshots the result the same way `checkInBrowser` does so
+ * the model sees what actually happened rather than guessing.
+ *
+ * `Input.dispatchMouseEvent` needs an explicit press-then-release pair --
+ * a single event with no `type` distinction is not a click, it is a mouse
+ * sitting at a point. `Input.insertText` (rather than synthesizing
+ * `Input.dispatchKeyEvent` per character) inserts at whatever element
+ * currently has focus, the same primitive Playwright's own `page.fill()`
+ * uses -- simpler and more reliable than simulating individual keystrokes
+ * for the click+type slice this is scoped to.
+ *
+ * Never throws, same posture and same reason as `checkInBrowser`.
+ */
+async function interactInBrowser(url: string, interaction: BrowserInteraction): Promise<InteractInBrowserOutcome> {
+	let attachment: BrowserPageAttachment | undefined;
+	try {
+		attachment = await attachToBrowserTab(url);
+		if (interaction.action === 'click') {
+			const { x, y } = interaction;
+			await attachment.cdp.send(
+				'Input.dispatchMouseEvent',
+				{ type: 'mousePressed', x, y, button: 'left', clickCount: 1 },
+				attachment.sessionId,
+			);
+			await attachment.cdp.send(
+				'Input.dispatchMouseEvent',
+				{ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 },
+				attachment.sessionId,
+			);
+		} else {
+			await attachment.cdp.send('Input.insertText', { text: interaction.text }, attachment.sessionId);
+		}
+
+		const data = await captureScreenshot(attachment);
+		const axTree = await captureAccessibilityTree(attachment);
+		if (axTree) {
+			return { outcome: 'screenshot', mimeType: 'image/png', data, axTree };
+		}
+		return { outcome: 'screenshot', mimeType: 'image/png', data };
+	} catch (error) {
+		return { outcome: 'failed', reason: describeError(error) };
+	} finally {
+		attachment?.cdp.dispose();
+		void attachment?.session.close();
+	}
+}
+
+/**
+ * The visible half of `check_in_browser`. Terminal output already opens a
+ * pane via `workbench.browser.openLocalhostLinks`. Do not open a second
+ * editor beside it, and do not call `openBrowserTab` (that is what created
+ * the extra `about:blank` tab). Wait for the first pane, then reuse it.
+ */
+const PANE_OPEN_TIMEOUT_MS = 5_000;
+const TAB_APPEAR_WAIT_MS = 1_200;
+const TAB_APPEAR_STEP_MS = 80;
+const openingBrowserTabs = new Map<string, Promise<void>>();
+
+async function ensureBrowserTab(url: string) {
+	const key = localhostOrigin(url);
+	let opening = openingBrowserTabs.get(key);
+	if (!opening) {
+		opening = revealOrOpenBrowserTab(url).finally(() => {
+			openingBrowserTabs.delete(key);
+		});
+		openingBrowserTabs.set(key, opening);
+	}
+	await opening;
+
+	const tab = findReusableBrowserTab(vscode.window.browserTabs, url);
+	if (!tab) {
+		throw new Error('Browser tab did not open.');
+	}
+	return tab;
+}
+
+async function revealOrOpenBrowserTab(url: string): Promise<void> {
+	if (await waitForReusableTab(url, TAB_APPEAR_WAIT_MS)) {
+		await openBrowserPane(url);
+		return;
+	}
+	await openBrowserPane(url);
+	await waitForReusableTab(url, TAB_APPEAR_WAIT_MS);
+}
+
+async function waitForReusableTab(url: string, ms: number) {
+	const deadline = Date.now() + ms;
+	for (;;) {
+		const existing = findReusableBrowserTab(vscode.window.browserTabs, url);
+		if (existing) {
+			return existing;
+		}
+		if (Date.now() >= deadline) {
+			return undefined;
+		}
+		await delay(TAB_APPEAR_STEP_MS);
+	}
+}
+
+function browserReuseFilter(url: string): string {
+	return localhostOrigin(url);
+}
+
+async function openBrowserPane(url: string): Promise<void> {
+	try {
+		await Promise.race([
+			vscode.commands.executeCommand('workbench.action.browser.open', {
+				url,
+				openToSide: false,
+				reuseUrlFilter: browserReuseFilter(url),
+			}),
+			new Promise<void>(resolve => setTimeout(resolve, PANE_OPEN_TIMEOUT_MS)),
+		]);
+	} catch {
+		// See ensureBrowserTab -- not worth surfacing.
+	}
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export function deactivate(): void {
+	// Nothing to do here -- the disposable registered in activate() already
+	// tears the subprocess down on extension host shutdown.
+}

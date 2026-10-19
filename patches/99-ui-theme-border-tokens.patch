@@ -154,7 +154,7 @@ index 0000000..0000000 100644
 +	'widget.border': '#FFFFFF14'
  };
  
- // boxcode-ide: same treatment as COLOR_THEME_DARK_INITIAL_COLORS above,
+ // covexcode-ide: same treatment as COLOR_THEME_DARK_INITIAL_COLORS above,
 @@ -272,7 +272,7 @@
  	'actionBar.toggledBackground': '#dddddd',
  	'activityBar.activeBorder': '#7C3AED',

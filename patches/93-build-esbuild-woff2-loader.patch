@@ -6,7 +6,7 @@ index 21a17ee..29b7ba1 100644
  				target: [target],
  				loader: {
  					'.ttf': 'file',
-+					'.woff2': 'file', // boxcode-ide: geist.css's @font-face references a .woff2 (see src/vs/base/browser/ui/fonts/geist) -- esbuild has no default loader for it and fails the whole bundle without this
++					'.woff2': 'file', // covexcode-ide: geist.css's @font-face references a .woff2 (see src/vs/base/browser/ui/fonts/geist) -- esbuild has no default loader for it and fails the whole bundle without this
  					'.svg': 'file',
  					'.png': 'file',
  					'.sh': 'file',
@@ -18,7 +18,7 @@ index 7e0ef88..70c11d3 100644
  			banner,
  			loader: {
  				'.ttf': 'file',
-+				'.woff2': 'file', // boxcode-ide: geist.css's @font-face references a .woff2 (see src/vs/base/browser/ui/fonts/geist) -- esbuild has no default loader for it and fails the whole bundle without this
++				'.woff2': 'file', // covexcode-ide: geist.css's @font-face references a .woff2 (see src/vs/base/browser/ui/fonts/geist) -- esbuild has no default loader for it and fails the whole bundle without this
  				'.svg': 'file',
  				'.png': 'file',
  				'.sh': 'file',
