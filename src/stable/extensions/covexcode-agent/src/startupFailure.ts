@@ -50,8 +50,8 @@ export function describeStartupFailure(error: unknown, platform: NodeJS.Platform
 	}
 	const installCommand =
 		platform === 'win32'
-			? 'irm https://covexcode.com/install.ps1 | iex'
-			: 'curl -fsSL https://covexcode.com/install.sh | bash';
+			? 'irm https://covexcode.sh/install.ps1 | iex'
+			: 'curl -fsSL https://covexcode.sh/install.sh | bash';
 	return (
 		"The `covexcode` CLI isn't installed yet -- covexcode IDE and the `covexcode` command are separate installs. " +
 		`Run this in a terminal, then send your message again:\n\n\`\`\`\n${installCommand}\n\`\`\``
