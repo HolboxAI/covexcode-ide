@@ -18,8 +18,8 @@ On top of the fork, the patch set adds a chat-first landing page, an Integrated 
 covexcode-ide and the `covexcode` CLI are separate installs: this repo is only the editor surface, and the chat participant it ships shells out to a `covexcode` binary already on your `PATH` (see the Architecture section below). Install that binary first:
 
 ```sh
-curl -fsSL https://covexcode.com/install.sh | bash      # macOS/Linux
-irm https://covexcode.com/install.ps1 | iex              # Windows (PowerShell)
+curl -fsSL https://covexcode.sh/install.sh | bash      # macOS/Linux
+irm https://covexcode.sh/install.ps1 | iex              # Windows (PowerShell)
 ```
 
 ### Install the IDE itself (macOS dev builds)
@@ -63,7 +63,7 @@ The Flatpak is a sideloaded bundle. There is no Flathub listing yet:
 ```sh
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user ./Covexcode-x86_64.flatpak
-flatpak run ai.holbox.Covexcode
+flatpak run com.covexcode.Covexcode
 ```
 
 The sandbox can see the host home directory, so the CLI in `~/.local/bin` still works.
