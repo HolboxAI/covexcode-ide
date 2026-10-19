@@ -41,15 +41,15 @@ concurrency:
 # jobs, all gated by `needs: compile`) automatically - only the real
 # "compile" job (compile+typecheck) runs.
 
-# P1: boxcode-ide only builds the "stable" quality for now — no insider
+# P1: covexcode-ide only builds the "stable" quality for now — no insider
 # channel yet. ASSETS_REPOSITORY is set explicitly (rather than relying on
 # utils.sh's fallback) so a misconfigured run can never silently point at
 # VSCodium's own release/update infrastructure.
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
-  APP_NAME: Boxcode
+  APP_NAME: Covexcode
   ASSETS_REPOSITORY: ${{ github.repository }}
-  BINARY_NAME: boxcode-ide
+  BINARY_NAME: covexcode-ide
   # DISABLE_UPDATE=no bakes updateUrl into product.json so a shipped .tar.gz
   # build can notice a newer versioned build (via the update-feed branch, see
   # publish_update_feed.sh). The app still asks before downloading; it never
@@ -63,7 +63,7 @@ env:
   OS_NAME: linux
   VSCODE_QUALITY: stable
 
-# boxcode-ide is private (unlike VSCodium's public repo, where an empty
+# covexcode-ide is private (unlike VSCodium's public repo, where an empty
 # permissions block still allows read access) — GITHUB_TOKEN needs an
 # explicit contents:read or actions/checkout can't even fetch the repo.
 permissions:
@@ -280,7 +280,7 @@ jobs:
     if: ${{ always() && (github.event.inputs.generate_assets == 'true' || github.event_name == 'push') && !cancelled() && needs.compile.result == 'success' }}
     runs-on: ubuntu-latest
     env:
-      APP_NAME: Boxcode
+      APP_NAME: Covexcode
       FLATPAK_ARCH: x86_64
       RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
     steps:
@@ -312,10 +312,10 @@ jobs:
 
       - name: Build Flatpak bundle
         run: |
-          chmod +x stores/flatpak/build.sh stores/flatpak/apply.sh stores/flatpak/boxcode-ide.sh
+          chmod +x stores/flatpak/build.sh stores/flatpak/apply.sh stores/flatpak/covexcode-ide.sh
           ls -la assets
           shopt -s nullglob
-          debs=( assets/boxcode-ide_*_amd64.deb assets/*_amd64.deb )
+          debs=( assets/covexcode-ide_*_amd64.deb assets/*_amd64.deb )
           if [[ ${#debs[@]} -eq 0 ]]; then
             echo "bin-x64 did not contain an amd64 .deb — x64 package job probably failed" >&2
             exit 1
@@ -393,7 +393,7 @@ jobs:
           shopt -s nullglob
           TAG="${RELEASE_VERSION}"
           gh release create "$TAG" --repo "${{ github.repository }}" \
-            --title "boxcode-ide ${RELEASE_VERSION}" \
+            --title "covexcode-ide ${RELEASE_VERSION}" \
             --notes "Unsigned dev build. Not for public distribution. Formats: .deb/.rpm (x64/arm64/ppc64le), .tar.gz (all arches including riscv64/loong64), AppImage and Flatpak (x64), plus checksums." \
             --prerelease --generate-notes 2>/dev/null || true
           files=( assets/*.deb assets/*.rpm assets/*.AppImage assets/*.AppImage.zsync assets/*.tar.gz assets/*.flatpak assets/*.sha256 assets/*.sha1 )
@@ -412,13 +412,13 @@ jobs:
       - name: Publish update feed
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APP_NAME: Boxcode
+          APP_NAME: Covexcode
           OS_NAME: linux
           VSCODE_QUALITY: stable
           VSCODE_ARCH: x64
           RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
         run: |
-          ASSET="Boxcode-linux-x64-${RELEASE_VERSION}.tar.gz"
+          ASSET="Covexcode-linux-x64-${RELEASE_VERSION}.tar.gz"
           if [[ ! -f "assets/${ASSET}" ]]; then
             echo "Skipping update feed: assets/${ASSET} missing (x64 build failed)"
             exit 0

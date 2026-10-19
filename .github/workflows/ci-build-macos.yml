@@ -42,7 +42,7 @@ concurrency:
 # should be made a required status check in branch protection, once its
 # exact name is confirmed reporting on a real run - see docs/BACKLOG.md.
 
-# P1: boxcode-ide only builds the "stable" quality for now — no insider
+# P1: covexcode-ide only builds the "stable" quality for now — no insider
 # channel yet. ASSETS_REPOSITORY is set explicitly (rather than relying on
 # utils.sh's fallback) so a misconfigured run can never silently point at
 # VSCodium's own release/update infrastructure.
@@ -51,9 +51,9 @@ concurrency:
 # can notice a newer versioned build. The app still asks before downloading;
 # it does not silent-install. Local ./dev/build.sh keeps DISABLE_UPDATE=yes.
 env:
-  APP_NAME: Boxcode
+  APP_NAME: Covexcode
   ASSETS_REPOSITORY: ${{ github.repository }}
-  BINARY_NAME: boxcode-ide
+  BINARY_NAME: covexcode-ide
   DISABLE_UPDATE: no
   GH_REPO_PATH: ${{ github.repository }}
   GITHUB_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.head }}
@@ -72,7 +72,7 @@ env:
   SHOULD_BUILD_REH: 'no'
   SHOULD_BUILD_REH_WEB: 'no'
 
-# boxcode-ide is private (unlike VSCodium's public repo, where an empty
+# covexcode-ide is private (unlike VSCodium's public repo, where an empty
 # permissions block still allows read access) — GITHUB_TOKEN needs an
 # explicit contents:read or actions/checkout can't even fetch the repo.
 permissions:
@@ -117,7 +117,7 @@ jobs:
           echo "$CHANGED"
 
           # src/ is copied into the vscode tree by prepare_vscode.sh (the
-          # boxcode-agent extension and branding overlay). build/ and
+          # covexcode-agent extension and branding overlay). build/ and
           # prepare_assets.sh are the packaging path. icons/ is copied into
           # the overlay. Omitting any of these meant a PR that only touched
           # the agent, a packaging script, or an icon skipped compile.
@@ -260,7 +260,7 @@ jobs:
       # it walks and re-zips a whole directory tree. Confirmed directly on a
       # real download - every single file in the .app bundle (5,352 of them)
       # came out with the execute bit stripped, which is exactly why macOS
-      # showed a bare "Boxcode IDE can't be opened" with no further detail:
+      # showed a bare "Covexcode IDE can't be opened" with no further detail:
       # LaunchServices can't even attempt to run a non-executable file, so it
       # never gets far enough to show a Gatekeeper dialog. Standard fix for
       # this class of GitHub Actions gotcha: tar the tree into one opaque
@@ -371,7 +371,7 @@ jobs:
             NOTES="Unsigned (ad-hoc) macOS build. Gatekeeper may warn on first launch (right-click → Open). Add CERTIFICATE_OSX_* repo secrets for Developer ID signing + notarization."
           fi
           gh release create "$TAG" --repo "${{ github.repository }}" \
-            --title "boxcode-ide ${RELEASE_VERSION}" \
+            --title "covexcode-ide ${RELEASE_VERSION}" \
             --notes "$NOTES" \
             --prerelease --generate-notes 2>/dev/null || true
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip assets/*.dmg

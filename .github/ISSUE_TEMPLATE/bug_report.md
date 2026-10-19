@@ -5,7 +5,7 @@ labels: bug
 ---
 
 **Which repo does this actually belong to?**
-If this is about agent behavior (tool calls, approval logic, model responses), it likely belongs in `HolboxAI/boxcode`, not here. This repo is the editor surface only.
+If this is about agent behavior (tool calls, approval logic, model responses), it likely belongs in `HolboxAI/covexcode`, not here. This repo is the editor surface only.
 
 **What happened**
 
