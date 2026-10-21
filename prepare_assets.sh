@@ -48,21 +48,34 @@ if [[ "${SHOULD_BUILD_CLI}" != "no" ]]; then
   NAME_LONG="$( node -p "require(\"./vscode/product.json\").nameLong" )"
   TUNNEL_APPLICATION_NAME="$( node -p "require(\"./vscode/product.json\").tunnelApplicationName" )"
 
-  mkdir -p "vscode-cli"
-
-  cd "vscode-cli"
-
   if [[ "${OS_NAME}" == "osx" ]]; then
-    cp "../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/${NAME_LONG}.app/Contents/Resources/app/bin/${TUNNEL_APPLICATION_NAME}" "${APPLICATION_NAME}"
+    CLI_SRC="../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/${NAME_LONG}.app/Contents/Resources/app/bin/${TUNNEL_APPLICATION_NAME}"
+    CLI_DST="${APPLICATION_NAME}"
   elif [[ "${OS_NAME}" == "windows" ]]; then
-    cp "../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/bin/${TUNNEL_APPLICATION_NAME}.exe" "${APPLICATION_NAME}.exe"
+    CLI_SRC="../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/bin/${TUNNEL_APPLICATION_NAME}.exe"
+    CLI_DST="${APPLICATION_NAME}.exe"
   else
-    cp "../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/bin/${TUNNEL_APPLICATION_NAME}" "${APPLICATION_NAME}"
+    CLI_SRC="../VSCode-${VSCODE_PLATFORM}-${VSCODE_ARCH}/bin/${TUNNEL_APPLICATION_NAME}"
+    CLI_DST="${APPLICATION_NAME}"
   fi
 
-  tar czf "../assets/${APP_NAME_LC}-cli-${VSCODE_PLATFORM}-${VSCODE_ARCH}-${RELEASE_VERSION}.tar.gz" .
+  # build_cli.sh only builds the tunnel CLI for arches it has a Rust target
+  # for (Linux x64/arm64/ppc64le, macOS/Windows x64/arm64). riscv64 and
+  # loong64 have no target yet, so the binary legitimately doesn't exist
+  # there -- skip the CLI tarball rather than failing the whole job.
+  if [[ ! -f "${CLI_SRC}" ]]; then
+    echo "Skipping CLI tarball: no tunnel CLI built for ${VSCODE_PLATFORM}-${VSCODE_ARCH} (no Rust target)"
+  else
+    mkdir -p "vscode-cli"
 
-  cd ..
+    cd "vscode-cli"
+
+    cp "${CLI_SRC}" "${CLI_DST}"
+
+    tar czf "../assets/${APP_NAME_LC}-cli-${VSCODE_PLATFORM}-${VSCODE_ARCH}-${RELEASE_VERSION}.tar.gz" .
+
+    cd ..
+  fi
 fi
 
 if [[ "${OS_NAME}" != "windows" ]]; then
