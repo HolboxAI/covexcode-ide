@@ -53,9 +53,9 @@ env:
   SHOULD_BUILD_REH: 'no'
   SHOULD_BUILD_REH_WEB: 'no'
 
-# covexcode-ide is private (unlike VSCodium's public repo, where an empty
-# permissions block still allows read access) — GITHUB_TOKEN needs an
-# explicit contents:read or actions/checkout can't even fetch the repo.
+# Keep an explicit contents:read grant: GITHUB_TOKEN defaults to read-only in
+# a public repo, but stating it keeps the workflow's capability surface
+# explicit (and unchanged if the repo is ever made private again).
 permissions:
   contents: read
 

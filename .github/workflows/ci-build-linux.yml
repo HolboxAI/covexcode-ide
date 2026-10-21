@@ -63,9 +63,9 @@ env:
   OS_NAME: linux
   VSCODE_QUALITY: stable
 
-# covexcode-ide is private (unlike VSCodium's public repo, where an empty
-# permissions block still allows read access) — GITHUB_TOKEN needs an
-# explicit contents:read or actions/checkout can't even fetch the repo.
+# Keep an explicit contents:read grant: GITHUB_TOKEN defaults to read-only in
+# a public repo, but stating it keeps the workflow's capability surface
+# explicit (and unchanged if the repo is ever made private again).
 permissions:
   contents: read
 
@@ -354,10 +354,9 @@ jobs:
     if: ${{ always() && (github.event.inputs.generate_assets == 'true' || github.event_name == 'push') && !cancelled() && needs.compile.result == 'success' }}
     runs-on: ubuntu-latest
     # Job-level permissions override the workflow-level `contents: read`
-    # above (which exists so actions/checkout can fetch this private repo).
-    # Creating a release needs `contents: write` - the exact fix the macOS
-    # workflow needed (its `gh release create` failed 403 under the read-only
-    # default).
+    # above. Creating a release needs `contents: write` - the exact fix the
+    # macOS workflow needed (its `gh release create` failed 403 under the
+    # read-only default).
     permissions:
       contents: write
     env:
