@@ -6,8 +6,8 @@
   <developer_name>HolboxAI</developer_name>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <url type="homepage">https://github.com/HolboxAI/boxcode-ide</url>
-  <url type="bugtracker">https://github.com/HolboxAI/boxcode-ide/issues</url>
+  <url type="homepage">https://github.com/HolboxAI/covexcode-ide</url>
+  <url type="bugtracker">https://github.com/HolboxAI/covexcode-ide/issues</url>
   <launchable type="desktop-id">com.covexcode.Covexcode.desktop</launchable>
   <description>
     <p>

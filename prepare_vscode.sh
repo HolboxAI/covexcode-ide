@@ -52,10 +52,10 @@ setpath "product" "introductoryVideosUrl" "https://go.microsoft.com/fwlink/?link
 setpath "product" "keyboardShortcutsUrlLinux" "https://go.microsoft.com/fwlink/?linkid=832144"
 setpath "product" "keyboardShortcutsUrlMac" "https://go.microsoft.com/fwlink/?linkid=832143"
 setpath "product" "keyboardShortcutsUrlWin" "https://go.microsoft.com/fwlink/?linkid=832145"
-setpath "product" "licenseUrl" "https://github.com/HolboxAI/boxcode-ide/blob/main/LICENSE"
+setpath "product" "licenseUrl" "https://github.com/HolboxAI/covexcode-ide/blob/main/LICENSE"
 setpath_json "product" "linkProtectionTrustedDomains" '["https://open-vsx.org"]'
 setpath "product" "releaseNotesUrl" "https://go.microsoft.com/fwlink/?LinkID=533483#vscode"
-setpath "product" "reportIssueUrl" "https://github.com/HolboxAI/boxcode-ide/issues/new"
+setpath "product" "reportIssueUrl" "https://github.com/HolboxAI/covexcode-ide/issues/new"
 setpath "product" "requestFeatureUrl" "https://go.microsoft.com/fwlink/?LinkID=533482"
 setpath "product" "tipsAndTricksUrl" "https://go.microsoft.com/fwlink/?linkid=852118"
 setpath "product" "twitterUrl" "https://go.microsoft.com/fwlink/?LinkID=533687"
@@ -66,12 +66,12 @@ setpath "product" "twitterUrl" "https://go.microsoft.com/fwlink/?LinkID=533687"
 # notifies when a newer build exists and waits for the user to confirm
 # before downloading. It does not silently replace the running app.
 if [[ "${DISABLE_UPDATE}" != "yes" ]]; then
-  setpath "product" "updateUrl" "https://raw.githubusercontent.com/HolboxAI/boxcode-ide/update-feed"
+  setpath "product" "updateUrl" "https://raw.githubusercontent.com/HolboxAI/covexcode-ide/update-feed"
 
   if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-    setpath "product" "downloadUrl" "https://github.com/HolboxAI/boxcode-ide-insiders/releases"
+    setpath "product" "downloadUrl" "https://github.com/HolboxAI/covexcode-ide-insiders/releases"
   else
-    setpath "product" "downloadUrl" "https://github.com/HolboxAI/boxcode-ide/releases"
+    setpath "product" "downloadUrl" "https://github.com/HolboxAI/covexcode-ide/releases"
   fi
 
   # if [[ "${OS_NAME}" == "windows" ]]; then
@@ -314,28 +314,28 @@ if [[ "${OS_NAME}" == "linux" ]]; then
   # fix the packages metadata
   # code.appdata.xml
   sed -i 's|Visual Studio Code|Covexcode|g' resources/linux/code.appdata.xml
-  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/boxcode-ide#readme|' resources/linux/code.appdata.xml
+  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/covexcode-ide#readme|' resources/linux/code.appdata.xml
   sed -i 's|https://code.visualstudio.com/home/home-screenshot-linux-lg.png||' resources/linux/code.appdata.xml
-  sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/boxcode-ide|' resources/linux/code.appdata.xml
+  sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/covexcode-ide|' resources/linux/code.appdata.xml
 
   # control.template
-  sed -i 's|Microsoft Corporation <vscode-linux@microsoft.com>|HolboxAI https://github.com/HolboxAI/boxcode-ide/graphs/contributors|'  resources/linux/debian/control.template
+  sed -i 's|Microsoft Corporation <vscode-linux@microsoft.com>|HolboxAI https://github.com/HolboxAI/covexcode-ide/graphs/contributors|'  resources/linux/debian/control.template
   sed -i 's|Visual Studio Code|Covexcode|g' resources/linux/debian/control.template
-  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/boxcode-ide#readme|' resources/linux/debian/control.template
-  sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/boxcode-ide|' resources/linux/debian/control.template
+  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/covexcode-ide#readme|' resources/linux/debian/control.template
+  sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/covexcode-ide|' resources/linux/debian/control.template
 
   # code.spec.template
   sed -i 's|Microsoft Corporation|HolboxAI|' resources/linux/rpm/code.spec.template
-  sed -i 's|Visual Studio Code Team <vscode-linux@microsoft.com>|HolboxAI https://github.com/HolboxAI/boxcode-ide/graphs/contributors|' resources/linux/rpm/code.spec.template
+  sed -i 's|Visual Studio Code Team <vscode-linux@microsoft.com>|HolboxAI https://github.com/HolboxAI/covexcode-ide/graphs/contributors|' resources/linux/rpm/code.spec.template
   sed -i 's|Visual Studio Code|Covexcode|' resources/linux/rpm/code.spec.template
-  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/boxcode-ide#readme|' resources/linux/rpm/code.spec.template
-  sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/boxcode-ide|' resources/linux/rpm/code.spec.template
+  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/HolboxAI/covexcode-ide#readme|' resources/linux/rpm/code.spec.template
+  sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/covexcode-ide|' resources/linux/rpm/code.spec.template
 
   # snapcraft.yaml
   sed -i 's|Visual Studio Code|Covexcode|' resources/linux/rpm/code.spec.template
 elif [[ "${OS_NAME}" == "windows" ]]; then
   # code.iss
-  sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/boxcode-ide|' build/win32/code.iss
+  sed -i 's|https://code.visualstudio.com|https://github.com/HolboxAI/covexcode-ide|' build/win32/code.iss
   sed -i 's|Microsoft Corporation|HolboxAI|' build/win32/code.iss
 fi
 

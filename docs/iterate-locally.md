@@ -16,7 +16,7 @@ export OS_NAME=osx
 export VSCODE_ARCH=arm64
 export VSCODE_QUALITY=stable
 # Set DISABLE_UPDATE=no to bake in the versioned-release update feed
-# (https://raw.githubusercontent.com/HolboxAI/boxcode-ide/update-feed).
+# (https://raw.githubusercontent.com/HolboxAI/covexcode-ide/update-feed).
 export DISABLE_UPDATE=yes
 export SHOULD_BUILD=yes
 export SHOULD_BUILD_REH=no

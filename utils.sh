@@ -2,9 +2,9 @@
 
 APP_NAME="${APP_NAME:-Covexcode}"
 APP_NAME_LC="$( echo "${APP_NAME}" | awk '{print tolower($0)}' )"
-ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-HolboxAI/boxcode-ide}"
+ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-HolboxAI/covexcode-ide}"
 BINARY_NAME="${BINARY_NAME:-covexcode-ide}"
-GH_REPO_PATH="${GH_REPO_PATH:-HolboxAI/boxcode-ide}"
+GH_REPO_PATH="${GH_REPO_PATH:-HolboxAI/covexcode-ide}"
 ORG_NAME="${ORG_NAME:-HolboxAI}"
 TUNNEL_APP_NAME="${TUNNEL_APP_NAME:-"${BINARY_NAME}-tunnel"}"
 

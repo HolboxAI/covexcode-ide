@@ -24,7 +24,7 @@ irm https://covexcode.com/install.ps1 | iex              # Windows (PowerShell)
 
 ### Install the IDE itself (macOS dev builds)
 
-Download the latest `.dmg` from the [latest release](https://github.com/HolboxAI/boxcode-ide/releases/latest) and drag **Covexcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
+Download the latest `.dmg` from the [latest release](https://github.com/HolboxAI/covexcode-ide/releases/latest) and drag **Covexcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
 
 ```sh
 xattr -cr "/Applications/Covexcode IDE.app"
@@ -36,7 +36,7 @@ Then open a folder in covexcode-ide and send a chat message — the first messag
 
 ### Linux
 
-The `.deb`, `.rpm`, AppImage, Flatpak, and `.tar.gz` packages ship on the [latest release](https://github.com/HolboxAI/boxcode-ide/releases/latest). Every merge to `main` produces a new release with all formats. See the Release model section for how each format updates.
+The `.deb`, `.rpm`, AppImage, Flatpak, and `.tar.gz` packages ship on the [latest release](https://github.com/HolboxAI/covexcode-ide/releases/latest). Every merge to `main` produces a new release with all formats. See the Release model section for how each format updates.
 
 #### .deb / .rpm
 
@@ -84,7 +84,7 @@ The Snap is a classic-confinement bundle. It downloads the `.deb` from the lates
 
 covexcode-ide ships versioned releases. Every merge to `main` produces one new release. The release is immutable. It carries every file format for every platform.
 
-The latest release is always at [`/releases/latest`](https://github.com/HolboxAI/boxcode-ide/releases/latest). Older releases keep their own versioned tags.
+The latest release is always at [`/releases/latest`](https://github.com/HolboxAI/covexcode-ide/releases/latest). Older releases keep their own versioned tags.
 
 ### Version scheme
 
@@ -105,7 +105,7 @@ CI computes the counter with `git rev-list --count HEAD`. The counter is monoton
 
 ### Update feed
 
-The built-in updater reads a JSON feed. `updateUrl` in `product.json` points at `https://raw.githubusercontent.com/HolboxAI/boxcode-ide/update-feed`. The app fetches `${updateUrl}/${quality}/${platform}/${arch}/latest.json`. CI writes that file on every release run.
+The built-in updater reads a JSON feed. `updateUrl` in `product.json` points at `https://raw.githubusercontent.com/HolboxAI/covexcode-ide/update-feed`. The app fetches `${updateUrl}/${quality}/${platform}/${arch}/latest.json`. CI writes that file on every release run.
 
 Only two formats use the built-in updater:
 
