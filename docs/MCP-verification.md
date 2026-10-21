@@ -1,6 +1,13 @@
 # MCP verification — what the installed CLI actually does
 
-Date: 2026-09-18. Status: **observed empirically, not inferred from source.**
+> **Superseded 2026-10-07 — read as a historical record.** This page was scoped to CLI
+> `1.11.40` and said so: it described what that binary did, and "says nothing about how a
+> future MCP-capable CLI will behave." That future arrived. The CLI now parses
+> `mcpServers` into typed server configs and genuinely connects (`src/mcp.rs`; the
+> handshake runs in `SessionActor::spawn` via `connect_mcp()`, off the request path), so
+> the "defers to the capability check and does nothing" conclusion below no longer holds.
+> Kept because the method — observed, not inferred — is worth keeping. Current state:
+> `MCP.md`; open decision: `MCP-permissions-decision.md`.
 
 ## Why this exists
 

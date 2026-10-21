@@ -4,7 +4,7 @@ set -euo pipefail
 
 # Pushes stable/<platform>/<arch>/latest.json to the update-feed branch so
 # a running app can see that a newer rolling build exists. Lives in this
-# same repo (no HolboxAI/boxcode-ide-versions) because the IDE already
+# same repo (no HolboxAI/covexcode-ide-versions) because the IDE already
 # fetches ${updateUrl}/${quality}/${platform}/${arch}/latest.json.
 
 if [[ -z "${RELEASE_VERSION:-}" || -z "${VSCODE_ARCH:-}" || -z "${VSCODE_QUALITY:-}" ]]; then
@@ -18,7 +18,7 @@ if [[ -z "${GITHUB_TOKEN:-}" && -z "${GH_TOKEN:-}" ]]; then
 fi
 
 GITHUB_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN}}"
-REPO="${GITHUB_REPOSITORY:-HolboxAI/boxcode-ide}"
+REPO="${GITHUB_REPOSITORY:-HolboxAI/covexcode-ide}"
 FEED_BRANCH="${UPDATE_FEED_BRANCH:-update-feed}"
 APP_NAME="${APP_NAME:-Covexcode}"
 OS_NAME="${OS_NAME:-osx}"

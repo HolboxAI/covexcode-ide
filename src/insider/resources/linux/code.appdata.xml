@@ -4,7 +4,7 @@
 	<metadata_license>@@LICENSE@@</metadata_license>
 	<project_license>@@LICENSE@@</project_license>
 	<name>@@NAME_LONG@@</name>
-	<url type="homepage">https://github.com/HolboxAI/boxcode-ide</url>
+	<url type="homepage">https://github.com/HolboxAI/covexcode-ide</url>
 	<summary>Covexcode. Code editing for frontend engineers.</summary>
 	<description>
 		<p>Covexcode is a HolboxAI binary distribution of the open-source Code-OSS editor, distributed via Open VSX instead of the Microsoft Marketplace.</p>
