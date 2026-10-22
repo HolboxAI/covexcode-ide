@@ -1,0 +1,19 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/chatViewPane.ts b/src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/chatViewPane.ts
+--- a/src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/chatViewPane.ts
++++ b/src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/chatViewPane.ts
+@@ -632,7 +632,14 @@
+ 		const newSessionButtonContainer = this.sessionsNewButtonContainer = append(sessionsContainer, $('.agent-sessions-new-button-container'));
+ 		const newSessionButton = this._register(new Button(newSessionButtonContainer, { ...defaultButtonStyles, secondary: true }));
+ 		newSessionButton.label = localize('newSession', "New Session");
+-		this._register(newSessionButton.onDidClick(() => this.commandService.executeCommand(ACTION_ID_NEW_CHAT, this.getActionsContext())));
++		this._register(newSessionButton.onDidClick(async () => {
++			// Focus this view's own widget before invoking New Chat. Passing the
++			// current session resource made the action resolve a chat editor
++			// widget when the same session was also open there, so it cleared the
++			// editor and left this sidebar unchanged.
++			this._widget?.focusInput();
++			await this.commandService.executeCommand(ACTION_ID_NEW_CHAT);
++		}));
+ 
+ 		// Sessions Control
+ 		this.sessionsControlContainer = append(sessionsContainer, $('.agent-sessions-control-container'));
