@@ -370,10 +370,25 @@ jobs:
           else
             NOTES="Unsigned (ad-hoc) macOS build. Gatekeeper may warn on first launch (right-click → Open). Add CERTIFICATE_OSX_* repo secrets for Developer ID signing + notarization."
           fi
-          gh release create "$TAG" --repo "${{ github.repository }}" \
-            --title "covexcode-ide ${RELEASE_VERSION}" \
-            --notes "$NOTES" \
-            --prerelease --generate-notes 2>/dev/null || true
+          # Another platform build may have created the release first (the
+          # Linux/Windows workflows run in parallel), in which case
+          # `gh release create` fails and the macOS notes are never applied.
+          # Prepend the macOS signing note to the existing body and drop a
+          # stale "Unsigned dev build" paragraph if one is present.
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            EXISTING="$(gh release view "$TAG" --repo "${{ github.repository }}" --json body --jq .body)"
+            if [[ "$EXISTING" == "Unsigned dev build."* ]]; then
+              EXISTING="$(printf '%s\n' "$EXISTING" | sed '1,/^$/d')"
+            fi
+            if [[ "$EXISTING" != *"Developer ID–signed and notarized macOS build"* ]]; then
+              gh release edit "$TAG" --repo "${{ github.repository }}" --notes "$NOTES"$'\n\n'"$EXISTING"
+            fi
+          else
+            gh release create "$TAG" --repo "${{ github.repository }}" \
+              --title "covexcode-ide ${RELEASE_VERSION}" \
+              --notes "$NOTES" \
+              --prerelease --generate-notes
+          fi
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber assets/*.zip assets/*.dmg
 
       - name: Publish update feed
