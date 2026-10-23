@@ -18,6 +18,7 @@ import {
 	ChangeEntry,
 	CheckInBrowserOutcome,
 	CheckInBrowserRequest,
+	covexcodeVersion,
 	DiffHunk,
 	fetchProviders,
 	InteractInBrowserOutcome,
@@ -61,6 +62,8 @@ import { referenceContextSection } from './referenceContent';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import { createTurnUsage, TurnUsage } from './turnUsage';
 import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter, SessionUsage } from './sessionUsage';
+import { approvalEnvValue, cyclePermissionMode, permissionModeDescription, permissionModeFromSetting, permissionModeMarkdown, type PermissionMode } from './permissionMode';
+import { doctorMarkdown, helpMarkdown, type DoctorFacts } from './slashCommands';
 import {
 	describeRestrictedMode,
 	folderTrustKey,
@@ -529,6 +532,48 @@ export function activate(context: vscode.ExtensionContext): void {
 		updateUsageIndicator();
 	}
 
+	async function togglePermissionMode(): Promise<PermissionMode> {
+		const next = cyclePermissionMode(currentPermissionMode());
+		await vscode.workspace
+			.getConfiguration('covexcode')
+			.update('permissionMode', next, vscode.ConfigurationTarget.Global);
+		// The approval posture is baked into the ACP subprocess's environment at
+		// spawn, so a change only takes effect once the session is relaunched.
+		discardSession();
+		return next;
+	}
+
+	async function doctorReadoutMarkdown(): Promise<string> {
+		const config = vscode.workspace.getConfiguration('covexcode');
+		const candidates = covexcodeBinaryCandidates(configuredCovexcodePath(), os.homedir());
+		let command: string | undefined;
+		for (const candidate of candidates) {
+			if (await probeBinaryExists(candidate)) {
+				command = candidate;
+				break;
+			}
+		}
+		const version = command ? await covexcodeVersion(command) : 'not installed';
+		const apiKey = (await context.secrets.get(SECRET_API_KEY)) ?? '';
+		const workspace = currentWorkspace();
+		const cwd = workspace.hasFolder ? workspace.cwd : '';
+		const facts: DoctorFacts = {
+			version,
+			platform: process.platform,
+			arch: process.arch,
+			configPath: path.join(os.homedir(), '.covexcode', 'config.toml'),
+			configFound: configTomlExists(),
+			provider: config.get('provider', ''),
+			model: config.get('model', ''),
+			endpoint: config.get('endpoint', ''),
+			apiKeySet: apiKey.length > 0,
+			workspace: cwd,
+			workspaceIsGit: cwd ? fs.existsSync(path.join(cwd, '.git')) : false,
+			stateDirFound: fs.existsSync(path.join(os.homedir(), '.covexcode')),
+		};
+		return doctorMarkdown(facts);
+	}
+
 	async function requestFolderTrust(): Promise<void> {
 		const requestTrust = (vscode.workspace as { requestWorkspaceTrust?: (options?: { message?: string }) => Thenable<boolean | undefined> }).requestWorkspaceTrust;
 		if (typeof requestTrust === 'function') {
@@ -715,6 +760,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			stream.markdown(modelCommandMarkdown(outcome));
 			return;
 		}
+		if (request.command === 'help') {
+			stream.markdown(helpMarkdown());
+			return;
+		}
+		if (request.command === 'doctor') {
+			stream.markdown(await doctorReadoutMarkdown());
+			return;
+		}
+		if (request.command === 'mode') {
+			const next = await togglePermissionMode();
+			stream.markdown(permissionModeMarkdown(next));
+			return;
+		}
 
 		// Inline chat (Ctrl+I in an editor) is a propose-only flow: the selected
 		// editor buffer is the source of truth, covexcode runs in `edit` mode, and
@@ -880,6 +938,15 @@ export function activate(context: vscode.ExtensionContext): void {
 	const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, requestHandler);
 	context.subscriptions.push(participant);
 	context.subscriptions.push({ dispose: () => discardSession() });
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.togglePermissionMode', async () => {
+			const next = await togglePermissionMode();
+			void vscode.window.showInformationMessage(
+				`covexcode: permission mode is now ${next.toUpperCase()} — ${permissionModeDescription(next)}.`,
+			);
+		}),
+	);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('covexcode.rollback', async () => {
@@ -1882,7 +1949,18 @@ async function ensureCredentials(context: vscode.ExtensionContext, covexcodeComm
 	if (apiKey) {
 		overrides.COVEXCODE_API_KEY = apiKey;
 	}
+	// The approval posture (auto vs manual) is set per-session via env -- the
+	// same axis the TUI toggles with Shift+Tab. The IDE keeps it in
+	// `covexcode.permissionMode` and relaunches the ACP session on change.
+	overrides.COVEXCODE_TOOLS_APPROVAL = approvalEnvValue(currentPermissionMode());
 	return overrides;
+}
+
+/** The effective permission posture from `covexcode.permissionMode` (auto/manual). */
+function currentPermissionMode(): PermissionMode {
+	return permissionModeFromSetting(
+		vscode.workspace.getConfiguration('covexcode').get<string>('permissionMode', 'auto'),
+	);
 }
 
 function configTomlExists(): boolean {

@@ -587,6 +587,24 @@ export function probeBinaryExists(covexcodeCommand: string, args: string[] = ['-
 }
 
 /**
+ * The version string `covexcode --version` prints (e.g. `covexcode 1.11.88`),
+ * or `'unknown'` when the binary can't be run. Used by `/doctor`, which
+ * renders a read-only health report rather than a liveness probe.
+ */
+export function covexcodeVersion(covexcodeCommand: string): Promise<string> {
+	return new Promise(resolve => {
+		try {
+			cp.execFile(covexcodeCommand, ['--version'], { timeout: 5_000 }, (error, stdout) => {
+				const firstLine = stdout.trim().split('\n')[0].trim();
+				resolve(error || !firstLine ? 'unknown' : firstLine);
+			});
+		} catch {
+			resolve('unknown');
+		}
+	});
+}
+
+/**
  * Whether this `covexcode` binary actually accepts `--acp`. `--version` is
  * not enough: a CLI from before ACP landed still prints a version and
  * still sits on PATH, then `covexcode --acp` exits 2 with "Unknown
