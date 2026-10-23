@@ -40,7 +40,7 @@ index b8057a0..b583e94 100644
 +	} catch {
 +		canUseSquirrelCache = false;
 +	}
-+	return canUseSquirrelCache;
++	return canUseSquirrelCache ?? false;
 +}
 +
  export class DarwinUpdateService extends AbstractUpdateService implements IRelaunchHandler {
