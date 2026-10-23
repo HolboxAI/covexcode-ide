@@ -403,26 +403,28 @@ jobs:
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${files[@]}"
 
       # The .tar.gz is the only Linux format with the built-in updater, so it
-      # is the only one that needs an update-feed entry. x64 only for now -
-      # mirror the macOS workflow's single-arch feed; repeat this step with a
-      # different VSCODE_ARCH to add arm64/etc. Skip (rather than fail) when
-      # x64 did not build, since the release job tolerates a partial arch
-      # matrix.
+      # is the only one that needs an update-feed entry. Publish every arch
+      # that produced one; the app requests .../linux/<process.arch>/latest.json,
+      # and publish_update_feed.sh maps the ppc64le build arch to node's ppc64.
+      # Skip (rather than fail) arches that did not build, since the release
+      # job tolerates a partial arch matrix.
       - name: Publish update feed
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APP_NAME: Covexcode
           OS_NAME: linux
           VSCODE_QUALITY: stable
-          VSCODE_ARCH: x64
           RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
         run: |
-          ASSET="Covexcode-linux-x64-${RELEASE_VERSION}.tar.gz"
-          if [[ ! -f "assets/${ASSET}" ]]; then
-            echo "Skipping update feed: assets/${ASSET} missing (x64 build failed)"
-            exit 0
-          fi
-          ./publish_update_feed.sh
+          for ARCH in x64 arm64 ppc64le riscv64 loong64; do
+            ASSET="Covexcode-linux-${ARCH}-${RELEASE_VERSION}.tar.gz"
+            if [[ ! -f "assets/${ASSET}" ]]; then
+              echo "Skipping update feed: assets/${ASSET} missing"
+              continue
+            fi
+            echo "Publishing Linux update feed for ${ARCH}"
+            VSCODE_ARCH="${ARCH}" ./publish_update_feed.sh
+          done
 
   reh_linux:
     needs:

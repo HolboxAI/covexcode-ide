@@ -107,16 +107,25 @@ CI computes the counter with `git rev-list --count HEAD`. The counter is monoton
 
 The built-in updater reads a JSON feed. `updateUrl` in `product.json` points at `https://raw.githubusercontent.com/HolboxAI/covexcode-ide/update-feed`. The app fetches `${updateUrl}/${quality}/${platform}/${arch}/latest.json`. CI writes that file on every release run.
 
-Only two formats use the built-in updater:
+These formats use the built-in updater:
 
 | Format | Update path |
 |---|---|
 | macOS `.zip` | built-in updater |
+| Windows `.exe` (Inno Setup) | built-in updater (`user` / `system` feed) |
+| Windows `.msi` | built-in updater (`msi` feed) |
 | Linux `.tar.gz` | built-in updater |
+| Windows `.zip` | portable; no updater |
 | Linux `.deb` / `.rpm` | package manager |
 | Linux AppImage | zsync |
 | Linux Flatpak | sideloaded bundle (no store yet) |
 | Linux Snap | classic bundle (no store yet) |
+
+On macOS, a Developer ID-signed build downloads the update through Squirrel.Mac in the background and then asks to restart. Ad-hoc/unsigned builds cannot use Squirrel.Mac, so they fall back to opening the release zip.
+
+On Windows, the feed has separate `user`, `system`, and `msi` entries so the updater can pick the installer matching how the app was installed; portable `.zip` installs cannot self-update. The Windows installers are not code-signed yet, so SmartScreen may prompt.
+
+On Linux, feeds are published for every architecture that produced a `.tar.gz`.
 
 ## Architecture
 
