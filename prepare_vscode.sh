@@ -62,9 +62,10 @@ setpath "product" "twitterUrl" "https://go.microsoft.com/fwlink/?LinkID=533687"
 
 # Rolling macOS builds publish latest.json to the update-feed branch of this
 # repo (see publish_update_feed.sh). Set DISABLE_UPDATE=yes to compile an
-# app that never checks. The default update.mode is "default": the app
-# notifies when a newer build exists and waits for the user to confirm
-# before downloading. It does not silently replace the running app.
+# app that never checks. The default update.mode is "default": a Developer
+# ID-signed build downloads through Squirrel.Mac in the background and then
+# asks to restart. Ad-hoc/unsigned builds cannot use Squirrel.Mac, so they
+# fall back to notifying and opening the release zip.
 if [[ "${DISABLE_UPDATE}" != "yes" ]]; then
   setpath "product" "updateUrl" "https://raw.githubusercontent.com/HolboxAI/covexcode-ide/update-feed"
 
