@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fetchProviders, probeAcpSupported, probeBinaryExists } from './acpClient';
+import { agentSupportsImages, fetchProviders, probeAcpSupported, probeBinaryExists } from './acpClient';
 
 /**
  * `probeBinaryExists`/`fetchProviders` spawn a real child process -- these
@@ -83,4 +83,11 @@ test('fetchProviders() rejects on timeout instead of hanging forever', async () 
 		() => fetchProviders(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], 50),
 		/timed out/,
 	);
+});
+
+test('agentSupportsImages() follows the advertised prompt capability', () => {
+	assert.equal(agentSupportsImages({ agentCapabilities: { promptCapabilities: { image: true } } }), true);
+	assert.equal(agentSupportsImages({ agentCapabilities: { promptCapabilities: { image: false } } }), false);
+	assert.equal(agentSupportsImages({ agentCapabilities: {} }), false);
+	assert.equal(agentSupportsImages(undefined), false);
 });

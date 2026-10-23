@@ -14,6 +14,7 @@ import {
 import * as vscode from 'vscode';
 import {
 	AcpClient,
+	agentSupportsImages,
 	BrowserInteraction,
 	ChangeEntry,
 	CheckInBrowserOutcome,
@@ -315,6 +316,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	// actually starts a new ACP session instead of keeping the one spawned
 	// against `$HOME` on the chat-first landing page.
 	let sessionCwd: string | undefined;
+	// Whether the active ACP session advertised image prompt support. Set from
+	// `initialize()`; image references are omitted rather than sent to a
+	// text-only model that would reject or garble them.
+	let agentImagesSupported = false;
 	// Running token total for the current ACP session -- the cumulative half
 	// of the end-of-turn usage footer, reset alongside the session in
 	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
@@ -525,6 +530,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessionId = undefined;
 		ready = undefined;
 		sessionCwd = undefined;
+		agentImagesSupported = false;
 		sessionUsage.reset();
 		updateUsageIndicator();
 	}
@@ -597,6 +603,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				// re-launches (ensureReady re-runs because `ready` is cleared).
 				acp.on('exit', () => discardSession());
 				const initResult = await acp.initialize();
+				agentImagesSupported = agentSupportsImages(initResult);
 				const mcpLoaded = loadMcpConfig({
 					readFile: (file) => {
 						try {
@@ -818,7 +825,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const content = isInline && inlineEditorData
 			? inlineEditPrompt(request, inlineEditorData, workspaceWithFramework)
-			: await attachReferencesToPrompt(request, workspaceWithFramework);
+			: await attachReferencesToPrompt(request, workspaceWithFramework, agentImagesSupported);
 		// Registered *after* the `await` above so a throw while reading an
 		// attachment (e.g. a binary reference whose bytes can't be loaded)
 		// can't leak these: they were previously added before any `try`, so
@@ -1335,9 +1342,10 @@ function inlineEditPrompt(
  * anything `referenceContextSection` can't resolve is skipped rather than
  * injected as a "[unrecognized]" marker.
  */
-async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: WorkspaceContext): Promise<PromptContentBlock[]> {
+async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: WorkspaceContext, supportsImages: boolean): Promise<PromptContentBlock[]> {
 	const sections: string[] = [];
 	const images: PromptContentBlock[] = [];
+	let omittedImage = false;
 	// Reads a workspace file's text for a `Uri`/`Location` reference. Only
 	// `file:` references reach this -- `referenceContextSection` filters on
 	// scheme before calling -- and an unreadable path (directory, deleted
@@ -1350,6 +1358,18 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 
 	for (const reference of request.references) {
 		if (reference.value instanceof vscode.ChatReferenceBinaryData) {
+			if (!supportsImages) {
+				// The daemon's initialize result is authoritative: a text-only
+				// model must not be handed image bytes it would reject or read
+				// as garbage. Tell the model once so it can point the user at
+				// /model instead of silently ignoring the attachment.
+				if (!omittedImage) {
+					sections.push('The user attached an image, but the current model cannot read images. ' +
+						'The image was omitted; switch to a vision model with /model to use screenshots.');
+					omittedImage = true;
+				}
+				continue;
+			}
 			const bytes = await reference.value.data();
 			images.push({
 				type: 'image',
