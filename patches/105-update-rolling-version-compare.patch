@@ -1,5 +1,5 @@
 diff --git a/src/vs/platform/update/electron-main/abstractUpdateService.ts b/src/vs/platform/update/electron-main/abstractUpdateService.ts
-index c45ccf8..e253de3 100644
+index d9e5a40..e39c185 100644
 --- a/src/vs/platform/update/electron-main/abstractUpdateService.ts
 +++ b/src/vs/platform/update/electron-main/abstractUpdateService.ts
 @@ -450,22 +450,22 @@ export abstract class AbstractUpdateService implements IUpdateService {
@@ -27,9 +27,9 @@ index c45ccf8..e253de3 100644
 -				const lastest = semver.compareBuild(currentVersion, fetchedVersion) >= 0;
 +				const lastest = compareRollingVersions(currentVersion, fetchedVersion) >= 0;
  
- 				return Promise.resolve({ lastest, update });
- 			})
-@@ -508,10 +508,36 @@ export abstract class AbstractUpdateService implements IUpdateService {
+ 				const minReleaseAge = this.configurationService.getValue<number>('update.minReleaseAge');
+ 
+@@ -531,10 +531,36 @@ export abstract class AbstractUpdateService implements IUpdateService {
  	protected abstract doCheckForUpdates(explicit: boolean, pendingVersion?: string): void;
  }
  
