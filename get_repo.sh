@@ -16,6 +16,7 @@ if [[ -z "${RELEASE_VERSION}" ]]; then
     echo "Get version from ${VSCODE_QUALITY}.json"
     MS_COMMIT=$( jq -r '.commit' "./upstream/${VSCODE_QUALITY}.json" )
     MS_TAG=$( jq -r '.tag' "./upstream/${VSCODE_QUALITY}.json" )
+    RELEASE_TAG=$( jq -r '.releaseTag // .tag' "./upstream/${VSCODE_QUALITY}.json" )
   fi
 
   if [[ -z "${MS_COMMIT}" ]]; then
@@ -25,30 +26,32 @@ if [[ -z "${RELEASE_VERSION}" ]]; then
     if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
       MS_TAG="${MS_TAG/\-insider/}"
     fi
+
+    RELEASE_TAG="${MS_TAG}"
   fi
 
   if [[ "${GITHUB_ACTIONS}" == "true" ]]; then
     COMMIT_COUNT=$( git rev-list --count HEAD )
 
     if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-      RELEASE_VERSION="${MS_TAG}.${COMMIT_COUNT}-insider"
+      RELEASE_VERSION="${RELEASE_TAG}.${COMMIT_COUNT}-insider"
     else
-      RELEASE_VERSION="${MS_TAG}.${COMMIT_COUNT}"
+      RELEASE_VERSION="${RELEASE_TAG}.${COMMIT_COUNT}"
     fi
   else
     TIME_PATCH=$( printf "%04d" $(($(date +%-j) * 24 + $(date +%-H))) )
 
     if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-      RELEASE_VERSION="${MS_TAG}${TIME_PATCH}-insider"
+      RELEASE_VERSION="${RELEASE_TAG}${TIME_PATCH}-insider"
     else
-      RELEASE_VERSION="${MS_TAG}${TIME_PATCH}"
+      RELEASE_VERSION="${RELEASE_TAG}${TIME_PATCH}"
     fi
   fi
 else
   if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
     if [[ "${RELEASE_VERSION}" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+-insider$ ]];
     then
-      MS_TAG="${BASH_REMATCH[1]}"
+      RELEASE_TAG="${BASH_REMATCH[1]}"
     else
       echo "Error: Bad RELEASE_VERSION: ${RELEASE_VERSION}"
       exit 1
@@ -56,14 +59,15 @@ else
   else
     if [[ "${RELEASE_VERSION}" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+$ ]];
     then
-      MS_TAG="${BASH_REMATCH[1]}"
+      RELEASE_TAG="${BASH_REMATCH[1]}"
     else
       echo "Error: Bad RELEASE_VERSION: ${RELEASE_VERSION}"
       exit 1
     fi
   fi
 
-  if [[ "${MS_TAG}" == "$( jq -r '.tag' "./upstream/${VSCODE_QUALITY}.json" )" ]]; then
+  if [[ "${RELEASE_TAG}" == "$( jq -r '.releaseTag // .tag' "./upstream/${VSCODE_QUALITY}.json" )" ]]; then
+    MS_TAG=$( jq -r '.tag' "./upstream/${VSCODE_QUALITY}.json" )
     MS_COMMIT=$( jq -r '.commit' "./upstream/${VSCODE_QUALITY}.json" )
   else
     echo "Error: No MS_COMMIT for ${RELEASE_VERSION}"
