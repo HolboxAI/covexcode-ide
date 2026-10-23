@@ -118,6 +118,8 @@ Only two formats use the built-in updater:
 | Linux Flatpak | sideloaded bundle (no store yet) |
 | Linux Snap | classic bundle (no store yet) |
 
+On macOS, a Developer ID-signed build downloads the update through Squirrel.Mac in the background and then asks to restart. Ad-hoc/unsigned builds cannot use Squirrel.Mac, so they fall back to opening the release zip.
+
 ## Architecture
 
 Two repos, one brain:
