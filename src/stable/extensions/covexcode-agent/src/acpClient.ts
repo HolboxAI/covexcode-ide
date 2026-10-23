@@ -46,6 +46,18 @@ export function agentSupportsMcp(result: InitializeResult | undefined): boolean 
 	return result?.agentCapabilities?.mcp === true;
 }
 
+/**
+ * Whether the agent advertised that it can accept image prompt blocks.
+ *
+ * Absent capability means "no": sending an image to a text-only model either
+ * fails the request or is billed as text the model cannot read. The daemon
+ * advertises this from its configured provider (see `transport.rs`), so the
+ * extension has the same answer the model endpoint will.
+ */
+export function agentSupportsImages(result: InitializeResult | undefined): boolean {
+	return result?.agentCapabilities?.promptCapabilities?.image === true;
+}
+
 // Wire types mirror covexcode's own `src/protocol.rs` exactly -- see that
 // module's own doc comments for the ACP v1 schema this implements. Kept to
 // only the request/response/notification shapes this client actually sends
