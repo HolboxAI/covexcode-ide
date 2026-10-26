@@ -125,7 +125,7 @@ On macOS, a Developer ID-signed build downloads the update through Squirrel.Mac 
 
 On Windows, the feed has separate `user`, `system`, and `msi` entries so the updater can pick the installer matching how the app was installed; portable `.zip` installs cannot self-update. The Windows installers are not code-signed yet, so SmartScreen may prompt.
 
-On Linux, feeds are published for every architecture that produced a `.tar.gz`.
+On Linux, feeds are published for every architecture that produced a `.tar.gz`. The `.tar.gz` app downloads the update, verifies its SHA-256, extracts it, and swaps it in on restart. If the app directory is not writable (a `.deb`/`.rpm` install or an AppImage mount), it falls back to opening the release page.
 
 ## Architecture
 
