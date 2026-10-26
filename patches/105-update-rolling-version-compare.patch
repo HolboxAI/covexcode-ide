@@ -1,0 +1,73 @@
+diff --git a/src/vs/platform/update/electron-main/abstractUpdateService.ts b/src/vs/platform/update/electron-main/abstractUpdateService.ts
+index d9e5a40..e39c185 100644
+--- a/src/vs/platform/update/electron-main/abstractUpdateService.ts
++++ b/src/vs/platform/update/electron-main/abstractUpdateService.ts
+@@ -450,22 +450,22 @@ export abstract class AbstractUpdateService implements IUpdateService {
+ 					return Promise.resolve(undefined);
+ 				}
+ 
+-				const fetchedVersion = normalizeVersion(update.productVersion);
++				const fetchedVersion = update.productVersion;
+ 
+ 				let currentVersion: string;
+ 
+ 				if(pendingVersion) {
+-					currentVersion = normalizeVersion(pendingVersion);
++					currentVersion = pendingVersion;
+ 
+ 					this.logService.info(`update#isLatestVersion() - found: ${fetchedVersion}, pending: ${currentVersion}`);
+ 				}
+ 				else {
+-					currentVersion = normalizeVersion(this.productService.version);
++					currentVersion = this.productService.version;
+ 
+ 					this.logService.info(`update#isLatestVersion() - found: ${fetchedVersion}, current: ${currentVersion}`);
+ 				}
+ 
+-				const lastest = semver.compareBuild(currentVersion, fetchedVersion) >= 0;
++				const lastest = compareRollingVersions(currentVersion, fetchedVersion) >= 0;
+ 
+ 				const minReleaseAge = this.configurationService.getValue<number>('update.minReleaseAge');
+ 
+@@ -531,10 +531,36 @@ export abstract class AbstractUpdateService implements IUpdateService {
+ 	protected abstract doCheckForUpdates(explicit: boolean, pendingVersion?: string): void;
+ }
+ 
+-function normalizeVersion(version: string): string {
+-	const normalizedVersion = version
+-		.replace(/(\d+\.\d+\.\d+)\.\d+(\-\w+)?/, '$1$2')
+-		.replace(/(\d+\.\d+\.)0+(\d+)(\-\w+)?/, '$1$2$3');
++function compareRollingVersions(a: string, b: string): number {
++	const parse = (version: string) => {
++		const [core, prerelease] = version.split('-', 2);
++		const parts = core.split('.').map(part => parseInt(part, 10) || 0);
+ 
+-	return normalizedVersion;
++		return { parts, prerelease: prerelease ?? '' };
++	};
++
++	const av = parse(a);
++	const bv = parse(b);
++	const coreA = `${av.parts.slice(0, 3).join('.')}${av.prerelease ? `-${av.prerelease}` : ''}`;
++	const coreB = `${bv.parts.slice(0, 3).join('.')}${bv.prerelease ? `-${bv.prerelease}` : ''}`;
++	const core = semver.compareBuild(coreA, coreB);
++
++	if (core !== 0) {
++		return core;
++	}
++
++	// Rolling builds append the commit count as a fourth component
++	// (1.126.0.366). semver has no concept of it, so compare it numerically
++	// after the semver-valid major.minor.patch-prerelease part.
++	const length = Math.max(av.parts.length, bv.parts.length);
++
++	for (let i = 3; i < length; i++) {
++		const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
++
++		if (diff !== 0) {
++			return diff;
++		}
++	}
++
++	return 0;
+ }
