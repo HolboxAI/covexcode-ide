@@ -9,7 +9,7 @@ import { groupDigits } from './turnUsage';
  * Session-scoped sibling of `turnUsage`: the same `usage_update` events that
  * power the per-turn footnote are summed here into one running total for the
  * whole ACP session, so the end-of-turn footer can show a cumulative
- * "N tokens this session" (and an estimated `~$` cost) rather than only the
+ * "N tokens spent this session" (and an estimated `~$` cost) rather than only the
  * per-turn count.
  *
  * Lifetime differs from `TurnUsage` on purpose: a `TurnUsage` is created
@@ -57,7 +57,7 @@ export function createSessionUsage(): SessionUsage {
 
 /**
  * The session footer text, or `undefined` when the session has recorded no
- * usage yet (no "0 tokens this session" line before the first real spend).
+ * usage yet (no "0 tokens spent this session" line before the first real spend).
  *
  * `costPerMillionTokens` is a blended USD price per 1M tokens; when absent
  * (unknown provider, or cost display disabled) the footer is tokens-only
@@ -67,7 +67,7 @@ export function sessionUsageFootnote(totalTokens: number, costPerMillionTokens?:
 	if (totalTokens <= 0) {
 		return undefined;
 	}
-	const tokens = `${groupDigits(totalTokens)} tokens this session`;
+	const tokens = `${groupDigits(totalTokens)} tokens spent this session`;
 	if (costPerMillionTokens === undefined) {
 		return tokens;
 	}
@@ -85,7 +85,7 @@ export function sessionUsageMeter(totalTokens: number, costPerMillionTokens?: nu
 	if (totalTokens <= 0) {
 		return undefined;
 	}
-	const tokens = `${groupDigits(totalTokens)} tokens`;
+	const tokens = `${groupDigits(totalTokens)} tokens spent`;
 	if (costPerMillionTokens === undefined) {
 		return tokens;
 	}
