@@ -48,7 +48,7 @@ import {
 	REVIEW_COMMAND,
 	reviewCommandUri,
 } from './chatPermission';
-import { isFreshChat } from './freshChat';
+import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
 import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
@@ -319,6 +319,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	// actually starts a new ACP session instead of keeping the one spawned
 	// against `$HOME` on the chat-first landing page.
 	let sessionCwd: string | undefined;
+	// A checkpoint restore removes the later chat requests, which can leave
+	// `chatContext.history` empty on the next prompt even though the user is
+	// continuing the same conversation. Remember that restore so the next
+	// prompt reuses the ACP session instead of treating it as a New Chat and
+	// losing the model's (already truncated) history.
+	let restoredCheckpoint = false;
 	// Whether the active ACP session advertised image prompt support. Set from
 	// `initialize()`; image references are omitted rather than sent to a
 	// text-only model that would reject or garble them.
@@ -790,14 +796,17 @@ export function activate(context: vscode.ExtensionContext): void {
 		const inlineEditorData = (request as vscode.ChatRequest & { location2?: vscode.ChatRequestEditorData }).location2;
 		const isInline = inlineEditorData?.document !== undefined;
 		// Inline chat has its own empty history and must not discard the shared
-		// panel session (which "New Chat" reuse is guarding against below).
-		if (!isInline && isFreshChat(chatContext.history.length) && client) {
+		// panel session (which "New Chat" reuse is guarding against below). A
+		// checkpoint restore also empties history without starting a new chat,
+		// so it must not discard the session the restore just rewound.
+		if (shouldStartFreshSession(chatContext.history.length, isInline, restoredCheckpoint) && client) {
 			// VS Code's "New Chat" reuses this extension host, so without
 			// this the next empty-history request would keep talking to the
 			// previous HeadlessSession -- every "new chat" was the same
 			// conversation on the daemon side.
 			discardSession();
 		}
+		restoredCheckpoint = false;
 		const workspace = currentWorkspace();
 		// Attach the detected framework so workspacePromptPrefix() hides the
 		// stack in the model's own context (see that function's comment on the
@@ -1025,10 +1034,15 @@ export function activate(context: vscode.ExtensionContext): void {
 			const activeClient = client;
 			const activeSessionId = sessionId;
 			try {
-				// The journal records files, not chat messages, so this restores
-				// workspace content only -- same limitation as the picker's own
-				// "undo turn N" entries.
+				// covexcode's rollback restores the files and truncates the
+				// model's conversation history to the same turn, so the next
+				// prompt continues from the restored checkpoint rather than
+				// remembering work the user just undid.
 				const summary = await activeClient.rollback(activeSessionId, { restoreBeforeTurn: turn });
+				// The core patch removes the later chat requests after this
+				// command returns; keep the ACP session alive for the next
+				// prompt even if that leaves its history array empty.
+				restoredCheckpoint = true;
 				if (!summary.startsWith("Rolled back nothing")) {
 					void vscode.window.showInformationMessage(`covexcode: [turn ${turn}] ${summary}`);
 					return;
