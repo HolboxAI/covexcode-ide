@@ -1,7 +1,8 @@
 diff --git a/src/vs/workbench/contrib/update/browser/update.ts b/src/vs/workbench/contrib/update/browser/update.ts
+index c182b9c..10b8e49 100644
 --- a/src/vs/workbench/contrib/update/browser/update.ts
 +++ b/src/vs/workbench/contrib/update/browser/update.ts
-@@ -211,12 +211,13 @@
+@@ -211,12 +211,13 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
  	private majorMinorUpdateAvailableContextKey: IContextKey<boolean>;
  
  	constructor(
@@ -16,7 +17,7 @@ diff --git a/src/vs/workbench/contrib/update/browser/update.ts b/src/vs/workbenc
  	) {
  		super();
  		this.state = updateService.state;
-@@ -235,12 +236,12 @@
+@@ -235,12 +236,12 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
  		*/
  
  		const currentVersion = this.productService.commit;
@@ -32,18 +33,20 @@ diff --git a/src/vs/workbench/contrib/update/browser/update.ts b/src/vs/workbenc
  		}
  
  		this.registerGlobalActivityActions();
-@@ -261,6 +262,10 @@
+@@ -261,6 +262,12 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
  			}
  		}
  
 +		if (state.type === StateType.AvailableForDownload) {
 +			this.promptIfNewUpdate(state.update.productVersion ?? state.update.version);
++		} else if (state.type === StateType.Ready) {
++			this.promptIfUpdateReady(state.update.productVersion ?? state.update.version);
 +		}
 +
  		let badge: IBadge | undefined = undefined;
  
  		if (state.type === StateType.AvailableForDownload || state.type === StateType.Downloaded || state.type === StateType.Ready) {
-@@ -282,6 +287,26 @@
+@@ -282,6 +289,46 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
  		this.state = state;
  	}
  
@@ -60,6 +63,26 @@ diff --git a/src/vs/workbench/contrib/update/browser/update.ts b/src/vs/workbenc
 +			[{
 +				label: nls.localize('updateNow', "Update"),
 +				run: () => this.updateService.downloadUpdate(true)
++			}, {
++				label: nls.localize('updateLater', "Later"),
++				run: () => { }
++			}]
++		);
++	}
++
++	private promptIfUpdateReady(version: string): void {
++		const key = 'update/lastReadyNotifiedProductVersion';
++		if (this.storageService.get(key, StorageScope.APPLICATION) === version) {
++			return;
++		}
++
++		this.storageService.store(key, version, StorageScope.APPLICATION, StorageTarget.MACHINE);
++		this.notificationService.prompt(
++			Severity.Info,
++			nls.localize('covexcodeUpdateReady', "{0} {1} is ready to install. Restart to update.", this.productService.nameLong, version),
++			[{
++				label: nls.localize('covexcodeRestartToUpdate', "Restart to Update"),
++				run: () => this.updateService.quitAndInstall()
 +			}, {
 +				label: nls.localize('updateLater', "Later"),
 +				run: () => { }
