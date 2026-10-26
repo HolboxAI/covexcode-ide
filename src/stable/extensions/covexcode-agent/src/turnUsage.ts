@@ -10,14 +10,15 @@ import type { SessionUpdate } from './acpClient';
  *
  * Wire source: covexcode's `SessionUpdate::UsageUpdate { used, size }`
  * (`protocol.rs`), one per LLM response -- a multi-response turn (an agent
- * loop with tool calls) therefore emits several per turn. `used` is
- * per-response token spend (per that variant's own doc comment, the closest
- * proxy ACP's `usage_update` has to billing), so this *sums* across the
- * turn; if covexcode ever starts emitting cumulative totals instead, this is
- * the one line to revisit. `size` is context-window occupancy, which covexcode
- * currently always sends as `0` (it doesn't track the model's context limit
- * anywhere yet) -- the footnote omits the "of N" half until a real value
- * arrives.
+ * loop with tool calls) therefore emits several per turn. `used` is the
+ * prompt + completion spend of *one* response, so summing it across a turn
+ * gives the turn's spend, which can legitimately exceed the context window:
+ * the window limits one request, not every request in the turn combined.
+ * Comparing that sum to `size` is the bug this meter used to have -- a
+ * twenty-request turn showed "2,500,000 of 131,072", which reads as if the
+ * limit had been blown. `size` is the context window; the only figure that
+ * belongs beside it is the largest single request's `used`, so the footnote
+ * labels the sum as spend and reports the window comparison separately.
  *
  * Consumed rather than rendered inline by `renderUpdate`: printing a count
  * per update would spam several numbers mid-stream, and the per-turn total
@@ -32,8 +33,14 @@ export interface TurnUsage {
 	footnote(): string | undefined;
 }
 
+/** Report the context warning once the largest single request reaches this
+ * share of the window. Deliberately below 100: the model can still be cut off
+ * by its reply budget or tool results before a nominal 100% reading. */
+const CONTEXT_WARNING_PERCENT = 90;
+
 export function createTurnUsage(): TurnUsage {
-	let used = 0;
+	let spent = 0;
+	let largestRequest = 0;
 	let size = 0;
 	let seen = false;
 	return {
@@ -48,7 +55,10 @@ export function createTurnUsage(): TurnUsage {
 			if (typeof update.used !== 'number' || !Number.isFinite(update.used) || update.used < 0) {
 				return;
 			}
-			used += update.used;
+			spent += update.used;
+			if (update.used > largestRequest) {
+				largestRequest = update.used;
+			}
 			if (typeof update.size === 'number' && Number.isFinite(update.size) && update.size > size) {
 				size = update.size;
 			}
@@ -58,9 +68,15 @@ export function createTurnUsage(): TurnUsage {
 			if (!seen) {
 				return undefined;
 			}
-			return size > 0
-				? `${groupDigits(used)} of ${groupDigits(size)} tokens this turn`
-				: `${groupDigits(used)} tokens this turn`;
+			const total = `${groupDigits(spent)} tokens spent this turn`;
+			if (size <= 0 || largestRequest <= 0) {
+				return total;
+			}
+			const request = `largest request ${groupDigits(largestRequest)} of ${groupDigits(size)}`;
+			const percent = (largestRequest / size) * 100;
+			return percent >= CONTEXT_WARNING_PERCENT
+				? `${total} · ${request} — context nearly full, start a new chat`
+				: `${total} · ${request}`;
 		},
 	};
 }
