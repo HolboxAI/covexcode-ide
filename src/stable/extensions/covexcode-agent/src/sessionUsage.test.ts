@@ -37,20 +37,20 @@ test('sessionUsageFootnote is undefined for an empty session', () => {
 });
 
 test('sessionUsageFootnote renders tokens only when no cost rate is given', () => {
-	assert.equal(sessionUsageFootnote(5678), '5,678 tokens this session');
+	assert.equal(sessionUsageFootnote(5678), '5,678 tokens spent this session');
 });
 
 test('sessionUsageFootnote appends an estimated cost when a rate is given', () => {
-	assert.equal(sessionUsageFootnote(1_000_000, 0.35), '1,000,000 tokens this session · ~$0.35');
-	assert.equal(sessionUsageFootnote(100_000, 0.35), '100,000 tokens this session · ~$0.035');
+	assert.equal(sessionUsageFootnote(1_000_000, 0.35), '1,000,000 tokens spent this session · ~$0.35');
+	assert.equal(sessionUsageFootnote(100_000, 0.35), '100,000 tokens spent this session · ~$0.035');
 });
 
 test('sub-cent estimates stay non-zero instead of rounding to $0.00', () => {
-	assert.equal(sessionUsageFootnote(1000, 0.35), '1,000 tokens this session · ~$0.00035');
+	assert.equal(sessionUsageFootnote(1000, 0.35), '1,000 tokens spent this session · ~$0.00035');
 });
 
 test('whole-dollar estimates keep two decimals', () => {
-	assert.equal(sessionUsageFootnote(10_000_000, 0.35), '10,000,000 tokens this session · ~$3.50');
+	assert.equal(sessionUsageFootnote(10_000_000, 0.35), '10,000,000 tokens spent this session · ~$3.50');
 });
 
 test('sessionUsageMeter is undefined for an empty session', () => {
@@ -59,14 +59,14 @@ test('sessionUsageMeter is undefined for an empty session', () => {
 });
 
 test('sessionUsageMeter renders tokens only when no cost rate is given', () => {
-	assert.equal(sessionUsageMeter(5678), '5,678 tokens');
+	assert.equal(sessionUsageMeter(5678), '5,678 tokens spent');
 });
 
 test('sessionUsageMeter appends an estimated cost when a rate is given', () => {
-	assert.equal(sessionUsageMeter(1_000_000, 0.35), '1,000,000 tokens · ~$0.35');
-	assert.equal(sessionUsageMeter(100_000, 0.35), '100,000 tokens · ~$0.035');
+	assert.equal(sessionUsageMeter(1_000_000, 0.35), '1,000,000 tokens spent · ~$0.35');
+	assert.equal(sessionUsageMeter(100_000, 0.35), '100,000 tokens spent · ~$0.035');
 });
 
 test('sessionUsageMeter keeps sub-cent estimates non-zero', () => {
-	assert.equal(sessionUsageMeter(1000, 0.35), '1,000 tokens · ~$0.00035');
+	assert.equal(sessionUsageMeter(1000, 0.35), '1,000 tokens spent · ~$0.00035');
 });
