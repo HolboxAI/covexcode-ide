@@ -1,9 +1,9 @@
 {
-  "url": "https://github.com/HolboxAI/covexcode-ide/releases/download/1.126.0.372/Covexcode-darwin-arm64-1.126.0.372.zip",
-  "name": "1.126.0.372",
-  "version": "3a24ece657d7257423852dfcfcb9a62c2ef5ee2e",
-  "productVersion": "1.126.0.372",
-  "hash": "f88d7c084eb2cb907bbeb422832f42498e7c16d3",
-  "timestamp": "1792768149257",
-  "sha256hash": "ab14895f3282a1e0e5e15f93cb8bb7c99a399cc88103c67c8e1bb52bdf4658cd"
+  "url": "https://github.com/HolboxAI/covexcode-ide/releases/download/1.126.1.381/Covexcode-darwin-arm64-1.126.1.381.zip",
+  "name": "1.126.1.381",
+  "version": "a82381558599beb5bb059a80c0dfe5238f4a22b5",
+  "productVersion": "1.126.1.381",
+  "hash": "fcad2a4dd29b61d0a50fc949346e11c57c367602",
+  "timestamp": "1793012598474",
+  "sha256hash": "e89d5e9c5503579da4326f496895928c01ebcfd54b683bc3e8bb04e6d5c8f6dc"
 }
