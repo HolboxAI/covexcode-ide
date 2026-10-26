@@ -14,3 +14,22 @@
 export function isFreshChat(historyLength: number): boolean {
 	return historyLength === 0;
 }
+
+/**
+ * Whether this request should throw away the existing ACP session.
+ *
+ * `isFreshChat` alone is not enough: "Restore Checkpoint" removes the later
+ * chat requests from the model, which can leave `history` empty even though
+ * the user is continuing the same conversation. Discarding the ACP session
+ * there is exactly the bug that made a resumed task answer "I don't have the
+ * earlier session in front of me" -- the restore already truncated the
+ * model's history on the covexcode side (`session/rollback` with
+ * `restoreBeforeTurn`), so the session must survive the next prompt.
+ */
+export function shouldStartFreshSession(
+	historyLength: number,
+	isInline: boolean,
+	restoredCheckpoint: boolean,
+): boolean {
+	return !isInline && isFreshChat(historyLength) && !restoredCheckpoint;
+}
