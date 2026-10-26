@@ -63,6 +63,7 @@ import { referenceContextSection } from './referenceContent';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import { createTurnUsage, TurnUsage } from './turnUsage';
 import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter, SessionUsage } from './sessionUsage';
+import { stopReasonNote } from './stopReason';
 import { approvalEnvValue, cyclePermissionMode, permissionModeDescription, permissionModeFromSetting, permissionModeMarkdown, type PermissionMode } from './permissionMode';
 import { doctorMarkdown, helpMarkdown, type DoctorFacts } from './slashCommands';
 import {
@@ -919,7 +920,14 @@ export function activate(context: vscode.ExtensionContext): void {
 			// panel turn sends `normal` explicitly so a prior `plan`/`edit` turn
 			// can't leave the shared session in a stale mode (`mode` is per-turn,
 			// but covexcode keeps the last value when the field is omitted).
-			await activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			const turnResult = await activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			// A turn stopped by the tool-step limit or the output cap used to
+			// look like the agent simply stopped after its last step. Say which
+			// limit was hit and how to continue.
+			const stopNote = stopReasonNote(turnResult.stopReason);
+			if (stopNote) {
+				stream.markdown(`\n\n*${stopNote}*\n`);
+			}
 			// Finalize every resource that received a proposed diff so VS Code's
 			// inline editing session knows no more edits are coming and can offer
 			// accept/reject. No-op in the panel (inlineEdit is undefined there).
