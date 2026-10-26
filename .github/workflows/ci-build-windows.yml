@@ -44,7 +44,7 @@ env:
   APP_NAME: Covexcode
   ASSETS_REPOSITORY: ${{ github.repository }}
   BINARY_NAME: covexcode-ide
-  DISABLE_UPDATE: yes
+  DISABLE_UPDATE: no
   GH_REPO_PATH: ${{ github.repository }}
   GITHUB_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.head }}
   ORG_NAME: ${{ github.repository_owner }}
@@ -345,3 +345,17 @@ jobs:
             exit 1
           fi
           gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${files[@]}"
+
+      # Inno Setup installs read .../win32/<arch>/user|system/latest.json;
+      # MSI installs read .../win32/<arch>/msi/latest.json. Archive (.zip)
+      # installs do not self-update, so no archive feed is written.
+      - name: Publish update feed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_SOURCEVERSION: ${{ needs.compile.outputs.BUILD_SOURCEVERSION }}
+          APP_NAME: Covexcode
+          OS_NAME: windows
+          VSCODE_QUALITY: stable
+          VSCODE_ARCH: x64
+          RELEASE_VERSION: ${{ needs.compile.outputs.RELEASE_VERSION }}
+        run: ./publish_update_feed.sh
