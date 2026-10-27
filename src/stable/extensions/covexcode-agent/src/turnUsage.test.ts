@@ -7,8 +7,8 @@ import { test } from 'node:test';
 import { createTurnUsage } from './turnUsage';
 import type { SessionUpdate } from './acpClient';
 
-function usageUpdate(used: unknown, size?: unknown): SessionUpdate {
-	return { sessionUpdate: 'usage_update', used, size } as SessionUpdate;
+function usageUpdate(used: unknown, size?: unknown, promptTokens?: unknown): SessionUpdate {
+	return { sessionUpdate: 'usage_update', used, size, prompt_tokens: promptTokens } as SessionUpdate;
 }
 
 test('footnote() is undefined when the turn reported no usage at all', () => {
@@ -56,6 +56,54 @@ test('the largest request, not the last one, is what the window comparison uses'
 	turn.record(usageUpdate(70_000, 131_072));
 	turn.record(usageUpdate(10_000, 131_072));
 	assert.match(turn.footnote() ?? '', /largest request 70,000 of 131,072/);
+});
+
+test('the prompt, not the billed total, is what the context comparison uses', () => {
+	// The shape from the field report: 146,958 was prompt + a 32k reply, and
+	// the prompt itself was only ~114k of a 1M window.
+	const turn = createTurnUsage();
+	turn.record(usageUpdate(146_958, 1_048_576, 114_190));
+	assert.equal(
+		turn.footnote(),
+		'146,958 tokens spent this turn · context 114,190 of 1,048,576',
+	);
+});
+
+test('a long turn whose requests sum past the window still shows the real context', () => {
+	const turn = createTurnUsage();
+	turn.record(usageUpdate(100_000, 131_072, 60_000));
+	turn.record(usageUpdate(100_000, 131_072, 62_000));
+	assert.equal(
+		turn.footnote(),
+		'200,000 tokens spent this turn · context 62,000 of 131,072',
+	);
+});
+
+test('the largest prompt, not the last one, is what the context comparison uses', () => {
+	const turn = createTurnUsage();
+	turn.record(usageUpdate(50_000, 131_072, 50_000));
+	turn.record(usageUpdate(70_000, 131_072, 70_000));
+	turn.record(usageUpdate(10_000, 131_072, 10_000));
+	assert.match(turn.footnote() ?? '', /context 70,000 of 131,072/);
+});
+
+test('warns when the prompt reaches 90% of the context window', () => {
+	const turn = createTurnUsage();
+	turn.record(usageUpdate(50_000, 131_072, 118_000));
+	assert.match(turn.footnote() ?? '', /context nearly full, start a new chat/);
+});
+
+test('does not warn below 90% when prompt tokens are known', () => {
+	const turn = createTurnUsage();
+	turn.record(usageUpdate(50_000, 131_072, 117_000));
+	assert.doesNotMatch(turn.footnote() ?? '', /context nearly full/);
+});
+
+test('a missing or malformed prompt token count falls back to the largest request', () => {
+	const turn = createTurnUsage();
+	turn.record(usageUpdate('garbage', 200_000, 'garbage'));
+	turn.record(usageUpdate(500, 200_000, -5));
+	assert.equal(turn.footnote(), '500 tokens spent this turn · largest request 500 of 200,000');
 });
 
 test('warns when a single request reaches 90% of the context window', () => {

@@ -170,12 +170,16 @@ export interface SessionUpdate {
 	toolCallId?: string;
 	kind?: string;
 	status?: ToolCallStatus;
-	/** `usage_update`'s flattened fields (`used` = token spend of one LLM
-	 * response, `size` = context-window occupancy, `0` while covexcode
-	 * doesn't track the context limit) -- see `turnUsage.ts` for how one
-	 * turn's updates combine. */
+	/** `usage_update`'s flattened fields -- see `turnUsage.ts` for how one
+	 * turn's updates combine.
+	 *
+	 * `used` is prompt + completion spend of one LLM response, `size` is the
+	 * model's context window (`0` while covexcode doesn't know it), and
+	 * `prompt_tokens` is the prompt alone when the endpoint reported usage.
+	 * The prompt is what occupies the window; `used` includes the reply. */
 	used?: number;
 	size?: number;
+	prompt_tokens?: number;
 	[key: string]: unknown;
 }
 
