@@ -89,7 +89,7 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED"
 
-          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|prepare_assets\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|src/|build/|icons/|\.github/workflows/ci-build-windows\.yml)'; then
+          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|prepare_sidecar\.sh|verify_sidecar\.sh|agent\.lock\.json|prepare_assets\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|src/|build/|test/|icons/|\.github/workflows/ci-build-windows\.yml)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "a build-relevant path changed"
           else

@@ -34,6 +34,8 @@ export function helpMarkdown(): string {
 /** Facts `/doctor` gathers before rendering; see `doctorMarkdown`. */
 export interface DoctorFacts {
 	readonly version: string;
+	readonly agentSource: 'configured' | 'bundled' | 'external' | 'missing';
+	readonly agentPath?: string;
 	readonly platform: string;
 	readonly arch: string;
 	readonly configPath: string;
@@ -57,6 +59,7 @@ export function doctorMarkdown(facts: DoctorFacts): string {
 		'**covexcode doctor**',
 		'',
 		row('Version', facts.version),
+		row('Agent', facts.agentSource === 'missing' ? 'not found' : `${facts.agentSource}${facts.agentPath ? ` (${facts.agentPath})` : ''}`),
 		row('Platform', `${facts.platform} / ${facts.arch}`),
 		row('Config', `${facts.configPath} (${facts.configFound ? 'found' : 'missing'})`),
 		row('Provider', facts.provider || 'custom endpoint'),

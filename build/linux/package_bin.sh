@@ -151,6 +151,12 @@ find "../VSCode-linux-${VSCODE_ARCH}" -print0 | xargs -0 touch -c
 
 . ../build_cli.sh
 
+bash ../prepare_sidecar.sh
+
+bash ../verify_sidecar.sh
+
+bash ../test/sidecar-acp-smoke.sh
+
 if [[ -n "${GITHUB_OUTPUT}" ]]; then
   echo "VSCODE_SYSROOT_REPOSITORY=${VSCODE_SYSROOT_REPOSITORY:-}" >> "${GITHUB_OUTPUT}"
   echo "VSCODE_SYSROOT_VERSION=${VSCODE_SYSROOT_VERSION:-}" >> "${GITHUB_OUTPUT}"

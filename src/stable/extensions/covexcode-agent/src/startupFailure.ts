@@ -12,17 +12,11 @@ export function describeError(error: unknown): string {
 }
 
 /**
- * A fresh covexcode-ide install has no `covexcode` CLI bundled with it -- it's a
- * separate install (see README.md's own "Install" section, which names the
- * same two commands as `installCommand` below) that `ensureReady()` (in
- * `extension.ts`) probes for before ever showing the credential wizard --
- * see `probeBinaryExists()`. On a machine that's never run that install step
- * at all, `cp.spawn`
- * in `acpClient.ts` fails with a plain Node `ENOENT`, which used to surface
- * as generic prose ("Make sure `covexcode` is installed and on your PATH")
- * with no actual next step. This gives the one thing that actually gets a
- * first-time tester unblocked: the real, copy-pasteable install command
- * from covexcode.com, picked by platform.
+ * The IDE ships a pinned agent runtime inside the app. A missing binary in
+ * that path is an installation problem, not a request to install the terminal
+ * CLI. The external-CLI fallback is still supported for development and for
+ * users who explicitly disabled the bundled runtime, so its install/upgrade
+ * guidance stays available behind the `bundled: false` branch.
  */
 /**
  * Thrown when a `covexcode` binary exists and answers `--version`, but
@@ -37,16 +31,56 @@ export class AcpUnsupportedError extends Error {
 	}
 }
 
-export function describeStartupFailure(error: unknown, platform: NodeJS.Platform): string {
+export type StartupFailureOptions = {
+	/** True when the launch we attempted was the runtime bundled with the IDE. */
+	bundled?: boolean;
+};
+
+export function describeStartupFailure(
+	error: unknown,
+	platform: NodeJS.Platform,
+	options: StartupFailureOptions = {},
+): string {
+	const bundled = options.bundled === true;
 	const isMissingBinary = error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT';
+	if (isAgentCompatibilityError(error)) {
+		if (bundled) {
+			return (
+				"The agent runtime bundled with this Covexcode IDE build is incompatible with the IDE " +
+				`(${describeError(error)}). Reinstall or update Covexcode IDE, then send your message again.`
+			);
+		}
+		return (
+			`The configured \`covexcode\` CLI is incompatible with this IDE (${describeError(error)}). ` +
+			'Update the CLI, or clear `covexcode.path` to use the bundled runtime.'
+		);
+	}
 	if (isAcpUnsupported(error)) {
+		if (bundled) {
+			return (
+				'The agent runtime bundled with this Covexcode IDE build does not support the ACP interface this IDE ' +
+				'needs. Reinstall or update Covexcode IDE, then send your message again.'
+			);
+		}
 		return (
 			"Your `covexcode` CLI is installed, but it's too old for this IDE -- chat needs `covexcode --acp`, " +
 			"which this build doesn't have. Upgrade, then send your message again:\n\n```\ncovexcode --upgrade\n```"
 		);
 	}
 	if (!isMissingBinary) {
+		if (bundled) {
+			return (
+				`Couldn't start the bundled covexcode agent (${describeError(error)}). ` +
+				'Reinstall or update Covexcode IDE if this persists.'
+			);
+		}
 		return `Couldn't start \`covexcode --acp\` (${describeError(error)}). Make sure \`covexcode\` is installed and on your PATH.`;
+	}
+	if (bundled) {
+		return (
+			"Covexcode IDE couldn't find its bundled agent runtime. " +
+			'Reinstall or update Covexcode IDE, then send your message again.'
+		);
 	}
 	const installCommand =
 		platform === 'win32'
@@ -56,6 +90,10 @@ export function describeStartupFailure(error: unknown, platform: NodeJS.Platform
 		"The `covexcode` CLI isn't installed yet -- covexcode IDE and the `covexcode` command are separate installs. " +
 		`Run this in a terminal, then send your message again:\n\n\`\`\`\n${installCommand}\n\`\`\``
 	);
+}
+
+function isAgentCompatibilityError(error: unknown): boolean {
+	return error instanceof Error && error.name === 'AgentCompatibilityError';
 }
 
 function isAcpUnsupported(error: unknown): boolean {

@@ -34,6 +34,45 @@ export interface AgentCapabilities {
 export interface InitializeResult {
 	protocolVersion?: number;
 	agentCapabilities?: AgentCapabilities;
+	agentInfo?: {
+		name?: string;
+		version?: string;
+	};
+}
+
+export type AgentCompatibility = {
+	protocolVersion: number;
+	agentVersion?: string;
+};
+
+export class AgentCompatibilityError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'AgentCompatibilityError';
+	}
+}
+
+/**
+ * Reject an agent built for a different ACP contract instead of letting the
+ * first prompt fail in some less obvious way. The bundled runtime is pinned to
+ * an IDE release, so its protocol and version are known; an explicitly
+ * configured/PATH CLI gets the same protocol check so a stale binary is
+ * reported here too.
+ */
+export function assertAgentCompatible(result: InitializeResult | undefined, expected: AgentCompatibility | undefined): void {
+	if (!expected) {
+		return;
+	}
+	if (result?.protocolVersion !== expected.protocolVersion) {
+		throw new AgentCompatibilityError(
+			`covexcode agent speaks ACP protocol ${result?.protocolVersion ?? 'unknown'}, expected ${expected.protocolVersion}`,
+		);
+	}
+	if (expected.agentVersion && result.agentInfo?.version !== expected.agentVersion) {
+		throw new AgentCompatibilityError(
+			`covexcode agent version ${result.agentInfo?.version ?? 'unknown'} does not match the pinned ${expected.agentVersion}`,
+		);
+	}
 }
 
 /**
@@ -318,11 +357,18 @@ export class AcpClient extends EventEmitter {
 	 * an existing `~/.covexcode/config.toml`) the user already has working
 	 * from using the CLI directly.
 	 */
-	constructor(covexcodeCommand: string, cwd: string, envOverrides: NodeJS.ProcessEnv = {}) {
+	constructor(
+		covexcodeCommand: string,
+		cwd: string,
+		envOverrides: NodeJS.ProcessEnv = {},
+		args: readonly string[] = ['--acp'],
+		private readonly expectedAgent?: AgentCompatibility,
+	) {
 		super();
-		this.child = cp.spawn(covexcodeCommand, ['--acp'], {
+		this.child = cp.spawn(covexcodeCommand, [...args], {
 			cwd,
 			env: { ...process.env, ...envOverrides },
+			windowsHide: true,
 		});
 
 		const rl = readline.createInterface({ input: this.child.stdout });
@@ -471,7 +517,9 @@ export class AcpClient extends EventEmitter {
 	 */
 	async initialize(): Promise<InitializeResult> {
 		const result = (await this.request('initialize', { protocolVersion: 1 })) as InitializeResult | undefined;
-		return result ?? {};
+		const initialized = result ?? {};
+		assertAgentCompatible(initialized, this.expectedAgent);
+		return initialized;
 	}
 
 	/**
