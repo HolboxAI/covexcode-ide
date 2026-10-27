@@ -43,7 +43,10 @@ test('probeAcpSupported() is false when the CLI rejects --acp as an unknown argu
 	const ok = await probeAcpSupported(
 		process.execPath,
 		['-e', 'console.error("Unknown argument: --acp"); process.exit(2)'],
-		200,
+		// Generous enough that a loaded CI runner cannot hit the probe's
+		// timeout before this child gets to exit(2); the assertion is about
+		// the exit code, not startup latency.
+		2_000,
 	);
 	assert.equal(ok, false);
 });

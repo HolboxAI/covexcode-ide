@@ -154,6 +154,10 @@ function bundledAgentCommandPath(): string | undefined {
 	return extensionContext ? bundledAgentPath(extensionContext.extensionPath, process.platform) : undefined;
 }
 
+function expectsBundledAgent(): boolean {
+	return bundledAgentEnabled() && configuredCovexcodePath().length === 0;
+}
+
 function launchCandidates() {
 	return agentLaunchCandidates({
 		configuredPath: configuredCovexcodePath(),
@@ -592,9 +596,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		const config = vscode.workspace.getConfiguration('covexcode');
 		const candidates = launchCandidates();
 		let command: string | undefined;
+		let agentSource: DoctorFacts['agentSource'] = 'missing';
 		for (const candidate of candidates) {
 			if (await probeBinaryExists(candidate.command)) {
 				command = candidate.command;
+				agentSource = candidate.source;
 				break;
 			}
 		}
@@ -604,6 +610,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		const cwd = workspace.hasFolder ? workspace.cwd : '';
 		const facts: DoctorFacts = {
 			version,
+			agentSource,
+			agentPath: command,
 			platform: process.platform,
 			arch: process.arch,
 			configPath: path.join(os.homedir(), '.covexcode', 'config.toml'),
@@ -807,12 +815,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		// not be forwarded to ACP as ordinary chat prompts.
 		if (request.command === 'provider') {
 			const outcome = await changeProviderFlow(context, discardSession);
-			stream.markdown(providerCommandMarkdown(outcome));
+			stream.markdown(providerCommandMarkdown(outcome, expectsBundledAgent()));
 			return;
 		}
 		if (request.command === 'model') {
 			const outcome = await changeModelFlow(context, discardSession);
-			stream.markdown(modelCommandMarkdown(outcome));
+			stream.markdown(modelCommandMarkdown(outcome, expectsBundledAgent()));
 			return;
 		}
 		if (request.command === 'help') {
@@ -864,7 +872,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (error instanceof SetupCancelled) {
 				stream.markdown('Configuration needed -- send another message when you\'re ready to set covexcode up.');
 			} else {
-				stream.markdown(describeStartupFailure(error, process.platform));
+				stream.markdown(describeStartupFailure(error, process.platform, { bundled: expectsBundledAgent() }));
 			}
 			return;
 		}
@@ -1132,7 +1140,9 @@ export function activate(context: vscode.ExtensionContext): void {
 				void vscode.window.showInformationMessage('covexcode: provider change cancelled.');
 			} else if (outcome.kind === 'no-binary') {
 				void vscode.window.showErrorMessage(
-					"covexcode: couldn't find the `covexcode` CLI. Install it first, or set `covexcode.path` in Settings.",
+					expectsBundledAgent()
+						? "covexcode: couldn't find its bundled agent runtime. Reinstall or update Covexcode IDE."
+						: "covexcode: couldn't find the `covexcode` CLI. Install it first, or set `covexcode.path` in Settings.",
 				);
 			}
 		}),
@@ -1940,7 +1950,7 @@ async function setApiKeyFlow(
 	return 'ok';
 }
 
-function providerCommandMarkdown(outcome: ProviderFlowOutcome): string {
+function providerCommandMarkdown(outcome: ProviderFlowOutcome, bundled = false): string {
 	switch (outcome.kind) {
 		case 'ok':
 			return `Provider updated to **${outcome.summary}**. Send a normal chat message to use it.\n\n` +
@@ -1948,18 +1958,22 @@ function providerCommandMarkdown(outcome: ProviderFlowOutcome): string {
 		case 'cancelled':
 			return 'Provider change cancelled -- existing credentials are unchanged.';
 		case 'no-binary':
-			return "Couldn't find the `covexcode` CLI. Install it, or set `covexcode.path` in Settings, then run `/provider` again.";
+			return bundled
+				? "Covexcode IDE couldn't find its bundled agent runtime. Reinstall or update Covexcode IDE, then run `/provider` again."
+				: "Couldn't find the `covexcode` CLI. Install it, or set `covexcode.path` in Settings, then run `/provider` again.";
 	}
 }
 
-function modelCommandMarkdown(outcome: ModelFlowOutcome): string {
+function modelCommandMarkdown(outcome: ModelFlowOutcome, bundled = false): string {
 	switch (outcome.kind) {
 		case 'ok':
 			return `Model updated to **${outcome.summary}**. Send a normal chat message to use it.`;
 		case 'cancelled':
 			return 'Model change cancelled -- existing model is unchanged.';
 		case 'no-binary':
-			return "Couldn't find the `covexcode` CLI. Install it, or set `covexcode.path` in Settings, then run `/model` again.";
+			return bundled
+				? "Covexcode IDE couldn't find its bundled agent runtime. Reinstall or update Covexcode IDE, then run `/model` again."
+				: "Couldn't find the `covexcode` CLI. Install it, or set `covexcode.path` in Settings, then run `/model` again.";
 		case 'no-provider':
 			return 'No provider is configured yet (or the registry has no models for it). Run `/provider` to pick a provider, model, and API key.';
 	}

@@ -31,6 +31,31 @@ test('describeStartupFailure() tells an installed-but-old CLI to upgrade, not to
 	assert.doesNotMatch(message, /curl -fsSL/);
 });
 
+test('describeStartupFailure() sends a bundled-runtime failure to reinstall, not to the CLI installer', () => {
+	const message = describeStartupFailure(enoent(), 'darwin', { bundled: true });
+	assert.match(message, /bundled agent runtime/);
+	assert.match(message, /Reinstall or update Covexcode IDE/);
+	assert.doesNotMatch(message, /curl -fsSL/);
+	assert.doesNotMatch(message, /covexcode --upgrade/);
+});
+
+test('describeStartupFailure() reports an incompatible bundled runtime without CLI upgrade advice', () => {
+	const message = describeStartupFailure(new AcpUnsupportedError(), 'darwin', { bundled: true });
+	assert.match(message, /bundled with this Covexcode IDE build/);
+	assert.match(message, /Reinstall or update Covexcode IDE/);
+	assert.doesNotMatch(message, /covexcode --upgrade/);
+	assert.doesNotMatch(message, /curl -fsSL/);
+});
+
+test('describeStartupFailure() recognizes an ACP compatibility mismatch', () => {
+	const error = new Error('covexcode agent version 1.11.91 does not match the pinned 1.11.92');
+	error.name = 'AgentCompatibilityError';
+	const message = describeStartupFailure(error, 'darwin', { bundled: true });
+	assert.match(message, /incompatible/);
+	assert.match(message, /1\.11\.91/);
+	assert.doesNotMatch(message, /covexcode --upgrade/);
+});
+
 test('describeStartupFailure() treats exit code 2 as an unknown --acp flag', () => {
 	const message = describeStartupFailure(new Error('covexcode --acp exited (code 2, signal null)'), 'darwin');
 	assert.match(message, /covexcode --upgrade/);

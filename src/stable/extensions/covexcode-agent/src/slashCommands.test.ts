@@ -25,6 +25,7 @@ test('helpMarkdown advertises the new /mode, /help and /doctor commands', () => 
 test('doctorMarkdown reports the api key as present/absent, never its value', () => {
 	const readout = doctorMarkdown({
 		version: 'covexcode 1.11.88',
+		agentSource: 'external',
 		platform: 'darwin',
 		arch: 'arm64',
 		configPath: '/home/u/.covexcode/config.toml',
@@ -41,11 +42,33 @@ test('doctorMarkdown reports the api key as present/absent, never its value', ()
 	assert.doesNotMatch(readout, /bx-live-/);
 	assert.match(readout, /git repo/);
 	assert.match(readout, /deepseek-v4-pro/);
+	assert.match(readout, /Agent:\*\* external/);
+});
+
+test('doctorMarkdown shows the bundled agent source and path', () => {
+	const readout = doctorMarkdown({
+		version: 'covexcode 1.11.92',
+		agentSource: 'bundled',
+		agentPath: '/Applications/Covexcode IDE.app/Contents/Resources/app/extensions/covexcode-agent/resources/bin/covexcode',
+		platform: 'darwin',
+		arch: 'arm64',
+		configPath: '/c',
+		configFound: true,
+		provider: '',
+		model: '',
+		endpoint: '',
+		apiKeySet: false,
+		workspace: '',
+		workspaceIsGit: false,
+		stateDirFound: true,
+	});
+	assert.match(readout, /Agent:\*\* bundled \(.*resources\/bin\/covexcode\)/);
 });
 
 test('doctorMarkdown marks an empty workspace as not set', () => {
 	const readout = doctorMarkdown({
 		version: 'covexcode 1.11.88',
+		agentSource: 'external',
 		platform: 'darwin',
 		arch: 'arm64',
 		configPath: '/c',

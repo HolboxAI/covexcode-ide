@@ -160,7 +160,7 @@
         "covexcode.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to the `covexcode` CLI binary, if it isn't on the PATH this app was launched with. Leave empty to resolve `covexcode` off PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.covexcode/bin` (the locations `install.sh` actually writes to, which a Finder-launched app's PATH often misses)."
+          "markdownDescription": "Optional explicit path to an external `covexcode` CLI. Leave empty to use the agent runtime bundled with Covexcode IDE. If the bundled runtime is unavailable, the IDE falls back to `covexcode` on PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.covexcode/bin`."
         },
         "covexcode.provider": {
           "type": "string",
