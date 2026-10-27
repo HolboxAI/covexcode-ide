@@ -1,0 +1,202 @@
+diff --git a/src/vs/platform/encryption/electron-main/encryptionMainService.ts b/src/vs/platform/encryption/electron-main/encryptionMainService.ts
+index 1b4b1e0..c312a0f 100644
+--- a/src/vs/platform/encryption/electron-main/encryptionMainService.ts
++++ b/src/vs/platform/encryption/electron-main/encryptionMainService.ts
+@@ -4,6 +4,9 @@
+  *--------------------------------------------------------------------------------------------*/
+ 
+ import { safeStorage as safeStorageElectron, app } from 'electron';
++import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
++import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
++import { dirname, join } from 'path';
+ import { isMacintosh, isWindows } from '../../../base/common/platform.js';
+ import { KnownStorageProvider, IEncryptionMainService, PasswordStoreCLIOption } from '../common/encryptionService.js';
+ import { ILogService } from '../../log/common/log.js';
+@@ -20,6 +23,16 @@ const safeStorage: typeof import('electron').safeStorage & Partial<ISafeStorageA
+ export class EncryptionMainService implements IEncryptionMainService {
+ 	_serviceBrand: undefined;
+ 
++	/**
++	 * macOS stores Electron's safeStorage key in the login Keychain, whose ACL
++	 * is bound to the binary's cdhash. Every new build therefore has a new
++	 * identity and macOS re-prompts for access. A key file beside the user
++	 * data is stable across updates, keeps the same encryption-at-rest
++	 * guarantee under 0600 permissions, and never touches Keychain.
++	 */
++	private macKey: Buffer | undefined;
++	private readonly macKeyFile = join(app.getPath('userData'), 'covexcode-encryption.key');
++
+ 	constructor(
+ 		@ILogService private readonly logService: ILogService
+ 	) {
+@@ -31,10 +44,63 @@ export class EncryptionMainService implements IEncryptionMainService {
+ 		}
+ 	}
+ 
++	private getMacKey(): Buffer {
++		if (this.macKey?.length === 32) {
++			return this.macKey;
++		}
++		try {
++			if (existsSync(this.macKeyFile)) {
++				const existing = readFileSync(this.macKeyFile);
++				if (existing.length === 32) {
++					this.macKey = existing;
++					return existing;
++				}
++				this.logService.warn('[EncryptionMainService] macOS key file has the wrong length; generating a new key');
++			}
++		} catch (e) {
++			this.logService.error('[EncryptionMainService] Could not read the macOS key file', e);
++		}
++
++		const key = randomBytes(32);
++		try {
++			mkdirSync(dirname(this.macKeyFile), { recursive: true });
++			writeFileSync(this.macKeyFile, key, { mode: 0o600 });
++			chmodSync(this.macKeyFile, 0o600);
++		} catch (e) {
++			this.logService.error('[EncryptionMainService] Could not write the macOS key file', e);
++			throw e;
++		}
++		this.macKey = key;
++		return key;
++	}
++
++	private encryptWithMacKey(value: string): string {
++		const iv = randomBytes(12);
++		const cipher = createCipheriv('aes-256-gcm', this.getMacKey(), iv);
++		const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
++		const tag = cipher.getAuthTag();
++		return JSON.stringify({ v: 1, data: Buffer.concat([iv, tag, ciphertext]).toString('base64') });
++	}
++
++	private decryptWithMacKey(data: string): string {
++		const raw = Buffer.from(data, 'base64');
++		if (raw.length < 28) {
++			throw new Error('[EncryptionMainService] Invalid macOS encrypted value');
++		}
++		const iv = raw.subarray(0, 12);
++		const tag = raw.subarray(12, 28);
++		const ciphertext = raw.subarray(28);
++		const decipher = createDecipheriv('aes-256-gcm', this.getMacKey(), iv);
++		decipher.setAuthTag(tag);
++		return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
++	}
++
+ 	async encrypt(value: string): Promise<string> {
+ 		this.logService.trace('[EncryptionMainService] Encrypting value...');
+ 		try {
+-			const result = JSON.stringify(safeStorage.encryptString(value));
++			const result = isMacintosh
++				? this.encryptWithMacKey(value)
++				: JSON.stringify(safeStorage.encryptString(value));
+ 			this.logService.trace('[EncryptionMainService] Encrypted value.');
+ 			return result;
+ 		} catch (e) {
+@@ -44,16 +110,23 @@ export class EncryptionMainService implements IEncryptionMainService {
+ 	}
+ 
+ 	async decrypt(value: string): Promise<string> {
+-		let parsedValue: { data: string };
++		let parsedValue: { data: string; v?: number };
+ 		try {
+ 			parsedValue = JSON.parse(value);
+ 			if (!parsedValue.data) {
+ 				throw new Error(`[EncryptionMainService] Invalid encrypted value: ${value}`);
+ 			}
+-			const bufferToDecrypt = Buffer.from(parsedValue.data);
+ 
+ 			this.logService.trace('[EncryptionMainService] Decrypting value...');
+-			const result = safeStorage.decryptString(bufferToDecrypt);
++			let result: string;
++			if (isMacintosh && parsedValue.v === 1) {
++				result = this.decryptWithMacKey(parsedValue.data);
++			} else {
++				// Legacy values written by safeStorage. The one-time migration in
++				// NativeSecretStorageService rewrites these with the key file;
++				// afterwards this branch is never reached on macOS.
++				result = safeStorage.decryptString(Buffer.from(parsedValue.data));
++			}
+ 			this.logService.trace('[EncryptionMainService] Decrypted value.');
+ 			return result;
+ 		} catch (e) {
+@@ -63,6 +136,9 @@ export class EncryptionMainService implements IEncryptionMainService {
+ 	}
+ 
+ 	isEncryptionAvailable(): Promise<boolean> {
++		if (isMacintosh) {
++			return Promise.resolve(true);
++		}
+ 		this.logService.trace('[EncryptionMainService] Checking if encryption is available...');
+ 		const result = safeStorage.isEncryptionAvailable();
+ 		this.logService.trace('[EncryptionMainService] Encryption is available: ', result);
+@@ -74,7 +150,7 @@ export class EncryptionMainService implements IEncryptionMainService {
+ 			return Promise.resolve(KnownStorageProvider.dplib);
+ 		}
+ 		if (isMacintosh) {
+-			return Promise.resolve(KnownStorageProvider.keychainAccess);
++			return Promise.resolve(KnownStorageProvider.unknown);
+ 		}
+ 		if (safeStorage.getSelectedStorageBackend) {
+ 			try {
+diff --git a/src/vs/workbench/services/secrets/electron-browser/secretStorageService.ts b/src/vs/workbench/services/secrets/electron-browser/secretStorageService.ts
+index 228328d..6adced8 100644
+--- a/src/vs/workbench/services/secrets/electron-browser/secretStorageService.ts
++++ b/src/vs/workbench/services/secrets/electron-browser/secretStorageService.ts
+@@ -4,7 +4,7 @@
+  *--------------------------------------------------------------------------------------------*/
+ 
+ import { createSingleCallFunction } from '../../../../base/common/functional.js';
+-import { isLinux } from '../../../../base/common/platform.js';
++import { isLinux, isMacintosh } from '../../../../base/common/platform.js';
+ import Severity from '../../../../base/common/severity.js';
+ import { localize } from '../../../../nls.js';
+ import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+@@ -15,7 +15,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
+ import { INotificationService, IPromptChoice } from '../../../../platform/notification/common/notification.js';
+ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
+ import { BaseSecretStorageService, ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
+-import { IStorageService } from '../../../../platform/storage/common/storage.js';
++import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+ import { IJSONEditingService } from '../../configuration/common/jsonEditing.js';
+ 
+ export class NativeSecretStorageService extends BaseSecretStorageService {
+@@ -36,6 +36,37 @@ export class NativeSecretStorageService extends BaseSecretStorageService {
+ 			encryptionService,
+ 			logService
+ 		);
++
++		if (isMacintosh && !_environmentService.useInMemorySecretStorage) {
++			// One final Keychain read is required to decrypt values written by
++			// the old safeStorage backend. The encryption service's macOS
++			// backend re-writes each value with a stable 0600 key file, so
++			// later builds never touch Keychain again.
++			void this.migrateMacSecretsOnce();
++		}
++	}
++
++	private async migrateMacSecretsOnce(): Promise<void> {
++		const marker = 'covexcode/secretsFileKeyMigrated';
++		try {
++			const storageService = await this.resolvedStorageService;
++			if (storageService.get(marker, StorageScope.APPLICATION)) {
++				return;
++			}
++
++			this._logService.trace('[NativeSecretStorageService] migrating macOS secrets to the file-key backend');
++			for (const key of await this.keys()) {
++				const value = await this.get(key);
++				if (value !== undefined) {
++					await this.set(key, value);
++				}
++			}
++			storageService.store(marker, '1', StorageScope.APPLICATION, StorageTarget.MACHINE);
++			this._logService.trace('[NativeSecretStorageService] macOS secrets migration complete');
++		} catch (e) {
++			// Leave the marker unset so the next launch can retry.
++			this._logService.error('[NativeSecretStorageService] macOS secret migration failed', e);
++		}
+ 	}
+ 
+ 	override set(key: string, value: string): Promise<void> {
