@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "agentVersion": "1.11.92",
+  "protocolVersion": 1,
+  "releaseTag": "v1.11.92",
+  "repository": "HolboxAI/covexcode",
+  "artifacts": {
+    "darwin-arm64": {
+      "asset": "covexcode-macos-aarch64",
+      "sha256": "0b90092e8f2287e973283d458e43d48c32841fe2c079f90dba5004c3150816e9",
+      "size": 6815184
+    },
+    "win32-x64": {
+      "asset": "covexcode-windows-x86_64.exe",
+      "sha256": "669cff682841d17b08d27041b1ff00840be20bbad210ccfbe9b629da6288efb3",
+      "size": 9694208
+    },
+    "linux-x64": {
+      "asset": "covexcode-linux-x86_64",
+      "sha256": "0c6c3753652b336109393a49f053b9885dc18300350105fb9b90db7979dea8d9",
+      "size": 7941488
+    },
+    "linux-arm64": {
+      "asset": "covexcode-linux-aarch64",
+      "sha256": "8f7ab105f4c9b7f78bb625090f9aadae4f3296134ff972617d59fea7074aa3ba",
+      "size": 11689016
+    }
+  }
+}
