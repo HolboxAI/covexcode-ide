@@ -2,7 +2,10 @@ name: repo hygiene
 
 on:
   pull_request:
-    branches: [main]
+    # Feature/phase branches get the same hygiene and overlay tests as main.
+    # This keeps the standalone-agent integration branch honest without
+    # merging every small step straight to main.
+    branches: [main, "feat/**"]
 
 jobs:
   hygiene:
