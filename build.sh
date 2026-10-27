@@ -35,6 +35,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
 
     bash ../verify_sidecar.sh
 
+    bash ../test/sidecar-acp-smoke.sh
+
     VSCODE_PLATFORM="darwin"
   elif [[ "${OS_NAME}" == "windows" ]]; then
     # in CI, packaging will be done by a different job
@@ -57,6 +59,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
     bash ../prepare_sidecar.sh
 
     bash ../verify_sidecar.sh
+
+    bash ../test/sidecar-acp-smoke.sh
     fi
 
     VSCODE_PLATFORM="win32"
@@ -79,6 +83,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
     bash ../prepare_sidecar.sh
 
     bash ../verify_sidecar.sh
+
+    bash ../test/sidecar-acp-smoke.sh
     fi
 
     VSCODE_PLATFORM="linux"
