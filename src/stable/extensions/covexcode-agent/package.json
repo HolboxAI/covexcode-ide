@@ -26,10 +26,13 @@
     "onStartupFinished"
   ],
   "main": "./out/extension",
+  "extensionKind": [
+    "ui"
+  ],
   "scripts": {
     "compile": "gulp compile-extension:covexcode-agent",
     "watch": "gulp watch-extension:covexcode-agent",
-    "test": "tsc -p tsconfig.test.json && node --test out-test/*.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test out-test/*.test.js out-test/agent/*.test.js"
   },
   "contributes": {
     "chatParticipants": [
@@ -148,6 +151,12 @@
     "configuration": {
       "title": "covexcode",
       "properties": {
+        "covexcode.agent.useBundled": {
+          "type": "boolean",
+          "default": false,
+          "order": 0,
+          "markdownDescription": "Use the agent runtime bundled with Covexcode IDE instead of a separately installed `covexcode` CLI. This is opt-in while the bundled runtime is being rolled out; `covexcode.path` remains an explicit override."
+        },
         "covexcode.path": {
           "type": "string",
           "default": "",

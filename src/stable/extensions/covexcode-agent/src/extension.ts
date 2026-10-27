@@ -37,7 +37,7 @@ import {
 } from './acpClient';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
-import { covexcodeBinaryCandidates } from './covexcodeBinary';
+import { agentLaunchCandidates, bundledAgentPath } from './agent/launch';
 import {
 	parsePermissionCommandArgs,
 	parseReviewCommandArgs,
@@ -131,6 +131,34 @@ const pendingReviews = new Map<string, { newText: string; hunks: DiffHunk[] }>()
  * even though a login shell sees it fine). */
 function configuredCovexcodePath(): string {
 	return vscode.workspace.getConfiguration('covexcode').get<string>('path', '').trim();
+}
+
+/** The bundled runtime is opt-in until the packaging path has shipped and
+ * been verified on every platform. COVEXCODE_USE_BUNDLED_AGENT is the
+ * per-window escape hatch for testers. */
+function bundledAgentEnabled(): boolean {
+	const override = process.env.COVEXCODE_USE_BUNDLED_AGENT?.trim().toLowerCase();
+	if (override === '1' || override === 'true') {
+		return true;
+	}
+	if (override === '0' || override === 'false') {
+		return false;
+	}
+	return vscode.workspace.getConfiguration('covexcode').get<boolean>('agent.useBundled', false);
+}
+
+function bundledAgentCommandPath(): string {
+	return bundledAgentPath(context.extensionPath, process.platform);
+}
+
+function launchCandidates() {
+	return agentLaunchCandidates({
+		configuredPath: configuredCovexcodePath(),
+		bundledPath: bundledAgentCommandPath(),
+		useBundled: bundledAgentEnabled(),
+		home: os.homedir(),
+		platform: process.platform,
+	});
 }
 
 /** USD per 1M tokens for the cost half of the usage footer, or `undefined`
@@ -558,11 +586,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	async function doctorReadoutMarkdown(): Promise<string> {
 		const config = vscode.workspace.getConfiguration('covexcode');
-		const candidates = covexcodeBinaryCandidates(configuredCovexcodePath(), os.homedir());
+		const candidates = launchCandidates();
 		let command: string | undefined;
 		for (const candidate of candidates) {
-			if (await probeBinaryExists(candidate)) {
-				command = candidate;
+			if (await probeBinaryExists(candidate.command)) {
+				command = candidate.command;
 				break;
 			}
 		}
@@ -624,11 +652,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	function ensureReady(workspace: WorkspaceContext): Promise<void> {
 		if (!ready) {
 			ready = (async () => {
-				const candidates = covexcodeBinaryCandidates(configuredCovexcodePath(), os.homedir());
+				const candidates = launchCandidates();
 				let covexcodeCommand: string | undefined;
 				for (const candidate of candidates) {
-					if (await probeBinaryExists(candidate)) {
-						covexcodeCommand = candidate;
+					if (await probeBinaryExists(candidate.command)) {
+						covexcodeCommand = candidate.command;
 						break;
 					}
 				}
@@ -638,7 +666,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				// was missing. Thrown with `code: 'ENOENT'` so it lands on
 				// the exact branch `describeStartupFailure` already handles.
 				if (!covexcodeCommand) {
-					const notFound = new Error(`spawn ${candidates[0] ?? COVEXCODE_COMMAND} ENOENT`) as NodeJS.ErrnoException;
+					const notFound = new Error(`spawn ${candidates[0]?.command ?? COVEXCODE_COMMAND} ENOENT`) as NodeJS.ErrnoException;
 					notFound.code = 'ENOENT';
 					throw notFound;
 				}
@@ -1777,10 +1805,10 @@ type ModelFlowOutcome =
  * spawning an ACP session -- needed by `/provider` and `/model`, which only
  * need `--providers-json`. */
 async function resolveCovexcodeBinary(): Promise<string | undefined> {
-	const candidates = covexcodeBinaryCandidates(configuredCovexcodePath(), os.homedir());
+	const candidates = launchCandidates();
 	for (const candidate of candidates) {
-		if (await probeBinaryExists(candidate)) {
-			return candidate;
+		if (await probeBinaryExists(candidate.command)) {
+			return candidate.command;
 		}
 	}
 	return undefined;
