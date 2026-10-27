@@ -18,15 +18,35 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCK="${ROOT}/agent.lock.json"
-EXTENSION="${ROOT}/vscode/extensions/covexcode-agent"
-DEST_DIR="${EXTENSION}/resources/bin"
 
 if [[ ! -f "${LOCK}" ]]; then
 	echo "agent.lock.json not found at ${LOCK}" >&2
 	exit 1
 fi
-if [[ ! -d "${EXTENSION}" ]]; then
-	echo "covexcode-agent extension not staged at ${EXTENSION}; run prepare_vscode.sh first" >&2
+
+# Stage into the packaged app tree, not the vscode source tree: the app tree
+# is what the installers and the signed .app actually contain. SIDECAR_APP_DIR
+# is an explicit override for tests/local builds.
+APP_DIR="${SIDECAR_APP_DIR:-}"
+if [[ -z "${APP_DIR}" ]]; then
+	case "${OS_NAME:-}" in
+		osx)
+			NAME_LONG="$(node -p "require('${ROOT}/vscode/product.json').nameLong")"
+			APP_DIR="${ROOT}/VSCode-darwin-${VSCODE_ARCH}/${NAME_LONG}.app/Contents/Resources/app"
+			;;
+		windows)
+			APP_DIR="${ROOT}/VSCode-win32-${VSCODE_ARCH}/resources/app"
+			;;
+		linux)
+			APP_DIR="${ROOT}/VSCode-linux-${VSCODE_ARCH}/resources/app"
+			;;
+	esac
+fi
+
+EXTENSION="${APP_DIR}/extensions/covexcode-agent"
+DEST_DIR="${EXTENSION}/resources/bin"
+if [[ -z "${APP_DIR}" || ! -d "${EXTENSION}" ]]; then
+	echo "covexcode-agent extension not found at ${EXTENSION:-<unknown>}; run the platform packing step first" >&2
 	exit 1
 fi
 
@@ -68,6 +88,22 @@ IFS=$'\t' read -r asset expected_sha expected_size <<<"${fields}"
 RELEASE_TAG="$(node -e 'process.stdout.write(require(process.argv[1]).releaseTag)' "${LOCK}")"
 REPOSITORY="$(node -e 'process.stdout.write(require(process.argv[1]).repository)' "${LOCK}")"
 
+binary_name="covexcode"
+if [[ "${key}" == win32-* ]]; then
+	binary_name="covexcode.exe"
+fi
+
+if [[ -f "${DEST_DIR}/version.json" && -f "${DEST_DIR}/${binary_name}" ]]; then
+	staged_sha="$(node -e '
+		const fs = require("fs");
+		process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).sha256 || "");
+	' "${DEST_DIR}/version.json")"
+	if [[ "${staged_sha}" == "${expected_sha}" ]]; then
+		echo "Bundled agent already staged (${key}, ${RELEASE_TAG})"
+		exit 0
+	fi
+fi
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
@@ -96,10 +132,6 @@ if [[ "${actual_size}" != "${expected_size}" ]]; then
 fi
 
 mkdir -p "${DEST_DIR}"
-binary_name="covexcode"
-if [[ "${key}" == win32-* ]]; then
-	binary_name="covexcode.exe"
-fi
 cp "${TMP_DIR}/${asset}" "${DEST_DIR}/${binary_name}"
 chmod 755 "${DEST_DIR}/${binary_name}"
 
