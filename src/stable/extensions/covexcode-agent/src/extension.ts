@@ -37,7 +37,8 @@ import {
 } from './acpClient';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
-import { agentLaunchCandidates, bundledAgentPath } from './agent/launch';
+import { agentLaunchCandidates, bundledAgentPath, type AgentCandidate } from './agent/launch';
+import { readBundledAgentManifest } from './agent/manifest';
 import {
 	parsePermissionCommandArgs,
 	parseReviewCommandArgs,
@@ -656,10 +657,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (!ready) {
 			ready = (async () => {
 				const candidates = launchCandidates();
-				let covexcodeCommand: string | undefined;
+				let selected: AgentCandidate | undefined;
 				for (const candidate of candidates) {
 					if (await probeBinaryExists(candidate.command)) {
-						covexcodeCommand = candidate.command;
+						selected = candidate;
 						break;
 					}
 				}
@@ -668,17 +669,26 @@ export function activate(context: vscode.ExtensionContext): void {
 				// credential prompts before ever learning the binary itself
 				// was missing. Thrown with `code: 'ENOENT'` so it lands on
 				// the exact branch `describeStartupFailure` already handles.
-				if (!covexcodeCommand) {
+				if (!selected) {
 					const notFound = new Error(`spawn ${candidates[0]?.command ?? COVEXCODE_COMMAND} ENOENT`) as NodeJS.ErrnoException;
 					notFound.code = 'ENOENT';
 					throw notFound;
 				}
+				const covexcodeCommand = selected.command;
 				if (!(await probeAcpSupported(covexcodeCommand))) {
 					throw new AcpUnsupportedError();
 				}
+				const compatibility: { protocolVersion: number; agentVersion?: string } = { protocolVersion: 1 };
+				if (selected.source === 'bundled') {
+					const manifest = readBundledAgentManifest(context.extensionPath, process.platform, process.arch);
+					if (manifest) {
+						compatibility.protocolVersion = manifest.protocolVersion;
+						compatibility.agentVersion = manifest.agentVersion;
+					}
+				}
 				const cwd = workspace.cwd;
 				const envOverrides = await ensureCredentials(context, covexcodeCommand);
-				const acp = new AcpClient(covexcodeCommand, cwd, envOverrides, ['--acp'], { protocolVersion: 1 });
+				const acp = new AcpClient(covexcodeCommand, cwd, envOverrides, ['--acp'], compatibility);
 				client = acp;
 				// A crash mid-session must not leave the participant dead until
 				// the window reloads. AcpClient already emits 'exit' when the
