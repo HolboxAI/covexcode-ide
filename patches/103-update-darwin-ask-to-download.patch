@@ -1,5 +1,5 @@
 diff --git a/src/vs/platform/update/electron-main/updateService.darwin.ts b/src/vs/platform/update/electron-main/updateService.darwin.ts
-index b8057a0..b583e94 100644
+index b8057a0..920945c 100644
 --- a/src/vs/platform/update/electron-main/updateService.darwin.ts
 +++ b/src/vs/platform/update/electron-main/updateService.darwin.ts
 @@ -4,6 +4,7 @@
@@ -10,23 +10,21 @@ index b8057a0..b583e94 100644
  import { CancellationToken } from '../../../base/common/cancellation.js';
  import { memoize } from '../../../base/common/decorators.js';
  import { Event } from '../../../base/common/event.js';
-@@ -13,6 +14,7 @@ import { IConfigurationService } from '../../configuration/common/configuration.
- import { IEnvironmentMainService } from '../../environment/electron-main/environmentMainService.js';
- import { ILifecycleMainService, IRelaunchHandler, IRelaunchOptions } from '../../lifecycle/electron-main/lifecycleMainService.js';
- import { ILogService } from '../../log/common/log.js';
-+import { INativeHostMainService } from '../../native/electron-main/nativeHostMainService.js';
- import { IProductService } from '../../product/common/productService.js';
+@@ -17,10 +18,32 @@ import { IProductService } from '../../product/common/productService.js';
  import { asJson, IRequestService, NO_FETCH_TELEMETRY } from '../../request/common/request.js';
  import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
-@@ -21,6 +23,27 @@ import { AvailableForDownload, IUpdate, State, StateType, UpdateType } from '../
+ import { ITelemetryService } from '../../telemetry/common/telemetry.js';
+-import { AvailableForDownload, IUpdate, State, StateType, UpdateType } from '../common/update.js';
++import { AvailableForDownload, DisablementReason, IUpdate, State, StateType, UpdateType } from '../common/update.js';
  import { IMeteredConnectionService } from '../../meteredConnection/common/meteredConnection.js';
  import { AbstractUpdateService, createUpdateURL, getUpdateRequestHeaders, IUpdateURLOptions, UpdateErrorClassification } from './abstractUpdateService.js';
  
 +/**
 + * Squirrel.Mac can only install updates for an app signed with a Developer ID
 + * (or an App Store distribution certificate). Ad-hoc and unsigned builds
-+ * cannot, so they keep the old "open the download page" fallback. The answer
-+ * cannot change while the process is running, so cache it.
++ * cannot, so they must not pretend to self-update: the service disables
++ * updates instead of opening a browser or handing the bundle to Squirrel.
++ * The answer cannot change while the process is running, so cache it.
 + */
 +let canUseSquirrelCache: boolean | undefined;
 +function canUseSquirrel(): boolean {
@@ -46,15 +44,7 @@ index b8057a0..b583e94 100644
  export class DarwinUpdateService extends AbstractUpdateService implements IRelaunchHandler {
  
  	private readonly disposables = new DisposableStore();
-@@ -47,6 +70,7 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
- 		@IProductService productService: IProductService,
- 		@IApplicationStorageMainService applicationStorageMainService: IApplicationStorageMainService,
- 		@IMeteredConnectionService meteredConnectionService: IMeteredConnectionService,
-+		@INativeHostMainService private readonly nativeHostMainService: INativeHostMainService,
- 	) {
- 		super(lifecycleMainService, configurationService, environmentMainService, requestService, logService, productService, telemetryService, applicationStorageMainService, meteredConnectionService, true);
- 
-@@ -132,10 +156,17 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
+@@ -132,10 +155,24 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
  					this.setState(State.Idle(UpdateType.Setup, undefined, explicit || undefined));
  				}
  				else {
@@ -65,18 +55,35 @@ index b8057a0..b583e94 100644
 +					if (canUseSquirrel()) {
 +						this.logService.info('update#doCheckForUpdates - using Electron autoUpdater');
 +
++						// Never swap the app during a normal quit. The workbench
++						// prompts on Ready; only its explicit "Restart to Update"
++						// calls quitAndInstall(). A failed install therefore cannot
++						// happen just because the user closed the window.
++						electron.autoUpdater.autoInstallOnAppQuit = false;
 +						electron.autoUpdater.setFeedURL({ url });
 +						electron.autoUpdater.checkForUpdates();
 +					} else {
 +						// Unsigned / ad-hoc-signed builds cannot use Squirrel.Mac.
-+						// Notify and wait for the user to confirm before opening the zip.
-+						this.logService.info('update#doCheckForUpdates - offering download (app is not Developer ID signed)');
-+						this.setState(State.AvailableForDownload(result.update));
++						// Do not open a browser and do not hand anything to
++						// Squirrel: leaving the current app untouched is the only
++						// safe outcome for a build that cannot self-install.
++						this.logService.info('update#doCheckForUpdates - self-update unavailable (app is not Developer ID signed)');
++						this.setState(State.Disabled(DisablementReason.NotBuilt));
 +					}
  				}
  
  				return Promise.resolve(null);
-@@ -212,10 +243,19 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
+@@ -169,6 +206,9 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
+ 				this.logService.trace('update#checkForUpdateNoDownload - no update available');
+ 				const notAvailable = this.state.type === StateType.CheckingForUpdates && this.state.explicit;
+ 				this.setState(State.Idle(UpdateType.Archive, undefined, notAvailable || undefined));
++			} else if (!canUseSquirrel()) {
++				this.logService.info('update#checkForUpdateNoDownload - self-update unavailable (app is not Developer ID signed)');
++				this.setState(State.Disabled(DisablementReason.NotBuilt));
+ 			} else {
+ 				this.logService.trace('update#checkForUpdateNoDownload - update available', { version: update.version, productVersion: update.productVersion });
+ 				this.setState(State.AvailableForDownload(update, canInstall));
+@@ -212,10 +252,19 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
  	}
  
  	protected override async doDownloadUpdate(state: AvailableForDownload): Promise<void> {
@@ -92,10 +99,10 @@ index b8057a0..b583e94 100644
 +			return;
 +		}
 +
-+		const url = state.update.url || this.productService.downloadUrl;
-+		if (url) {
-+			this.nativeHostMainService.openExternal(undefined, url);
-+		}
++		// Unsigned builds never reach AvailableForDownload (both check paths
++		// disable them), but keep this guard so a restored state can never
++		// open a browser or start an install the bundle cannot complete.
++		this.logService.info('update#doDownloadUpdate - self-update unavailable (app is not Developer ID signed)');
 +		this.setState(State.Idle(UpdateType.Archive));
  	}
  
