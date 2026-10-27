@@ -26,10 +26,13 @@
     "onStartupFinished"
   ],
   "main": "./out/extension",
+  "extensionKind": [
+    "ui"
+  ],
   "scripts": {
     "compile": "gulp compile-extension:covexcode-agent",
     "watch": "gulp watch-extension:covexcode-agent",
-    "test": "tsc -p tsconfig.test.json && node --test out-test/*.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test out-test/*.test.js out-test/agent/*.test.js"
   },
   "contributes": {
     "chatParticipants": [
@@ -148,10 +151,16 @@
     "configuration": {
       "title": "covexcode",
       "properties": {
+        "covexcode.agent.useBundled": {
+          "type": "boolean",
+          "default": true,
+          "order": 0,
+          "markdownDescription": "Use the agent runtime bundled with Covexcode IDE instead of a separately installed `covexcode` CLI. Disable this to fall back to a CLI on PATH; `covexcode.path` remains an explicit override."
+        },
         "covexcode.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to the `covexcode` CLI binary, if it isn't on the PATH this app was launched with. Leave empty to resolve `covexcode` off PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.covexcode/bin` (the locations `install.sh` actually writes to, which a Finder-launched app's PATH often misses)."
+          "markdownDescription": "Optional explicit path to an external `covexcode` CLI. Leave empty to use the agent runtime bundled with Covexcode IDE. If the bundled runtime is unavailable, the IDE falls back to `covexcode` on PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.covexcode/bin`."
         },
         "covexcode.provider": {
           "type": "string",

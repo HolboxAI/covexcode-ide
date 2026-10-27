@@ -121,7 +121,7 @@ jobs:
           # prepare_assets.sh are the packaging path. icons/ is copied into
           # the overlay. Omitting any of these meant a PR that only touched
           # the agent, a packaging script, or an icon skipped compile.
-          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|prepare_assets\.sh|publish_update_feed\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|src/|build/|icons/|\.github/workflows/ci-build-macos\.yml)'; then
+          if echo "$CHANGED" | grep -qE '^(get_repo\.sh|get_pr\.sh|build\.sh|version\.sh|prepare_vscode\.sh|prepare_sidecar\.sh|verify_sidecar\.sh|agent\.lock\.json|prepare_assets\.sh|publish_update_feed\.sh|utils\.sh|build_cli\.sh|product\.json|\.nvmrc|patches/|src/|build/|test/|icons/|\.github/workflows/ci-build-macos\.yml)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "a build-relevant path changed"
           else

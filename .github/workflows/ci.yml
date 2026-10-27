@@ -40,6 +40,9 @@ jobs:
           node-version-file: '.nvmrc'
       - run: npm ci
       - run: npm test
+      - name: Sidecar layout checks
+        working-directory: ${{ github.workspace }}
+        run: ./build/sidecar-layout.test.sh
 
   # Unpacks a Code-OSS-shaped .deb the same way the Flatpak module does.
   # No vscode checkout and no flatpak-builder — those stay on generate_assets.

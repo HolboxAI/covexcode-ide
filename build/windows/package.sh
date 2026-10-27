@@ -37,6 +37,12 @@ npm run gulp "vscode-win32-${VSCODE_ARCH}-min-packing"
 
 . ../build_cli.sh
 
+bash ../prepare_sidecar.sh
+
+bash ../verify_sidecar.sh
+
+bash ../test/sidecar-acp-smoke.sh
+
 if [[ "${VSCODE_ARCH}" == "x64" ]]; then
   if [[ "${SHOULD_BUILD_REH}" != "no" ]]; then
     echo "Building REH"

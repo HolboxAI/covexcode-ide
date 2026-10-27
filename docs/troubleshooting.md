@@ -50,7 +50,7 @@ Credits: [Gerson](https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/-/issues/
 
 ### <a id="linux-flatpak-most-common-issues"></a>_Flatpak most common issues_
 
-The bundle id is `com.covexcode.Covexcode`. Chat still needs the host `covexcode` CLI (`curl -fsSL https://covexcode.com/install.sh | bash`); the wrapper adds `~/.local/bin` to `PATH` so that install is found.
+The bundle id is `com.covexcode.Covexcode`. The agent runtime is bundled inside the Flatpak, so chat does not require a host `covexcode` CLI. Install the host CLI separately only if you also want terminal use.
 
 - blurry screen with HiDPI on Wayland:
   ```bash
