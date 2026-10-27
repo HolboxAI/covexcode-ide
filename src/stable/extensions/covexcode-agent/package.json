@@ -153,9 +153,9 @@
       "properties": {
         "covexcode.agent.useBundled": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "order": 0,
-          "markdownDescription": "Use the agent runtime bundled with Covexcode IDE instead of a separately installed `covexcode` CLI. This is opt-in while the bundled runtime is being rolled out; `covexcode.path` remains an explicit override."
+          "markdownDescription": "Use the agent runtime bundled with Covexcode IDE instead of a separately installed `covexcode` CLI. Disable this to fall back to a CLI on PATH; `covexcode.path` remains an explicit override."
         },
         "covexcode.path": {
           "type": "string",
