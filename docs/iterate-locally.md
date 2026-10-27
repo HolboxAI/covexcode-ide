@@ -26,6 +26,11 @@ export SHOULD_BUILD_REH_WEB=no
 ./build.sh
 ```
 
+`build.sh` stages the pinned agent runtime from `agent.lock.json` through
+`prepare_sidecar.sh`. If you are offline or only testing the UI, set
+`SHOULD_BUILD_SIDECAR=no`; the extension then falls back to an external
+`covexcode` CLI.
+
 Launch the unsigned tree with:
 
 ```sh
@@ -72,5 +77,5 @@ VSCode-win32-x64\Covexcode.exe
 ```
 
 Installers (exe/msi) are still dispatch-only (`generate_assets: true`).
-arm64 Windows packing is dispatch-only too. The `covexcode` CLI is a
-separate install: `irm https://covexcode.com/install.ps1 | iex`.
+arm64 Windows packing is dispatch-only too. The IDE bundles its agent
+runtime; the `covexcode` CLI is optional and only needed for terminal use.
