@@ -678,7 +678,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				}
 				const cwd = workspace.cwd;
 				const envOverrides = await ensureCredentials(context, covexcodeCommand);
-				const acp = new AcpClient(covexcodeCommand, cwd, envOverrides);
+				const acp = new AcpClient(covexcodeCommand, cwd, envOverrides, ['--acp'], { protocolVersion: 1 });
 				client = acp;
 				// A crash mid-session must not leave the participant dead until
 				// the window reloads. AcpClient already emits 'exit' when the

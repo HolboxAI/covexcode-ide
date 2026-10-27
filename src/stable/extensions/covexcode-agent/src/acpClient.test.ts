@@ -4,7 +4,15 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { agentSupportsImages, fetchProviders, probeAcpSupported, probeBinaryExists } from './acpClient';
+import {
+	AcpClient,
+	AgentCompatibilityError,
+	agentSupportsImages,
+	assertAgentCompatible,
+	fetchProviders,
+	probeAcpSupported,
+	probeBinaryExists,
+} from './acpClient';
 
 /**
  * `probeBinaryExists`/`fetchProviders` spawn a real child process -- these
@@ -90,4 +98,62 @@ test('agentSupportsImages() follows the advertised prompt capability', () => {
 	assert.equal(agentSupportsImages({ agentCapabilities: { promptCapabilities: { image: false } } }), false);
 	assert.equal(agentSupportsImages({ agentCapabilities: {} }), false);
 	assert.equal(agentSupportsImages(undefined), false);
+});
+
+test('assertAgentCompatible() accepts the pinned protocol/version and rejects mismatches', () => {
+	assert.doesNotThrow(() =>
+		assertAgentCompatible(
+			{ protocolVersion: 1, agentInfo: { version: '1.11.92' } },
+			{ protocolVersion: 1, agentVersion: '1.11.92' },
+		),
+	);
+	assert.throws(
+		() => assertAgentCompatible({ protocolVersion: 2 }, { protocolVersion: 1 }),
+		/protocol 2, expected 1/,
+	);
+	assert.throws(
+		() => assertAgentCompatible({ protocolVersion: 1, agentInfo: { version: '1.11.91' } }, { protocolVersion: 1, agentVersion: '1.11.92' }),
+		/does not match the pinned 1\.11\.92/,
+	);
+});
+
+const acpServerScript = `
+const readline = require('node:readline');
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', line => {
+	const message = JSON.parse(line);
+	if (message.method === 'initialize') {
+		process.stdout.write(JSON.stringify({
+			jsonrpc: '2.0',
+			id: message.id,
+			result: { protocolVersion: 1, agentInfo: { name: 'covexcode', version: '1.11.92' } },
+		}) + '\\n');
+	}
+});
+`;
+
+test('AcpClient accepts injected args and passes the ACP compatibility check', async () => {
+	const client = new AcpClient(process.execPath, process.cwd(), {}, ['-e', acpServerScript], {
+		protocolVersion: 1,
+		agentVersion: '1.11.92',
+	});
+	try {
+		const result = await client.initialize();
+		assert.equal(result.protocolVersion, 1);
+		assert.equal(result.agentInfo?.version, '1.11.92');
+	} finally {
+		client.dispose();
+	}
+});
+
+test('AcpClient rejects an agent whose ACP version does not match the pin', async () => {
+	const client = new AcpClient(process.execPath, process.cwd(), {}, ['-e', acpServerScript], {
+		protocolVersion: 1,
+		agentVersion: '9.9.9',
+	});
+	try {
+		await assert.rejects(() => client.initialize(), AgentCompatibilityError);
+	} finally {
+		client.dispose();
+	}
 });
