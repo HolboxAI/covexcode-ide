@@ -29,7 +29,14 @@ test('agent.lock.json pins a concrete agent build and ACP protocol', () => {
 });
 
 test('agent.lock.json covers every currently shipped desktop target', () => {
-	for (const target of ['darwin-arm64', 'win32-x64', 'linux-x64', 'linux-arm64']) {
+	for (const target of [
+		'darwin-arm64',
+		'win32-x64',
+		'linux-x64',
+		'linux-arm64',
+		'linux-x64-musl',
+		'linux-arm64-musl',
+	]) {
 		const artifact = lock.artifacts[target];
 		assert.ok(artifact, `missing artifact for ${target}`);
 		assert.match(artifact.asset, /^covexcode-/);
