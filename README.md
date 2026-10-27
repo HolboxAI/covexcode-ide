@@ -1,6 +1,6 @@
 # covexcode-ide
 
-A Code-OSS-based editor for covexcode, aimed at frontend engineers. This repo owns the editor surface only — the agent brain stays in [`HolboxAI/covexcode`](https://github.com/HolboxAI/covexcode) and is reused over a protocol, not reimplemented here.
+A Code-OSS-based editor for covexcode, aimed at frontend engineers. This repo owns the editor surface. The agent brain lives in [`HolboxAI/covexcode`](https://github.com/HolboxAI/covexcode); a pinned build of that runtime is bundled inside the IDE, so the editor does not require a separately installed CLI.
 
 **Status: P1 in progress.** Build tooling (adapted from [VSCodium](https://github.com/VSCodium/vscodium)'s MIT-licensed scripts — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)) has landed: a pinned `microsoft/vscode` checkout, a patch set for de-branding/Open VSX/telemetry, and covexcode's own product identity (`utils.sh`, `prepare_vscode.sh`). The covexcode chat participant and covexcode's own themes ship in-tree, and macOS/Windows/Linux builds compile in CI. See [`docs/howto-build.md`](docs/howto-build.md) to build locally.
 
@@ -8,31 +8,29 @@ A Code-OSS-based editor for covexcode, aimed at frontend engineers. This repo ow
 
 Two covexcode-specific extensions are bundled under `src/stable/extensions/`:
 
-- **`covexcode-agent`** — the chat participant. Registers `covexcode` as the default chat participant (ask/edit/agent modes) and drives the `covexcode` binary over its ACP stdio interface. Ships commands for undoing a session's file changes, switching provider/model/API key, responding to a permission prompt, and trusting the open folder.
+- **`covexcode-agent`** — the chat participant. Registers `covexcode` as the default chat participant (ask/edit/agent modes) and drives the bundled agent runtime over its ACP stdio interface, with an external CLI fallback for development. Ships commands for undoing a session's file changes, switching provider/model/API key, responding to a permission prompt, and trusting the open folder.
 - **`covexcode-theme`** — covexcode's own color themes ("Covexcode Dark" and "Covexcode Light"), an amber/orange accent on top of Dark Modern / Light Modern.
 
 On top of the fork, the patch set adds a chat-first landing page, an Integrated Browser pane (with `check_in_browser`), auto-open of localhost dev servers, and the rebrand. What's done vs. planned lives in [`docs/BACKLOG.md`](docs/BACKLOG.md), not here.
 
 ## Install
 
-covexcode-ide and the `covexcode` CLI are separate installs: this repo is only the editor surface, and the chat participant it ships shells out to a `covexcode` binary already on your `PATH` (see the Architecture section below). Install that binary first:
+Covexcode IDE is self-contained: a pinned `covexcode` agent runtime ships inside the app. You do **not** need to install the terminal CLI to use chat.
+
+### macOS
+
+Download the latest `.dmg` from the [latest release](https://github.com/HolboxAI/covexcode-ide/releases/latest) and drag **Covexcode IDE** into `Applications`. Builds are Developer ID signed and notarized; if Gatekeeper still asks, use right-click → Open.
+
+Then open a folder in the IDE and send a chat message — the first message walks you through picking a model provider and API key if `~/.covexcode/config.toml` doesn't already exist.
+
+### Optional terminal CLI
+
+Install the `covexcode` binary only if you also want the agent from a shell (or want to use it as the IDE's fallback during development):
 
 ```sh
 curl -fsSL https://covexcode.com/install.sh | bash      # macOS/Linux
 irm https://covexcode.com/install.ps1 | iex              # Windows (PowerShell)
 ```
-
-### Install the IDE itself (macOS dev builds)
-
-Download the latest `.dmg` from the [latest release](https://github.com/HolboxAI/covexcode-ide/releases/latest) and drag **Covexcode IDE** into `Applications`. These builds are **unsigned while the IDE is still in development** (code-signing/notarization isn't set up yet — see [docs/BACKLOG.md](docs/BACKLOG.md), Tier 1), so macOS applies a quarantine flag to the downloaded app and it won't launch until that flag is cleared:
-
-```sh
-xattr -cr "/Applications/Covexcode IDE.app"
-```
-
-(Alternative: right-click the app → Open, and confirm the Gatekeeper prompt.) After that, launch Covexcode IDE normally.
-
-Then open a folder in covexcode-ide and send a chat message — the first message walks you through picking a model provider and API key if `~/.covexcode/config.toml` doesn't already exist (from using the CLI directly).
 
 ### Linux
 
@@ -66,7 +64,7 @@ flatpak install --user ./Covexcode-x86_64.flatpak
 flatpak run com.covexcode.Covexcode
 ```
 
-The sandbox can see the host home directory, so the CLI in `~/.local/bin` still works.
+The agent runtime is bundled inside the Flatpak, so chat works without a host CLI. The host CLI remains optional for terminal use.
 
 #### Snap
 
