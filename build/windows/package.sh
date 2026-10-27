@@ -41,6 +41,8 @@ bash ../prepare_sidecar.sh
 
 bash ../verify_sidecar.sh
 
+bash ../test/sidecar-acp-smoke.sh
+
 if [[ "${VSCODE_ARCH}" == "x64" ]]; then
   if [[ "${SHOULD_BUILD_REH}" != "no" ]]; then
     echo "Building REH"
