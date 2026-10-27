@@ -133,6 +133,8 @@ function configuredCovexcodePath(): string {
 	return vscode.workspace.getConfiguration('covexcode').get<string>('path', '').trim();
 }
 
+let extensionContext: vscode.ExtensionContext | undefined;
+
 /** The bundled runtime is opt-in until the packaging path has shipped and
  * been verified on every platform. COVEXCODE_USE_BUNDLED_AGENT is the
  * per-window escape hatch for testers. */
@@ -147,8 +149,8 @@ function bundledAgentEnabled(): boolean {
 	return vscode.workspace.getConfiguration('covexcode').get<boolean>('agent.useBundled', false);
 }
 
-function bundledAgentCommandPath(): string {
-	return bundledAgentPath(context.extensionPath, process.platform);
+function bundledAgentCommandPath(): string | undefined {
+	return extensionContext ? bundledAgentPath(extensionContext.extensionPath, process.platform) : undefined;
 }
 
 function launchCandidates() {
@@ -340,6 +342,7 @@ async function pickRollbackScope(changes: ChangeEntry[]): Promise<RollbackScope 
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+	extensionContext = context;
 	let client: AcpClient | undefined;
 	let sessionId: string | undefined;
 	let ready: Promise<void> | undefined;
