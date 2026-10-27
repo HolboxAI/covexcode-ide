@@ -31,6 +31,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
 
     . ../build_cli.sh
 
+    bash ../prepare_sidecar.sh
+
     VSCODE_PLATFORM="darwin"
   elif [[ "${OS_NAME}" == "windows" ]]; then
     # in CI, packaging will be done by a different job
@@ -49,6 +51,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
       fi
 
       . ../build_cli.sh
+
+    bash ../prepare_sidecar.sh
     fi
 
     VSCODE_PLATFORM="win32"
@@ -67,6 +71,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
       find "../VSCode-linux-${VSCODE_ARCH}" -print0 | xargs -0 touch -c
 
       . ../build_cli.sh
+
+    bash ../prepare_sidecar.sh
     fi
 
     VSCODE_PLATFORM="linux"
