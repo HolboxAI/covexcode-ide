@@ -59,7 +59,7 @@ index b8057a0..920945c 100644
 +						// prompts on Ready; only its explicit "Restart to Update"
 +						// calls quitAndInstall(). A failed install therefore cannot
 +						// happen just because the user closed the window.
-+						electron.autoUpdater.autoInstallOnAppQuit = false;
++						(electron.autoUpdater as unknown as { autoInstallOnAppQuit: boolean }).autoInstallOnAppQuit = false;
 +						electron.autoUpdater.setFeedURL({ url });
 +						electron.autoUpdater.checkForUpdates();
 +					} else {
