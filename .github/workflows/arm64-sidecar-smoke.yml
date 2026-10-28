@@ -1,0 +1,25 @@
+name: arm64 sidecar smoke
+
+on:
+  push:
+    branches:
+      - test/native-arm64-smoke
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Download the pinned arm64 agent
+        run: |
+          curl -fL --retry 5 --retry-delay 3 \
+            -o /tmp/covexcode-agent \
+            https://github.com/HolboxAI/covexcode/releases/download/v1.11.93/covexcode-linux-aarch64-musl
+          chmod +x /tmp/covexcode-agent
+          file /tmp/covexcode-agent
+      - name: ACP initialize on native arm64
+        run: node test/sidecar-acp-smoke.mjs /tmp/covexcode-agent
