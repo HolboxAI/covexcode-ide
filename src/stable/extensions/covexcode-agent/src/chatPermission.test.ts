@@ -102,3 +102,13 @@ test('reviewCommandUri() encodes the review command and its gate id', () => {
 	const args = JSON.parse(decodeURIComponent(uri.slice(`command:${REVIEW_COMMAND}?`.length)));
 	assert.deepEqual(args, ['9']);
 });
+
+test('PermissionGate.respond() ignores duplicate responses once resolved', async () => {
+	const gate = new PermissionGate();
+	const { id, wait } = gate.create();
+	assert.equal(gate.respond(id, 'allow'), true);
+	assert.equal(gate.respond(id, 'allow'), false);
+	assert.equal(gate.respond(id, 'reject'), false);
+	assert.deepEqual(await wait, { choice: 'allow' });
+});
+
