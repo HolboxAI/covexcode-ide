@@ -47,7 +47,6 @@ import {
 	PermissionGate,
 	PERMISSION_COMMAND,
 	REVIEW_COMMAND,
-	reviewCommandUri,
 } from './chatPermission';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
