@@ -47,7 +47,6 @@ import {
 	PermissionGate,
 	PERMISSION_COMMAND,
 	REVIEW_COMMAND,
-	reviewCommandUri,
 } from './chatPermission';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
@@ -2354,10 +2353,14 @@ async function askPermission(
 	// "to the previous tool invocation" removes exactly the prompt markdown
 	// that follows it and nothing else, leaving the pending row in place for
 	// covexcode's later completed update to flip in place (same `toolCallId`).
+	// We ensure an anchor is ALWAYS pushed (even in plan mode or when toolCallId
+	// is missing), guaranteeing that clearToPreviousToolInvocation always has
+	// a valid target to slice back to.
 	const pending = request.toolCall;
-	if (pending.toolCallId && pending.title) {
-		pushToolInvocation(pending.toolCallId, pending.title, pending.kind, pending.status, stream);
-	}
+	const toolCallId = pending.toolCallId ?? (diff?.type === 'plan' ? `plan-${id}` : `permission-${id}`);
+	const toolTitle = pending.title ?? (diff?.type === 'plan' ? (diff.title ? `Plan: ${diff.title}` : 'Review proposed plan') : action);
+	pushToolInvocation(toolCallId, toolTitle, pending.kind ?? (diff?.type === 'plan' ? 'plan' : 'covexcode'), pending.status, stream);
+
 	// The Allow/Reject choice is the in-chat markdown command links below.
 	// A `stream.confirmation()` card would deadlock here: its click arrives
 	// as a follow-up ChatRequest while `session/prompt` is still awaiting, so
@@ -2375,8 +2378,20 @@ async function askPermission(
 	// The user answered (Allow/Reject/Review). Remove the prompt from chat:
 	// `clearToPreviousToolInvocation` slices the response back to the pending
 	// row pushed above, so the question -- and its now-dead links -- vanish
-	// rather than lingering as an unclickable card for the rest of the turn.
+	// immediately rather than lingering as an unclickable card for the rest of the turn.
 	stream.clearToPreviousToolInvocation(vscode.ChatResponseClearToPreviousToolInvocationReason.NoReason);
+
+	// Immediately update the tool invocation anchor so VS Code repaints the
+	// chat list view instantaneously without waiting for the backend tool
+	// execution to finish.
+	if (answer.choice === 'reject' || answer.choice === 'cancelled') {
+		pushToolInvocation(toolCallId, toolTitle, pending.kind ?? (diff?.type === 'plan' ? 'plan' : 'covexcode'), 'failed', stream);
+	} else if (diff?.type === 'plan') {
+		pushToolInvocation(toolCallId, toolTitle, 'plan', 'completed', stream);
+	} else {
+		pushToolInvocation(toolCallId, toolTitle, pending.kind, 'pending', stream);
+	}
+
 	return permissionOutcomeFromGate(answer, allow, reject);
 }
 
@@ -2398,9 +2413,6 @@ function permissionDecisionMarkdown(
 	line.appendMarkdown('.\n\n');
 	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
 	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
-	if (hunks) {
-		line.appendMarkdown(`&nbsp;&nbsp;[$(list-selection) Review hunks…](${reviewCommandUri(id)})`);
-	}
 	line.appendMarkdown('\n\n');
 	if (hunks) {
 		line.appendMarkdown(renderHunksMarkdown(hunks));
