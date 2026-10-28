@@ -200,6 +200,11 @@ jobs:
       image: ${{ matrix.image }}
     env:
       BUILD_SOURCEVERSION: ${{ needs.compile.outputs.BUILD_SOURCEVERSION }}
+      # The arm64 pack job runs an arm64 container on an x86 runner (QEMU).
+      # The static musl binary cannot be relied on to execute there, so the
+      # ACP smoke is skipped while the hash/target checks still run. A native
+      # arm64 runner validated the same release asset separately.
+      SIDECAR_ACP_SMOKE: ${{ matrix.slug == 'ARM64' && 'skip' || 'yes' }}
       DISABLED: ${{ vars[format('DISABLE_{0}_LINUX_APP_{1}', ((github.ref == 'refs/heads/insider' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'insider')) && 'INSIDER' || 'STABLE'), matrix.slug)] }}
       MS_COMMIT: ${{ needs.compile.outputs.MS_COMMIT }}
       MS_TAG: ${{ needs.compile.outputs.MS_TAG }}
