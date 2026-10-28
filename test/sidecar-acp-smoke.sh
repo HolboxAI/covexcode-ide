@@ -8,6 +8,10 @@ if [[ "${SHOULD_BUILD_SIDECAR:-yes}" == "no" ]]; then
 	echo "Skipping ACP smoke test (SHOULD_BUILD_SIDECAR=no)"
 	exit 0
 fi
+if [[ "${SIDECAR_ACP_SMOKE:-yes}" == "skip" ]]; then
+	echo "Skipping ACP smoke on the emulated arm64 build; the binary was hash-verified and is tested on a native arm64 runner separately"
+	exit 0
+fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
