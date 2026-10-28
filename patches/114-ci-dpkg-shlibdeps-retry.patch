@@ -1,0 +1,56 @@
+diff --git a/build/linux/debian/calculate-deps.ts b/build/linux/debian/calculate-deps.ts
+index 98a9630..d71e4c2 100644
+--- a/build/linux/debian/calculate-deps.ts
++++ b/build/linux/debian/calculate-deps.ts
+@@ -4,13 +4,15 @@
+  *--------------------------------------------------------------------------------------------*/
+ 
+ import { spawnSync } from 'child_process';
+-import { constants, statSync } from 'fs';
++import { constants, readFileSync, statSync } from 'fs';
+ import { tmpdir } from 'os';
+ import path from 'path';
+ import manifests from '../../../cgmanifest.json' with { type: 'json' };
+ import { additionalDeps } from './dep-lists.ts';
+ import type { DebianArchString } from './types.ts';
+ 
++let dpkgShlibdepsFetched = false;
++
+ export function generatePackageDeps(files: string[], arch: DebianArchString, chromiumSysroot: string, vscodeSysroot: string): Set<string>[] {
+ 	const dependencies: Set<string>[] = files.map(file => calculatePackageDeps(file, arch, chromiumSysroot, vscodeSysroot));
+ 	const additionalDepsSet = new Set(additionalDeps);
+@@ -35,9 +37,31 @@ function calculatePackageDeps(binaryPath: string, arch: DebianArchString, chromi
+ 	});
+ 	const dpkgShlibdepsUrl = `https://raw.githubusercontent.com/chromium/chromium/${chromiumManifest[0].version}/third_party/dpkg-shlibdeps/dpkg-shlibdeps.pl`;
+ 	const dpkgShlibdepsScriptLocation = `${tmpdir()}/dpkg-shlibdeps.pl`;
+-	const result = spawnSync('curl', [dpkgShlibdepsUrl, '-o', dpkgShlibdepsScriptLocation]);
+-	if (result.status !== 0) {
+-		throw new Error('Cannot retrieve dpkg-shlibdeps. Stderr:\n' + result.stderr);
++	if (!dpkgShlibdepsFetched) {
++		// GitHub's raw endpoint rate-limits concurrent CI jobs (HTTP 429).
++		// Without --fail, curl saves the rate-limit HTML page over the script
++		// and exits 0, so the failure only surfaces later as something like
++		// "syntax error at /tmp/dpkg-shlibdeps.pl line 1, near 429:".
++		// Retry the fetch and verify it really is the Perl script before
++		// reusing it for every binary in this process.
++		const result = spawnSync('curl', [
++			'--fail',
++			'--location',
++			'--retry', '6',
++			'--retry-delay', '5',
++			'--retry-all-errors',
++			dpkgShlibdepsUrl,
++			'-o', dpkgShlibdepsScriptLocation
++		]);
++		if (result.status !== 0) {
++			throw new Error('Cannot retrieve dpkg-shlibdeps. Stderr:\n' + result.stderr);
++		}
++		const script = readFileSync(dpkgShlibdepsScriptLocation, 'utf8');
++		if (!script.startsWith('#!') || !script.includes('dpkg-shlibdeps')) {
++			const firstLine = script.split('\n', 1)[0];
++			throw new Error(`Cannot retrieve dpkg-shlibdeps: response did not look like the Perl script (first line: ${firstLine})`);
++		}
++		dpkgShlibdepsFetched = true;
+ 	}
+ 	const cmd = [dpkgShlibdepsScriptLocation, '--ignore-weak-undefined'];
+ 	switch (arch) {
