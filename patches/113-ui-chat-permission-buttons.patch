@@ -1,0 +1,156 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+@@ -4374,4 +4374,136 @@
+ /* Voice mode: green disconnect button */
+ .chat-input-container .chat-input-toolbars .codicon-debug-disconnect {
+ 	color: var(--vscode-charts-green, #3fb950) !important;
+ }
++
++/*
++ * covexcode-ide: Cursor/Antigravity style buttons for agent permission decisions.
++ * Minimal, unboxed inline actions that smoothly reveal a subtle neutral box on hover.
++ * Zero bulging/scaling, no loud colors, matching Cursor's flat refined aesthetic.
++ * Supports both data-href (VS Code sanitized DOM) and standard href.
++ */
++
++/* Card container for permission prompt */
++.interactive-session .rendered-markdown:has(a[data-href*="permission.respond"]),
++.interactive-session .rendered-markdown:has(a[href*="permission.respond"]),
++.rendered-markdown:has(a[data-href*="permission.respond"]),
++.rendered-markdown:has(a[href*="permission.respond"]) {
++	background-color: var(--vscode-editorWidget-background, rgba(30, 30, 30, 0.5)) !important;
++	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1)) !important;
++	border-radius: 8px !important;
++	padding: 12px 14px !important;
++	margin: 8px 0 !important;
++	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
++	user-select: none !important;
++}
++
++/* Button row container */
++.interactive-session p:has(a[data-href*="permission.respond"]),
++.interactive-session p:has(a[href*="permission.respond"]),
++p:has(a[data-href*="permission.respond"]),
++p:has(a[href*="permission.respond"]) {
++	display: flex !important;
++	flex-wrap: wrap !important;
++	align-items: center !important;
++	gap: 8px !important;
++	margin-top: 10px !important;
++	margin-bottom: 2px !important;
++	font-size: 0 !important; /* Cleans up whitespace &nbsp; between flex items */
++	user-select: none !important;
++}
++
++/* Base button: completely unboxed initially, smooth neutral Cursor action */
++.interactive-session a[data-href*="permission.respond"],
++.interactive-session a[data-href*="permission.respondAlways"],
++.interactive-session a[href*="permission.respond"],
++.interactive-session a[href*="permission.respondAlways"],
++a[data-href*="permission.respond"],
++a[data-href*="permission.respondAlways"],
++a[href*="permission.respond"],
++a[href*="permission.respondAlways"] {
++	display: inline-flex !important;
++	align-items: center !important;
++	justify-content: center !important;
++	gap: 6px !important;
++	padding: 4px 10px !important;
++	font-size: 12px !important;
++	font-weight: 500 !important;
++	line-height: 18px !important;
++	letter-spacing: 0.1px !important;
++	border-radius: 5px !important;
++	text-decoration: none !important;
++	cursor: pointer !important;
++	user-select: none !important;
++	box-sizing: border-box !important;
++	vertical-align: middle !important;
++	white-space: nowrap !important;
++	background-color: transparent !important;
++	border: 1px solid transparent !important;
++	box-shadow: none !important;
++	color: var(--vscode-foreground, #cccccc) !important;
++	transform: none !important;
++	transition: background-color 0.12s ease,
++	            border-color 0.12s ease,
++	            color 0.12s ease !important;
++}
++
++/* Hover state: smooth subtle box reveal, NO bulging, NO loud colors */
++.interactive-session a[data-href*="permission.respond"]:hover,
++.interactive-session a[data-href*="permission.respondAlways"]:hover,
++.interactive-session a[href*="permission.respond"]:hover,
++.interactive-session a[href*="permission.respondAlways"]:hover,
++a[data-href*="permission.respond"]:hover,
++a[data-href*="permission.respondAlways"]:hover,
++a[href*="permission.respond"]:hover,
++a[href*="permission.respondAlways"]:hover {
++	text-decoration: none !important;
++	background-color: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08)) !important;
++	border-color: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.14)) !important;
++	color: var(--vscode-foreground, #ffffff) !important;
++	box-shadow: none !important;
++	transform: none !important;
++}
++
++/* Active state */
++.interactive-session a[data-href*="permission.respond"]:active,
++.interactive-session a[data-href*="permission.respondAlways"]:active,
++.interactive-session a[href*="permission.respond"]:active,
++.interactive-session a[href*="permission.respondAlways"]:active,
++a[data-href*="permission.respond"]:active,
++a[data-href*="permission.respondAlways"]:active,
++a[href*="permission.respond"]:active,
++a[href*="permission.respondAlways"]:active {
++	background-color: var(--vscode-toolbar-activeBackground, rgba(255, 255, 255, 0.16)) !important;
++	border-color: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.2)) !important;
++	box-shadow: none !important;
++	transform: none !important;
++	transition: background-color 0.04s ease !important;
++}
++
++.interactive-session a[data-href*="permission"] .codicon,
++.interactive-session a[href*="permission"] .codicon,
++a[data-href*="permission"] .codicon,
++a[href*="permission"] .codicon {
++	font-size: 13px !important;
++	line-height: 1 !important;
++	pointer-events: none !important;
++	opacity: 0.85 !important;
++	transition: opacity 0.12s ease !important;
++}
++
++.interactive-session a[data-href*="permission"]:hover .codicon,
++.interactive-session a[href*="permission"]:hover .codicon,
++a[data-href*="permission"]:hover .codicon,
++a[href*="permission"]:hover .codicon {
++	opacity: 1 !important;
++}
++
++/* Review hunks button: completely hidden */
++.interactive-session a[data-href*="permission.review"],
++.interactive-session a[href*="permission.review"],
++a[data-href*="permission.review"],
++a[href*="permission.review"] {
++	display: none !important;
++}
++
++.interactive-session a[data-href*="permission"]:focus-visible,
++.interactive-session a[href*="permission"]:focus-visible,
++a[data-href*="permission"]:focus-visible,
++a[href*="permission"]:focus-visible {
++	outline: 1px solid var(--vscode-focusBorder, #007fd4) !important;
++	outline-offset: 1px !important;
++}
++
++@media (prefers-reduced-motion: reduce) {
++	.interactive-session a[data-href*="permission"],
++	.interactive-session a[href*="permission"],
++	a[data-href*="permission"],
++	a[href*="permission"] {
++		transition: none !important;
++		transform: none !important;
++	}
++}
