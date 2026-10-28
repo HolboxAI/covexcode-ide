@@ -1,8 +1,7 @@
 diff --git a/src/vs/workbench/contrib/update/browser/update.ts b/src/vs/workbench/contrib/update/browser/update.ts
-index c182b9c..10b8e49 100644
 --- a/src/vs/workbench/contrib/update/browser/update.ts
 +++ b/src/vs/workbench/contrib/update/browser/update.ts
-@@ -211,12 +211,13 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
+@@ -211,12 +211,14 @@
  	private majorMinorUpdateAvailableContextKey: IContextKey<boolean>;
  
  	constructor(
@@ -14,10 +13,11 @@ index c182b9c..10b8e49 100644
  		@IContextKeyService contextKeyService: IContextKeyService,
  		@IProductService private readonly productService: IProductService,
 +		@INotificationService private readonly notificationService: INotificationService,
++		@IOpenerService private readonly openerService: IOpenerService,
  	) {
  		super();
  		this.state = updateService.state;
-@@ -235,12 +236,12 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
+@@ -235,12 +237,12 @@
  		*/
  
  		const currentVersion = this.productService.commit;
@@ -33,20 +33,26 @@ index c182b9c..10b8e49 100644
  		}
  
  		this.registerGlobalActivityActions();
-@@ -261,6 +262,12 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
- 			}
- 		}
- 
-+		if (state.type === StateType.AvailableForDownload) {
-+			this.promptIfNewUpdate(state.update.productVersion ?? state.update.version);
-+		} else if (state.type === StateType.Ready) {
-+			this.promptIfUpdateReady(state.update.productVersion ?? state.update.version);
+@@ -258,7 +260,18 @@
+ 					this.majorMinorUpdateAvailableContextKey.set(Boolean(currentVersion && nextVersion && isMajorMinorUpdate(currentVersion, nextVersion)));
+ 				}
+ 				break;
++			}
 +		}
 +
- 		let badge: IBadge | undefined = undefined;
++		if (state.type === StateType.AvailableForDownload) {
++			this.promptIfNewUpdate(state.update.productVersion ?? state.update.version);
++		} else if (state.type === StateType.Downloading && state.update) {
++			const version = state.update.productVersion ?? state.update.version;
++			if (version) {
++				this.promptIfDownloading(version);
+ 			}
++		} else if (state.type === StateType.Ready) {
++			this.promptIfUpdateReady(state.update.productVersion ?? state.update.version);
+ 		}
  
- 		if (state.type === StateType.AvailableForDownload || state.type === StateType.Downloaded || state.type === StateType.Ready) {
-@@ -282,6 +289,46 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
+ 		let badge: IBadge | undefined = undefined;
+@@ -282,6 +295,76 @@
  		this.state = state;
  	}
  
@@ -63,6 +69,36 @@ index c182b9c..10b8e49 100644
 +			[{
 +				label: nls.localize('updateNow', "Update"),
 +				run: () => this.updateService.downloadUpdate(true)
++			}, {
++				label: nls.localize('updateLater', "Later"),
++				run: () => { }
++			}]
++		);
++	}
++
++	/**
++	 * macOS goes straight from checking to downloading; it never enters
++	 * AvailableForDownload. Without this prompt a failed background download
++	 * (the network errors users actually hit) produced no UI at all. The
++	 * download-page button gives them a path that does not depend on the
++	 * updater's single large GitHub request succeeding.
++	 */
++	private promptIfDownloading(version: string): void {
++		const key = 'update/lastDownloadingNotifiedProductVersion';
++		if (
++			this.storageService.get(key, StorageScope.APPLICATION) === version ||
++			this.storageService.get('update/lastNotifiedProductVersion', StorageScope.APPLICATION) === version
++		) {
++			return;
++		}
++
++		this.storageService.store(key, version, StorageScope.APPLICATION, StorageTarget.MACHINE);
++		this.notificationService.prompt(
++			Severity.Info,
++			nls.localize('covexcodeUpdateDownloading', "{0} {1} is available and is downloading. If it does not finish, get it from the download page.", this.productService.nameLong, version),
++			[{
++				label: nls.localize('openDownloadPage', "Download Page"),
++				run: () => this.openerService.open(URI.parse('https://covexcode.com/download'))
 +			}, {
 +				label: nls.localize('updateLater', "Later"),
 +				run: () => { }
