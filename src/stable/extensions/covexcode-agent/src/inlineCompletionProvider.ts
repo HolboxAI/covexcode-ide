@@ -3,9 +3,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { currentAgentStateDir } from './agent/stateDir';
 import {
 	buildCompletionRequest,
 	extractContext,
@@ -40,9 +40,9 @@ export function registerInlineCompletion(context: vscode.ExtensionContext): vsco
 			let endpoint = (config.get<string>('endpoint', '') || '').trim();
 			let model = (config.get<string>('model', '') || '').trim();
 			let apiKey = (await context.secrets.get('covexcode.apiKey')) ?? '';
-			// Fall back to the CLI's ~/.covexcode/config.toml when the IDE hasn't
-			// stored credentials yet, mirroring how chat lets `covexcode --acp`
-			// read the same file. IDE settings/SecretStorage always win.
+			// Fall back to the agent state directory's config.toml when the IDE
+			// hasn't stored credentials yet, mirroring how chat lets the ACP
+			// process read the same file. IDE settings/SecretStorage always win.
 			if (!endpoint || !model || !apiKey) {
 				const toml = configTomlCredentials();
 				endpoint = endpoint || toml.endpoint || '';
@@ -120,10 +120,10 @@ function debounceMs(config: vscode.WorkspaceConfiguration): number {
 	return typeof raw === 'number' && raw >= 0 ? raw : DEFAULT_DEBOUNCE_MS;
 }
 
-/** Reads the `[llm]` credentials from `~/.covexcode/config.toml`, or `{}` on any failure. */
+/** Reads the `[llm]` credentials from the agent state dir, or `{}` on any failure. */
 function configTomlCredentials(): CovexcodeConfigToml {
 	try {
-		const p = path.join(os.homedir(), '.covexcode', 'config.toml');
+		const p = path.join(currentAgentStateDir(), 'config.toml');
 		return parseCovexcodeConfigToml(fs.readFileSync(p, 'utf8'));
 	} catch {
 		return {};
