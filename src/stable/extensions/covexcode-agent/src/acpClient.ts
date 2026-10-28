@@ -354,8 +354,8 @@ export class AcpClient extends EventEmitter {
 	 * to match the user's login shell -- see `localProcessExtensionHost.ts`)
 	 * rather than replacing it, and only for the keys actually given: an
 	 * empty override here must never blank out a real `COVEXCODE_API_KEY` (or
-	 * an existing `~/.covexcode/config.toml`) the user already has working
-	 * from using the CLI directly.
+	 * an existing `config.toml` in the agent state directory) the user
+	 * already has working.
 	 */
 	constructor(
 		covexcodeCommand: string,

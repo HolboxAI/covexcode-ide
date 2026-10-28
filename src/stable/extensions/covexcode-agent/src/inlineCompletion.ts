@@ -74,7 +74,7 @@ export function extractContext(fullText: string, offset: number, maxPrefix: numb
 
 /**
  * Pulls the `[llm]` `endpoint`/`model`/`api_key` out of a
- * `~/.covexcode/config.toml` blob. Deliberately a tiny hand-rolled parser for
+ * `config.toml` blob. Deliberately a tiny hand-rolled parser for
  * covexcode's flat, machine-written `key = "value"` shape -- no TOML dependency
  * for three known fields -- so someone who configured covexcode from the CLI gets
  * completions even before signing into the IDE.

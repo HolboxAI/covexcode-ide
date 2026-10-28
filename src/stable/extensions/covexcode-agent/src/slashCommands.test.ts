@@ -30,6 +30,7 @@ test('doctorMarkdown reports the api key as present/absent, never its value', ()
 		arch: 'arm64',
 		configPath: '/home/u/.covexcode/config.toml',
 		configFound: true,
+		configSource: 'shared-cli',
 		provider: 'deepseek',
 		model: 'deepseek-v4-pro',
 		endpoint: 'https://api.deepseek.com',
@@ -54,6 +55,7 @@ test('doctorMarkdown shows the bundled agent source and path', () => {
 		arch: 'arm64',
 		configPath: '/c',
 		configFound: true,
+		configSource: 'isolated',
 		provider: '',
 		model: '',
 		endpoint: '',
@@ -73,6 +75,7 @@ test('doctorMarkdown marks an empty workspace as not set', () => {
 		arch: 'arm64',
 		configPath: '/c',
 		configFound: false,
+		configSource: 'environment',
 		provider: '',
 		model: '',
 		endpoint: '',
@@ -82,5 +85,6 @@ test('doctorMarkdown marks an empty workspace as not set', () => {
 		stateDirFound: false,
 	});
 	assert.match(readout, /Workspace:\*\* not set/);
+	assert.match(readout, /State:\*\* from COVEXCODE_CONFIG_DIR \(missing\)/);
 	assert.match(readout, /not set/);
 });
