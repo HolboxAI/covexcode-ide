@@ -349,6 +349,16 @@ export class AcpClient extends EventEmitter {
 	private closed = false;
 
 	/**
+	 * Whether the child process is still usable. `closed` is set by the
+	 * spawn/exit handlers; `exitCode`/`killed` cover the window before those
+	 * handlers have run. A JSON-RPC error from a live child leaves this true:
+	 * that error belongs to one request, not to the whole session.
+	 */
+	get isAlive(): boolean {
+		return !this.closed && this.child.exitCode === null && !this.child.killed;
+	}
+
+	/**
 	 * `envOverrides` is deliberately layered on top of `process.env` (this
 	 * extension host's own environment, which VS Code has already resolved
 	 * to match the user's login shell -- see `localProcessExtensionHost.ts`)

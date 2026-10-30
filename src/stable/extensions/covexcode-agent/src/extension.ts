@@ -580,6 +580,19 @@ export function activate(context: vscode.ExtensionContext): void {
 		updateUsageIndicator();
 	}
 
+	/**
+	 * Errors that mean the ACP session itself is gone, not just that one turn
+	 * failed. A model/API error (out of credit, bad request) is reported for
+	 * the turn but must not throw away a healthy session and its context.
+	 */
+	function isFatalSessionError(error: unknown): boolean {
+		const message = describeError(error).toLowerCase();
+		return message.includes('session actor gone')
+			|| message.includes('-32002')
+			|| message.includes('--acp exited')
+			|| message.includes('is not running');
+	}
+
 	async function togglePermissionMode(): Promise<PermissionMode> {
 		const next = cyclePermissionMode(currentPermissionMode());
 		await vscode.workspace
@@ -998,11 +1011,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		} catch (error) {
 			stream.markdown(`covexcode stopped responding: ${describeError(error)}`);
-			// The session stopped responding or the backend worker thread crashed
-			// (e.g. "session actor gone", daemon panic, or network drop). Discard the
-			// session so the next message or retry establishes a fresh session rather
-			// than perpetually failing against the dead session ID.
-			discardSession();
+			// Only tear down the session when the failure is actually fatal.
+			// Discarding on every prompt error would also throw away a healthy
+			// session (and the model's context) for a normal API/model error.
+			if (!activeClient.isAlive || isFatalSessionError(error)) {
+				discardSession();
+			}
 		} finally {
 			activeClient.off('update', onUpdate);
 			activeClient.off('permissionRequest', onPermissionRequest);

@@ -160,3 +160,12 @@ test('AcpClient rejects an agent whose ACP version does not match the pin', asyn
 		client.dispose();
 	}
 });
+
+test('AcpClient.isAlive is true while the child runs and false after it exits', async () => {
+	const client = new AcpClient(process.execPath, process.cwd(), {}, ['-e', acpServerScript]);
+	assert.equal(client.isAlive, true);
+	const exited = new Promise<void>(resolve => client.once('exit', () => resolve()));
+	client.dispose();
+	await exited;
+	assert.equal(client.isAlive, false);
+});
