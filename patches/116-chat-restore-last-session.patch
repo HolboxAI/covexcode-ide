@@ -1,0 +1,13 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts b/src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts
+index 290f056..4d72a90 100644
+--- a/src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts
++++ b/src/vs/workbench/contrib/chat/browser/chat.shared.contribution.ts
+@@ -1810,7 +1810,7 @@ configurationRegistry.registerConfiguration({
+ 		[ChatConfiguration.RestoreLastPanelSession]: {
+ 			type: 'boolean',
+ 			description: nls.localize('chat.restoreLastPanelSession', "Controls whether the last session is restored in panel after restart."),
+-			default: false
++			default: true
+ 		},
+ 		[ChatConfiguration.ExitAfterDelegation]: {
+ 			type: 'boolean',
