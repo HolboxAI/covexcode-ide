@@ -1,5 +1,5 @@
 diff --git a/build/linux/debian/calculate-deps.ts b/build/linux/debian/calculate-deps.ts
-index 98a9630..d71e4c2 100644
+index 98a9630..74e2c19 100644
 --- a/build/linux/debian/calculate-deps.ts
 +++ b/build/linux/debian/calculate-deps.ts
 @@ -4,13 +4,15 @@
@@ -19,7 +19,7 @@ index 98a9630..d71e4c2 100644
  export function generatePackageDeps(files: string[], arch: DebianArchString, chromiumSysroot: string, vscodeSysroot: string): Set<string>[] {
  	const dependencies: Set<string>[] = files.map(file => calculatePackageDeps(file, arch, chromiumSysroot, vscodeSysroot));
  	const additionalDepsSet = new Set(additionalDeps);
-@@ -35,9 +37,31 @@ function calculatePackageDeps(binaryPath: string, arch: DebianArchString, chromi
+@@ -35,9 +37,30 @@ function calculatePackageDeps(binaryPath: string, arch: DebianArchString, chromi
  	});
  	const dpkgShlibdepsUrl = `https://raw.githubusercontent.com/chromium/chromium/${chromiumManifest[0].version}/third_party/dpkg-shlibdeps/dpkg-shlibdeps.pl`;
  	const dpkgShlibdepsScriptLocation = `${tmpdir()}/dpkg-shlibdeps.pl`;
@@ -38,7 +38,6 @@ index 98a9630..d71e4c2 100644
 +			'--location',
 +			'--retry', '6',
 +			'--retry-delay', '5',
-+			'--retry-all-errors',
 +			dpkgShlibdepsUrl,
 +			'-o', dpkgShlibdepsScriptLocation
 +		]);
