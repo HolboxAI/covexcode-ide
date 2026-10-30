@@ -1,0 +1,78 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts b/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
+index d8f0a68..f6d05e7 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
+@@ -1021,11 +1021,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
+ 			},
+ 			getModels: () => this.getModels(),
+ 			useGroupedModelPicker: () => {
+-				// Agent-host session types (local and remote) reuse the same
+-				// grouped/featured model picker as the default chat session, so
+-				// the editor matches the agents window experience.
+-				const sessionType = this.getCurrentSessionType();
+-				return !sessionType || sessionType === localChatSessionType || isAgentHostTarget(sessionType);
++				return false;
+ 			},
+ 			showManageModelsAction: () => {
+ 				const sessionType = this.getCurrentSessionType();
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/input/chatModelPicker.ts b/src/vs/workbench/contrib/chat/browser/widget/input/chatModelPicker.ts
+index b16728b..e741202 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/input/chatModelPicker.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/input/chatModelPicker.ts
+@@ -822,21 +822,29 @@ export function buildModelPickerItems(
+ 			});
+ 		}
+ 	} else {
+-		// Flat list: auto first, then all models sorted alphabetically
+-		const autoModel = models.find(m => isAutoModel(m));
++		// covexcode-ide: Order models like Cursor:
++		// 1. Included models (DeepSeek Pro, DeepSeek Flash)
++		// 2. Auto
++		// 3. Separator: Use with API Key (BYOK)
++		// 4. BYOK models (Claude, GPT, Gemini, DeepSeek direct)
++		const autoModel = models.find(m => isAutoModel(m) || m.metadata.id === 'auto');
++		const includedModels = models.filter(m => m !== autoModel && !m.metadata.isBYOK);
++		const byokModels = models.filter(m => m !== autoModel && m.metadata.isBYOK);
++
++		for (const model of includedModels) {
++			const { action, ariaDescription } = createModelAction(model, selectedModelId, onSelect, configAccess, undefined, undefined, isUBB);
++			items.push(createModelItem(action, model, openerService, undefined, isUBB, ariaDescription, undefined, onConfigure));
++		}
+ 		if (autoModel) {
+ 			const { action: flatAutoAction, ariaDescription: flatAutoAriaDesc } = createModelAction(autoModel, selectedModelId, onSelect, configAccess, undefined, undefined, isUBB);
+ 			items.push(createModelItem(flatAutoAction, autoModel, openerService, undefined, isUBB, flatAutoAriaDesc));
+ 		}
+-		const sortedModels = models
+-			.filter(m => m !== autoModel)
+-			.sort((a, b) => {
+-				const vendorCmp = a.metadata.vendor.localeCompare(b.metadata.vendor);
+-				return vendorCmp !== 0 ? vendorCmp : a.metadata.name.localeCompare(b.metadata.name);
+-			});
+-		for (const model of sortedModels) {
+-			const { action: flatAction, ariaDescription: flatAriaDesc } = createModelAction(model, selectedModelId, onSelect, configAccess, undefined, undefined, isUBB);
+-			items.push(createModelItem(flatAction, model, openerService, undefined, isUBB, flatAriaDesc, undefined, onConfigure));
++		if (byokModels.length > 0) {
++			items.push({ kind: ActionListItemKind.Separator, label: localize('chat.modelPicker.byok', "Use with API Key") });
++			for (const model of byokModels) {
++				const { action, ariaDescription } = createModelAction(model, selectedModelId, onSelect, configAccess, undefined, undefined, isUBB);
++				items.push(createModelItem(action, model, openerService, undefined, isUBB, ariaDescription, undefined, onConfigure));
++			}
+ 		}
+ 	}
+ 
+@@ -1183,7 +1191,7 @@ export class ModelPickerWidget extends Disposable {
+ 			filterPlaceholder: localize('chat.modelPicker.search', "Search models"),
+ 			filterActions: !isUBB && manageModelsAction ? [manageModelsAction] : undefined,
+ 			focusFilterOnOpen: true,
+-			collapsedByDefault: new Set([ModelPickerSection.Other]),
++			collapsedByDefault: new Set(),
+ 			onDidToggleSection: (section: string, collapsed: boolean) => {
+ 				if (section === ModelPickerSection.Other) {
+ 					logModelPickerInteraction(collapsed ? 'otherModelsCollapsed' : 'otherModelsExpanded');
+@@ -1673,5 +1681,5 @@ export function getModelHoverContent(model: ILanguageModelChatMetadataAndIdentif
+ 
+ 
+ function isAutoModel(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+-	return model.metadata.id === 'auto' && (model.metadata.vendor === 'copilot' || model.metadata.vendor === 'copilotcli');
++	return model.metadata.id === 'auto' && (model.metadata.vendor === 'copilot' || model.metadata.vendor === 'copilotcli' || model.metadata.vendor === 'covexcode');
+ }

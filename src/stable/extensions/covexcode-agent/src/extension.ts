@@ -114,6 +114,16 @@ import {
 import { registerInlineCompletion } from './inlineCompletionProvider';
 import { detectDeicticReferent } from './deictic';
 import { formatFocusedSurface } from './focusedSurface';
+import {
+	COVEXCODE_MODELS,
+	CovexcodeModelDescriptor,
+	envVarForModel,
+	isByokModel,
+	missingApiKeyMarkdown,
+	resolveEffectiveModelName,
+	resolveModelDescriptor,
+	secretKeyForProvider,
+} from './models';
 
 const PARTICIPANT_ID = 'covexcode.agent';
 const COVEXCODE_COMMAND = 'covexcode';
@@ -230,27 +240,32 @@ class SetupCancelled extends Error {}
  * through `request.model` after all, which is worth knowing about loudly
  * rather than silently returning something plausible-looking.
  */
-class StubLanguageModelProvider implements vscode.LanguageModelChatProvider {
+class CovexcodeLanguageModelProvider implements vscode.LanguageModelChatProvider {
 	provideLanguageModelChatInformation(): vscode.LanguageModelChatInformation[] {
-		return [
-			{
-				id: 'covexcode',
-				name: 'covexcode',
-				family: 'covexcode',
-				version: '1.0.0',
-				maxInputTokens: 128_000,
-				maxOutputTokens: 8_192,
-				capabilities: {},
+		return COVEXCODE_MODELS.map(m => ({
+			id: m.id,
+			name: m.name,
+			family: m.family,
+			detail: m.detail,
+			version: m.version,
+			maxInputTokens: m.maxInputTokens,
+			maxOutputTokens: m.maxOutputTokens,
+			isBYOK: m.isBYOK,
+			isDefault: m.isDefault,
+			isUserSelectable: m.isUserSelectable,
+			capabilities: {
+				toolCalling: m.capabilities.toolCalling,
+				imageInput: m.capabilities.imageInput,
 			},
-		];
+		} as vscode.LanguageModelChatInformation));
 	}
 
 	provideLanguageModelChatResponse(): never {
-		throw new Error('StubLanguageModelProvider was invoked for a real request -- covexcode.agent should never route through request.model.');
+		throw new Error('CovexcodeLanguageModelProvider was invoked for a real request -- covexcode.agent routes through ACP client.');
 	}
 
 	provideTokenCount(): never {
-		throw new Error('StubLanguageModelProvider was invoked for a real request -- covexcode.agent should never route through request.model.');
+		throw new Error('CovexcodeLanguageModelProvider was invoked for a real request -- covexcode.agent routes through ACP client.');
 	}
 }
 
@@ -382,6 +397,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	// actually starts a new ACP session instead of keeping the one spawned
 	// against `$HOME` on the chat-first landing page.
 	let sessionCwd: string | undefined;
+	let sessionModel: string | undefined;
 	// A checkpoint restore removes the later chat requests, which can leave
 	// `chatContext.history` empty on the next prompt even though the user is
 	// continuing the same conversation. Remember that restore so the next
@@ -411,8 +427,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME, diffContentProvider),
 	);
 	context.subscriptions.push(
-		vscode.lm.registerLanguageModelChatProvider('covexcode', new StubLanguageModelProvider()),
+		vscode.lm.registerLanguageModelChatProvider('covexcode', new CovexcodeLanguageModelProvider()),
 	);
+	// Warm the language models cache so the chat input model picker populates immediately:
+	void vscode.lm.selectChatModels({ vendor: 'covexcode' }).catch(() => {});
 	// Tab-style multi-line completion: registers a `file`-scheme inline
 	// completion provider that predicts the continuation at the cursor. The
 	// fork already ships the whole ghost-text/accept layer in
@@ -453,10 +471,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	usageIndicator.name = 'covexcode: usage';
 	context.subscriptions.push(usageIndicator);
 	const updateUsageIndicator = (): void => {
-		const label = sessionUsageMeter(sessionUsage.total(), sessionCostRate());
-		if (label) {
-			usageIndicator.text = `$(graph) ${label}`;
-			usageIndicator.tooltip = `covexcode usage this session — ${label}`;
+		const fallbackLimit = sessionModel ? resolveModelDescriptor(sessionModel).maxInputTokens : 128_000;
+		const circle = sessionUsage.circleMeter(fallbackLimit);
+		if (circle) {
+			usageIndicator.text = circle.text;
+			usageIndicator.tooltip = circle.tooltip;
+			usageIndicator.color = circle.colorTheme === 'red'
+				? new vscode.ThemeColor('errorForeground')
+				: new vscode.ThemeColor('charts.blue');
 			usageIndicator.show();
 		} else {
 			usageIndicator.hide();
@@ -602,6 +624,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessionId = undefined;
 		ready = undefined;
 		sessionCwd = undefined;
+		sessionModel = undefined;
 		agentImagesSupported = false;
 		sessionUsage.reset();
 		updateUsageIndicator();
@@ -720,7 +743,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}
 
-	function ensureReady(workspace: WorkspaceContext): Promise<void> {
+	function ensureReady(workspace: WorkspaceContext, targetModel: string): Promise<void> {
 		if (!ready) {
 			ready = (async () => {
 				const candidates = launchCandidates();
@@ -754,7 +777,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					}
 				}
 				const cwd = workspace.cwd;
-				const envOverrides = await ensureCredentials(context, covexcodeCommand);
+				const envOverrides = await ensureCredentials(context, covexcodeCommand, targetModel);
 				// Keep the child on the same state directory the IDE reads for
 				// doctor, account status, and inline completions. The CLI honors
 				// this since 1.11.93; older external binaries simply ignore it.
@@ -792,6 +815,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					mcpServersForSession(mcpLoaded, agentSupportsMcp(initResult)),
 				);
 				sessionCwd = cwd;
+				sessionModel = targetModel;
 			})().catch(error => {
 				// A failed launch must not wedge every later message behind
 				// the same rejected promise forever -- clear the memoized
@@ -808,6 +832,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				client?.dispose();
 				client = undefined;
 				sessionCwd = undefined;
+				sessionModel = undefined;
 				throw error;
 			});
 		}
@@ -926,11 +951,31 @@ export function activate(context: vscode.ExtensionContext): void {
 		// framework line). Memoized per cwd by frameworkFor() above, so this is
 		// one package.json read per workspace, not per turn.
 		const workspaceWithFramework = { ...workspace, framework: await frameworkFor(workspace.cwd) };
+		const requestedModelId = request.model?.id;
+		const effectiveModel = resolveEffectiveModelName(
+			requestedModelId,
+			vscode.workspace.getConfiguration('covexcode').get<string>('model'),
+		);
+
+		// If user selected a BYOK model, verify that credentials exist
+		const modelDesc = resolveModelDescriptor(requestedModelId);
+		if (modelDesc.isBYOK) {
+			const providerKey = await context.secrets.get(secretKeyForProvider(modelDesc.provider));
+			const envKey = modelDesc.envVar ? process.env[modelDesc.envVar] : undefined;
+			if (!providerKey && !envKey) {
+				stream.markdown(missingApiKeyMarkdown(modelDesc));
+				return;
+			}
+		}
+
 		if (sessionCwd !== undefined && sessionCwd !== workspace.cwd) {
 			discardSession();
 		}
+		if (sessionModel !== undefined && sessionModel !== effectiveModel) {
+			discardSession();
+		}
 		try {
-			await ensureReady(workspace);
+			await ensureReady(workspace, effectiveModel);
 		} catch (error) {
 			if (error instanceof SetupCancelled) {
 				stream.markdown('Configuration needed -- send another message when you\'re ready to set covexcode up.');
@@ -1218,8 +1263,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('covexcode.setApiKey', async () => {
-			const outcome = await setApiKeyFlow(context, discardSession);
+		vscode.commands.registerCommand('covexcode.setApiKey', async (targetProvider?: string | [string]) => {
+			const provider = Array.isArray(targetProvider) ? targetProvider[0] : targetProvider;
+			const outcome = await setApiKeyFlow(context, discardSession, provider);
 			if (outcome === 'ok') {
 				void vscode.window.showInformationMessage(
 					'covexcode: API key saved securely. Send a chat message to use it.',
@@ -2000,12 +2046,27 @@ async function changeModelFlow(
 async function setApiKeyFlow(
 	context: vscode.ExtensionContext,
 	discardSession: () => void,
+	targetProvider?: string,
 ): Promise<'ok' | 'cancelled'> {
 	const config = vscode.workspace.getConfiguration('covexcode');
-	const providerId = config.get<string>('provider', '').trim();
+	let providerId = targetProvider || config.get<string>('provider', '').trim();
+	if (!providerId) {
+		const pick = await vscode.window.showQuickPick(
+			[
+				{ label: 'OpenAI', description: 'For GPT-4o, GPT-4o mini, o1, o3-mini', id: 'openai' },
+				{ label: 'DeepSeek', description: 'For DeepSeek API key (when $5 credits run out)', id: 'deepseek' },
+				{ label: 'Covexcode', description: 'Custom proxy key', id: 'covexcode' },
+			],
+			{ title: 'covexcode -- select provider for API key', ignoreFocusOut: true },
+		);
+		if (!pick) {
+			return 'cancelled';
+		}
+		providerId = pick.id;
+	}
 	const envHint = providerId ? ` (or export ${providerEnvVarName(providerId)})` : '';
 	const apiKey = await vscode.window.showInputBox({
-		title: 'covexcode -- set API key',
+		title: `covexcode -- set ${providerId} API key`,
 		prompt: `API key stored securely, never written to settings.json${envHint}`,
 		password: true,
 		ignoreFocusOut: true,
@@ -2014,7 +2075,11 @@ async function setApiKeyFlow(
 	if (!apiKey) {
 		return 'cancelled';
 	}
-	await context.secrets.store(SECRET_API_KEY, apiKey.trim());
+	const secretKey = secretKeyForProvider(providerId);
+	await context.secrets.store(secretKey, apiKey.trim());
+	if (providerId === 'covexcode' || !config.get<string>('provider')) {
+		await context.secrets.store(SECRET_API_KEY, apiKey.trim());
+	}
 	discardSession();
 	return 'ok';
 }
@@ -2074,14 +2139,31 @@ function isDeepseekHost(endpoint: string): boolean {
 	}
 }
 
-async function ensureCredentials(context: vscode.ExtensionContext, covexcodeCommand: string): Promise<NodeJS.ProcessEnv> {
+async function ensureCredentials(
+	context: vscode.ExtensionContext,
+	covexcodeCommand: string,
+	targetModel?: string,
+): Promise<NodeJS.ProcessEnv> {
 	const config = vscode.workspace.getConfiguration('covexcode');
 	let provider = config.get<string>('provider', '');
 	let endpoint = config.get<string>('endpoint', '');
-	let model = config.get<string>('model', '');
+	let model = targetModel || config.get<string>('model', '');
 	let apiKey = (await context.secrets.get(SECRET_API_KEY)) ?? '';
 
-	if ((!endpoint || !model || !apiKey) && !configTomlExists()) {
+	const modelDesc = targetModel ? resolveModelDescriptor(targetModel) : undefined;
+	if (modelDesc && modelDesc.isBYOK) {
+		provider = modelDesc.provider;
+		const specificKey = await context.secrets.get(secretKeyForProvider(modelDesc.provider));
+		if (specificKey) {
+			apiKey = specificKey;
+		} else if (modelDesc.envVar && process.env[modelDesc.envVar]) {
+			apiKey = process.env[modelDesc.envVar]!;
+		} else {
+			apiKey = '';
+		}
+	}
+
+	if ((!endpoint || !model || !apiKey) && !configTomlExists() && (!modelDesc || !modelDesc.isBYOK)) {
 		const entered = await runSetupFlow(covexcodeCommand);
 		if (!entered) {
 			throw new SetupCancelled('covexcode setup was cancelled');
@@ -2114,6 +2196,9 @@ async function ensureCredentials(context: vscode.ExtensionContext, covexcodeComm
 	}
 	if (apiKey) {
 		overrides.COVEXCODE_API_KEY = apiKey;
+	}
+	if (modelDesc?.envVar && apiKey) {
+		overrides[modelDesc.envVar] = apiKey;
 	}
 	// The approval posture (auto vs manual) is set per-session via env -- the
 	// same axis the TUI toggles with Shift+Tab. The IDE keeps it in
