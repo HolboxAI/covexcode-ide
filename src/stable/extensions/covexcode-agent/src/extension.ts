@@ -998,6 +998,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		} catch (error) {
 			stream.markdown(`covexcode stopped responding: ${describeError(error)}`);
+			// The session stopped responding or the backend worker thread crashed
+			// (e.g. "session actor gone", daemon panic, or network drop). Discard the
+			// session so the next message or retry establishes a fresh session rather
+			// than perpetually failing against the dead session ID.
+			discardSession();
 		} finally {
 			activeClient.off('update', onUpdate);
 			activeClient.off('permissionRequest', onPermissionRequest);
