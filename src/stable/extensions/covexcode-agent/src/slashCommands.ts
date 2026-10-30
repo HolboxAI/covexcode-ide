@@ -40,6 +40,7 @@ export interface DoctorFacts {
 	readonly arch: string;
 	readonly configPath: string;
 	readonly configFound: boolean;
+	readonly configSource: 'isolated' | 'shared-cli' | 'custom' | 'environment' | 'legacy';
 	readonly provider: string;
 	readonly model: string;
 	readonly endpoint: string;
@@ -47,6 +48,21 @@ export interface DoctorFacts {
 	readonly workspace: string;
 	readonly workspaceIsGit: boolean;
 	readonly stateDirFound: boolean;
+}
+
+function configSourceLabel(source: DoctorFacts['configSource']): string {
+	switch (source) {
+		case 'isolated':
+			return 'isolated (IDE-managed)';
+		case 'shared-cli':
+			return 'shared with CLI';
+		case 'environment':
+			return 'from COVEXCODE_CONFIG_DIR';
+		case 'custom':
+			return 'custom';
+		case 'legacy':
+			return 'legacy CLI location';
+	}
 }
 
 /** The `/doctor` health report. The API key is present/absent, never its value. */
@@ -67,6 +83,6 @@ export function doctorMarkdown(facts: DoctorFacts): string {
 		row('Endpoint', facts.endpoint || 'not set'),
 		row('API key', facts.apiKeySet ? 'set (not shown)' : 'not set'),
 		row('Workspace', workspace),
-		row('State dir', facts.stateDirFound ? 'found' : 'missing'),
+		row('State', `${configSourceLabel(facts.configSource)}${facts.stateDirFound ? '' : ' (missing)'}`),
 	].join('\n');
 }

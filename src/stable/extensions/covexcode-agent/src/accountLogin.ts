@@ -5,7 +5,8 @@
 /**
  * covexcode.com device login for the IDE — same flow as `covexcode login` in the
  * CLI: POST /api/auth/device/start → open browser → poll until approved →
- * write ~/.covexcode/{config.toml,account.token,account.email}.
+ * write {config.toml,account.token,account.email} into the agent state
+ * directory (isolated from the CLI by default; see `agent/stateDir.ts`).
  *
  * Deep-link return (`covexcode://`) is not required: the IDE stays open and
  * finishes as soon as the browser approval lands, which is the Cursor /
@@ -15,6 +16,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { currentAgentStateDir } from './agent/stateDir';
 
 export const DEFAULT_AUTH_BASE = 'https://covexcode.com';
 export const AUTH_PROVIDER_ID = 'covexcode';
@@ -72,22 +74,22 @@ export function covexcodeDir(home: string = os.homedir()): string {
 	return path.join(home, '.covexcode');
 }
 
-export function accountTokenPath(home?: string): string {
-	return path.join(covexcodeDir(home), 'account.token');
+export function accountTokenPath(configDir: string = currentAgentStateDir()): string {
+	return path.join(configDir, 'account.token');
 }
 
-export function accountEmailPath(home?: string): string {
-	return path.join(covexcodeDir(home), 'account.email');
+export function accountEmailPath(configDir: string = currentAgentStateDir()): string {
+	return path.join(configDir, 'account.email');
 }
 
-export function configTomlPath(home?: string): string {
-	return path.join(covexcodeDir(home), 'config.toml');
+export function configTomlPath(configDir: string = currentAgentStateDir()): string {
+	return path.join(configDir, 'config.toml');
 }
 
-export function readAccountStatus(home: string = os.homedir()): AccountStatus {
-	const email = readTrimmedFile(accountEmailPath(home));
-	const token = readTrimmedFile(accountTokenPath(home));
-	const llm = readLlmFields(readFileOrEmpty(configTomlPath(home)));
+export function readAccountStatus(configDir: string = currentAgentStateDir()): AccountStatus {
+	const email = readTrimmedFile(accountEmailPath(configDir));
+	const token = readTrimmedFile(accountTokenPath(configDir));
+	const llm = readLlmFields(readFileOrEmpty(configTomlPath(configDir)));
 	const endpoint = llm.endpoint ?? '';
 	const viaCovexcodeProxy = endpoint.toLowerCase().includes('llm.covexcode.com');
 	return {
@@ -168,11 +170,16 @@ export async function pollDeviceLogin(
 	return { kind: 'pending' };
 }
 
-export function saveAccountCredentials(creds: AccountCredentials, home: string = os.homedir()): void {
-	const dir = covexcodeDir(home);
-	fs.mkdirSync(dir, { recursive: true });
+export function saveAccountCredentials(creds: AccountCredentials, configDir: string = currentAgentStateDir()): void {
+	const dir = configDir;
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	try {
+		fs.chmodSync(dir, 0o700);
+	} catch {
+		// Windows / unusual FS — best effort.
+	}
 
-	const configPath = configTomlPath(home);
+	const configPath = configTomlPath(configDir);
 	const existing = readFileOrEmpty(configPath);
 	const next = upsertLlmFields(existing, {
 		endpoint: creds.endpoint,
@@ -183,18 +190,18 @@ export function saveAccountCredentials(creds: AccountCredentials, home: string =
 	writePrivate(configPath, next);
 
 	if (creds.sessionToken) {
-		writePrivate(accountTokenPath(home), creds.sessionToken);
+		writePrivate(accountTokenPath(configDir), creds.sessionToken);
 	}
 	if (creds.email) {
-		writePrivate(accountEmailPath(home), creds.email);
+		writePrivate(accountEmailPath(configDir), creds.email);
 	}
 }
 
-export function logoutLocal(home: string = os.homedir()): { clearedProxyKey: boolean } {
-	unlinkQuiet(accountTokenPath(home));
-	unlinkQuiet(accountEmailPath(home));
+export function logoutLocal(configDir: string = currentAgentStateDir()): { clearedProxyKey: boolean } {
+	unlinkQuiet(accountTokenPath(configDir));
+	unlinkQuiet(accountEmailPath(configDir));
 
-	const configPath = configTomlPath(home);
+	const configPath = configTomlPath(configDir);
 	const existing = readFileOrEmpty(configPath);
 	if (!existing) {
 		return { clearedProxyKey: false };
@@ -211,10 +218,10 @@ export function logoutLocal(home: string = os.homedir()): { clearedProxyKey: boo
 
 export async function heartbeatOnce(
 	baseUrl: string = authBaseUrl(),
-	home: string = os.homedir(),
+	configDir: string = currentAgentStateDir(),
 	fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-	const token = readTrimmedFile(accountTokenPath(home));
+	const token = readTrimmedFile(accountTokenPath(configDir));
 	if (!token) {
 		return;
 	}
