@@ -1,0 +1,60 @@
+diff --git a/src/vs/platform/update/electron-main/updateService.win32.ts b/src/vs/platform/update/electron-main/updateService.win32.ts
+index 246b3b3..5318a7f 100644
+--- a/src/vs/platform/update/electron-main/updateService.win32.ts
++++ b/src/vs/platform/update/electron-main/updateService.win32.ts
+@@ -564,22 +564,39 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
+ 			}
+ 		} else {
+ 			const type = getUpdateType();
+-			if (type == UpdateType.WindowsInstaller) {
+-				this.logService.info(`update#doQuitAndInstall - msiexec.exe /i ${this.availableUpdate.packagePath}`);
+-
+-				spawn('msiexec.exe', ['/i', this.availableUpdate.packagePath], {
+-					detached: true,
+-					stdio: ['ignore', 'ignore', 'ignore'],
+-					env: { ...process.env, __COMPAT_LAYER: 'RunAsInvoker' }
+-				});
+-			}
+-			else {
+-				spawn(this.availableUpdate.packagePath, ['/silent', '/log', '/mergetasks=runcode,!desktopicon,!quicklaunchicon'], {
+-					detached: true,
+-					stdio: ['ignore', 'ignore', 'ignore'],
+-					env: { ...process.env, __COMPAT_LAYER: 'RunAsInvoker' }
+-				});
+-			}
++			const packagePath = this.availableUpdate.packagePath;
++			const exePath = process.execPath;
++			const exeName = basename(exePath, '.exe');
++			const quote = (value: string) => value.replace(/'/g, "''");
++			const programFiles = [process.env['ProgramFiles'], process.env['ProgramFiles(x86)']]
++				.filter((dir): dir is string => !!dir);
++			const needsElevation = type === UpdateType.WindowsInstaller
++				|| programFiles.some(dir => exePath.toLowerCase().startsWith(dir.toLowerCase()));
++			const runAs = needsElevation ? ' -Verb RunAs' : '';
++			const installer = type === UpdateType.WindowsInstaller
++				? `Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i "${quote(packagePath)}" /quiet /norestart'${runAs} -Wait -ErrorAction Stop`
++				: `Start-Process -FilePath '${quote(packagePath)}' -ArgumentList '/silent /log /mergetasks=!runcode,!desktopicon,!quicklaunchicon'${runAs} -Wait -ErrorAction Stop`;
++			const script = [
++				`$ErrorActionPreference = 'SilentlyContinue'`,
++				`$deadline = (Get-Date).AddSeconds(30)`,
++				`while ((Get-Process -Name '${quote(exeName)}' -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }`,
++				`Start-Sleep -Milliseconds 750`,
++				`try { ${installer} } catch { }`,
++				`Start-Sleep -Seconds 2`,
++				`if (-not (Get-Process -Name '${quote(exeName)}' -ErrorAction SilentlyContinue)) { Start-Process -FilePath '${quote(exePath)}' }`,
++			].join('; ');
++			const env = { ...process.env };
++			delete env.__COMPAT_LAYER;
++
++			this.logService.info(`update#doQuitAndInstall - waiting for exit, then applying ${type === UpdateType.WindowsInstaller ? 'msiexec' : 'setup'} from a detached helper`);
++
++			const helper = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script], {
++				detached: true,
++				stdio: 'ignore',
++				windowsHide: true,
++				env
++			});
++			helper.unref();
+ 		}
+ 	}
+ 
