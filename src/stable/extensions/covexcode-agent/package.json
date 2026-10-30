@@ -162,6 +162,12 @@
           "default": "",
           "markdownDescription": "Optional explicit path to an external `covexcode` CLI. Leave empty to use the agent runtime bundled with Covexcode IDE. If the bundled runtime is unavailable, the IDE falls back to `covexcode` on PATH, then `~/.local/bin`, `/usr/local/bin`, `~/.cargo/bin`, and `~/.covexcode/bin`."
         },
+        "covexcode.agent.configDir": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Directory for the agent's config, login, sessions, and artifacts. Leave empty to use an IDE-managed directory under VS Code global storage (recommended; it is kept separate from the terminal CLI and copied once from `~/.covexcode` if that exists). Set to `~/.covexcode` to share state with the CLI. `COVEXCODE_CONFIG_DIR` is honored when this is empty."
+        },
         "covexcode.provider": {
           "type": "string",
           "default": "",
@@ -172,7 +178,7 @@
           "type": "string",
           "default": "",
           "order": 2,
-          "markdownDescription": "Base URL for covexcode's OpenAI-compatible LLM endpoint (e.g. `https://api.deepseek.com` or `https://llm.covexcode.com/v1`). Set automatically by Sign In / `/provider`; leave empty to use `~/.covexcode/config.toml` from the CLI when no IDE override is stored."
+          "markdownDescription": "Base URL for covexcode's OpenAI-compatible LLM endpoint (e.g. `https://api.deepseek.com` or `https://llm.covexcode.com/v1`). Set automatically by Sign In / `/provider`; leave empty to use the `config.toml` in the agent state directory when no IDE override is stored."
         },
         "covexcode.model": {
           "type": "string",

@@ -40,6 +40,13 @@ import { serializeAxTree, AxNode } from './axTree';
 import { agentLaunchCandidates, bundledAgentPath, type AgentCandidate } from './agent/launch';
 import { readBundledAgentManifest } from './agent/manifest';
 import {
+	currentAgentStateDir,
+	currentAgentStateSource,
+	ensureAgentStateDir,
+	resolveAgentStateDir,
+	setCurrentAgentState,
+} from './agent/stateDir';
+import {
 	parsePermissionCommandArgs,
 	parseReviewCommandArgs,
 	permissionCommandUri,
@@ -134,6 +141,24 @@ function configuredCovexcodePath(): string {
 }
 
 let extensionContext: vscode.ExtensionContext | undefined;
+
+/**
+ * Resolve and create the directory the agent (and the IDE's own account and
+ * inline-completion code) should use. Kept in one place so a settings change
+ * cannot leave the extension and the child process pointing at different
+ * state.
+ */
+function applyAgentState(context: vscode.ExtensionContext): void {
+	const location = ensureAgentStateDir(
+		resolveAgentStateDir({
+			setting: vscode.workspace.getConfiguration('covexcode').get<string>('agent.configDir', ''),
+			env: process.env,
+			globalStorage: context.globalStorageUri.fsPath,
+			home: os.homedir(),
+		}),
+	);
+	setCurrentAgentState(location);
+}
 
 /** The bundled runtime is opt-in until the packaging path has shipped and
  * been verified on every platform. COVEXCODE_USE_BUNDLED_AGENT is the
@@ -257,17 +282,18 @@ class StubLanguageModelProvider implements vscode.LanguageModelChatProvider {
  * "New Chat" actually starts fresh. Follow-up turns in the same thread keep
  * the session because their history is non-empty.
  *
- * First-run configuration: a fresh install has no `~/.covexcode/config.toml`
- * and no `covexcode.endpoint`/`covexcode.model` settings, so the very first
- * message would otherwise fail with a raw connection error (`headless.rs`
- * now fails fast on a missing API key specifically, but has no equivalent
- * for a missing endpoint/model, and no way to *collect* any of the three
- * from inside a headless subprocess either way). `ensureCredentials` below
- * prompts once, storing the endpoint/model as ordinary settings and the API
- * key in `SecretStorage` (never plain settings.json), and is skipped
- * entirely when `~/.covexcode/config.toml` already exists -- someone who's
- * already configured `covexcode` from the CLI must not be nagged to repeat
- * that inside the IDE.
+ * First-run configuration: a fresh install has no `config.toml` in the
+ * agent state directory and no `covexcode.endpoint`/`covexcode.model`
+ * settings, so the very first message would otherwise fail with a raw
+ * connection error (`headless.rs` now fails fast on a missing API key
+ * specifically, but has no equivalent for a missing endpoint/model, and no
+ * way to *collect* any of the three from inside a headless subprocess
+ * either way). `ensureCredentials` below prompts once, storing the
+ * endpoint/model as ordinary settings and the API key in `SecretStorage`
+ * (never plain settings.json), and is skipped entirely when the state
+ * directory already has a `config.toml` -- someone who's already configured
+ * `covexcode`, from the CLI or a previous IDE run, must not be nagged to
+ * repeat that.
  */
 interface RollbackPickItem extends vscode.QuickPickItem {
 	/** What picking this item means, so the command never has to guess
@@ -347,6 +373,7 @@ async function pickRollbackScope(changes: ChangeEntry[]): Promise<RollbackScope 
 
 export function activate(context: vscode.ExtensionContext): void {
 	extensionContext = context;
+	applyAgentState(context);
 	let client: AcpClient | undefined;
 	let sessionId: string | undefined;
 	let ready: Promise<void> | undefined;
@@ -580,6 +607,25 @@ export function activate(context: vscode.ExtensionContext): void {
 		updateUsageIndicator();
 	}
 
+	// The directory is baked into the child's environment at spawn, so a
+	// change only takes effect after relaunching the session.
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeConfiguration(event => {
+			if (!event.affectsConfiguration('covexcode.agent.configDir')) {
+				return;
+			}
+			try {
+				applyAgentState(context);
+			} catch (error) {
+				void vscode.window.showErrorMessage(
+					`covexcode: could not use the configured agent state directory: ${describeError(error)}`,
+				);
+				return;
+			}
+			discardSession();
+		}),
+	);
+
 	async function togglePermissionMode(): Promise<PermissionMode> {
 		const next = cyclePermissionMode(currentPermissionMode());
 		await vscode.workspace
@@ -613,15 +659,16 @@ export function activate(context: vscode.ExtensionContext): void {
 			agentPath: command,
 			platform: process.platform,
 			arch: process.arch,
-			configPath: path.join(os.homedir(), '.covexcode', 'config.toml'),
+			configPath: path.join(currentAgentStateDir(), 'config.toml'),
 			configFound: configTomlExists(),
+			configSource: currentAgentStateSource(),
 			provider: config.get('provider', ''),
 			model: config.get('model', ''),
 			endpoint: config.get('endpoint', ''),
 			apiKeySet: apiKey.length > 0,
 			workspace: cwd,
 			workspaceIsGit: cwd ? fs.existsSync(path.join(cwd, '.git')) : false,
-			stateDirFound: fs.existsSync(path.join(os.homedir(), '.covexcode')),
+			stateDirFound: fs.existsSync(currentAgentStateDir()),
 		};
 		return doctorMarkdown(facts);
 	}
@@ -695,6 +742,10 @@ export function activate(context: vscode.ExtensionContext): void {
 				}
 				const cwd = workspace.cwd;
 				const envOverrides = await ensureCredentials(context, covexcodeCommand);
+				// Keep the child on the same state directory the IDE reads for
+				// doctor, account status, and inline completions. The CLI honors
+				// this since 1.11.93; older external binaries simply ignore it.
+				envOverrides.COVEXCODE_CONFIG_DIR = currentAgentStateDir();
 				const acp = new AcpClient(covexcodeCommand, cwd, envOverrides, ['--acp'], compatibility);
 				client = acp;
 				// A crash mid-session must not leave the participant dead until
@@ -1175,7 +1226,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				updateAccountIndicator();
 				const who = session.account.label;
 				void vscode.window.showInformationMessage(
-					`covexcode: signed in as ${who}. Credentials saved to ~/.covexcode — same as \`covexcode login\`.`,
+					`covexcode: signed in as ${who}. Credentials saved to ${currentAgentStateDir()}.`,
 				);
 			} catch (err) {
 				if (err instanceof DeviceLoginError && /cancelled/i.test(err.message)) {
@@ -1987,12 +2038,12 @@ function modelCommandMarkdown(outcome: ModelFlowOutcome, bundled = false): strin
  * Resolves the env-var overrides to hand `covexcode --acp` (see
  * `AcpClient`'s own doc comment on why these are additive, never blanking):
  * whatever this extension already has stored (settings + `SecretStorage`)
- * is used as-is; if nothing is stored yet AND `~/.covexcode/config.toml`
- * doesn't exist either (the file-existence check is a deliberately simple
- * proxy for "has this person configured covexcode from the CLI before" --
- * no need to actually parse the TOML just to decide whether to prompt),
- * this runs a one-time setup prompt and persists the result. Throws
- * `SetupCancelled` if the user backs out of that prompt.
+ * is used as-is; if nothing is stored yet AND the agent state directory has
+ * no `config.toml` either (the file-existence check is a deliberately simple
+ * proxy for "has this person configured covexcode before" -- no need to
+ * actually parse the TOML just to decide whether to prompt), this runs a
+ * one-time setup prompt and persists the result. Throws `SetupCancelled` if
+ * the user backs out of that prompt.
  */
 const COVEXCODE_PROXY_ENDPOINT = 'https://llm.covexcode.com/v1';
 
@@ -2066,7 +2117,7 @@ function currentPermissionMode(): PermissionMode {
 
 function configTomlExists(): boolean {
 	try {
-		return fs.existsSync(path.join(os.homedir(), '.covexcode', 'config.toml'));
+		return fs.existsSync(path.join(currentAgentStateDir(), 'config.toml'));
 	} catch {
 		return false;
 	}
@@ -2082,7 +2133,7 @@ function providerEnvVarName(providerId: string): string {
 
 const CUSTOM_ENDPOINT_ITEM = 'Custom endpoint…';
 
-/** Browser device login → SetupResult, also writing ~/.covexcode like the CLI. */
+/** Browser device login → SetupResult, also writing the agent state directory like the CLI. */
 async function signInSetupResult(): Promise<SetupResult | undefined> {
 	try {
 		const creds = await runBrowserDeviceLogin();
