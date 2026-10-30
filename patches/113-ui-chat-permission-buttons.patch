@@ -1,3 +1,22 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRenderer.ts b/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRenderer.ts
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRenderer.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRenderer.ts
+@@ -148,6 +148,15 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
+ 				element.title = '';
+ 				store.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), element, title));
+ 			}
++			const href = element.getAttribute('data-href') || element.getAttribute('href') || '';
++			if (href.includes('permission.respond')) {
++				element.addEventListener('click', () => {
++					const container = element.closest('.rendered-markdown') as HTMLElement | null;
++					if (container) {
++						container.style.display = 'none';
++					}
++				});
++			}
+ 		});
+ 
+ 		return {
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
