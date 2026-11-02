@@ -1,39 +1,39 @@
 {
   "schemaVersion": 1,
-  "agentVersion": "1.11.93",
+  "agentVersion": "1.11.94",
   "protocolVersion": 1,
-  "releaseTag": "v1.11.93",
+  "releaseTag": "v1.11.94",
   "repository": "HolboxAI/covexcode",
   "artifacts": {
     "darwin-arm64": {
-      "asset": "covexcode-macos-aarch64",
-      "sha256": "b5aa1214c00c666dd53244aa73ea46e3df03e8922323a22903b153967399cdf3",
-      "size": 6815184
+      "asset": "covexcode-agent-macos-aarch64",
+      "sha256": "5226a6fce58faff62f38946a291e4d006b6d3ac08d8c48aae16f5999edf543b4",
+      "size": 5408720
     },
     "linux-arm64": {
-      "asset": "covexcode-linux-aarch64",
-      "sha256": "d5f852b60ad3a6a6c5ae3815c668d4e0c13243f3f975c08250351741b8b3c2a2",
-      "size": 11689016
+      "asset": "covexcode-agent-linux-aarch64",
+      "sha256": "62ff5cb9284f43af3f7823ef27427feebecdd2b30f060d2a634f124da7d4d299",
+      "size": 10283944
     },
     "linux-arm64-musl": {
-      "asset": "covexcode-linux-aarch64-musl",
-      "sha256": "5e25e7d43d99479d1e0844bf47a7cb82dbc5601fd3257f62a38c06cb5e894a92",
-      "size": 7680600
+      "asset": "covexcode-agent-linux-aarch64-musl",
+      "sha256": "a8d8d9fffc78202380109b7556ef67660def79ab4e710ffa94651f8cabc27850",
+      "size": 6291912
     },
     "linux-x64": {
-      "asset": "covexcode-linux-x86_64",
-      "sha256": "7ef17d825474b8b9fc3dbc18877fd871727e69b7883892415d2e45687ff80c64",
-      "size": 7941232
+      "asset": "covexcode-agent-linux-x86_64",
+      "sha256": "b4ed377f0fb73ffd29f3bdea5eefe8b26c31a2553e5cefc56e0ecc4692a5b8b8",
+      "size": 6340944
     },
     "linux-x64-musl": {
-      "asset": "covexcode-linux-x86_64-musl",
-      "sha256": "65bc2a8f52b0befcdcaebb98a8af5eb1d3f413c37e34acc8adc0e5be90cd6f37",
-      "size": 9082128
+      "asset": "covexcode-agent-linux-x86_64-musl",
+      "sha256": "9403f64f0c08a8e30a5ca10f6a907a19505c7b628ca258f35f7089fe6d729599",
+      "size": 7464048
     },
     "win32-x64": {
-      "asset": "covexcode-windows-x86_64.exe",
-      "sha256": "aeef8807ab6ac6549099e1581bd3e17796f4c0f26ee0535a4abee717ef39ee2b",
-      "size": 9696768
+      "asset": "covexcode-agent-windows-x86_64.exe",
+      "sha256": "6451621d5f7fa6d03eb8f9f3884f2a16d81e9720080dcc357edaf744eb7eb8e3",
+      "size": 7724032
     }
   }
 }
