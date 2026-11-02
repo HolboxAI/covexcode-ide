@@ -69,7 +69,7 @@ import { agentSupportsMcp, loadMcpConfig, mcpServersForSession } from './mcpLoad
 import { referenceContextSection } from './referenceContent';
 import { describeError, describeStartupFailure, AcpUnsupportedError } from './startupFailure';
 import { createTurnUsage, TurnUsage } from './turnUsage';
-import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter, SessionUsage } from './sessionUsage';
+import { createSessionUsage, sessionUsageFootnote, SessionUsage } from './sessionUsage';
 import { stopReasonNote } from './stopReason';
 import { approvalEnvValue, cyclePermissionMode, permissionModeDescription, permissionModeFromSetting, permissionModeMarkdown, type PermissionMode } from './permissionMode';
 import { doctorMarkdown, helpMarkdown, type DoctorFacts } from './slashCommands';
@@ -116,9 +116,6 @@ import { detectDeicticReferent } from './deictic';
 import { formatFocusedSurface } from './focusedSurface';
 import {
 	COVEXCODE_MODELS,
-	CovexcodeModelDescriptor,
-	envVarForModel,
-	isByokModel,
 	missingApiKeyMarkdown,
 	resolveEffectiveModelName,
 	resolveModelDescriptor,
@@ -430,7 +427,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.lm.registerLanguageModelChatProvider('covexcode', new CovexcodeLanguageModelProvider()),
 	);
 	// Warm the language models cache so the chat input model picker populates immediately:
-	void vscode.lm.selectChatModels({ vendor: 'covexcode' }).catch(() => {});
+	void Promise.resolve(vscode.lm.selectChatModels({ vendor: 'covexcode' })).catch(() => {});
 	// Tab-style multi-line completion: registers a `file`-scheme inline
 	// completion provider that predicts the continuation at the cursor. The
 	// fork already ships the whole ghost-text/accept layer in
