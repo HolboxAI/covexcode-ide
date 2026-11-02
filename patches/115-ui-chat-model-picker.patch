@@ -65,7 +65,7 @@ index b16728b..e741202 100644
  			filterActions: !isUBB && manageModelsAction ? [manageModelsAction] : undefined,
  			focusFilterOnOpen: true,
 -			collapsedByDefault: new Set([ModelPickerSection.Other]),
-+			collapsedByDefault: new Set(),
++			collapsedByDefault: new Set<string>(),
  			onDidToggleSection: (section: string, collapsed: boolean) => {
  				if (section === ModelPickerSection.Other) {
  					logModelPickerInteraction(collapsed ? 'otherModelsCollapsed' : 'otherModelsExpanded');
