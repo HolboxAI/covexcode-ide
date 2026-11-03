@@ -948,14 +948,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		// framework line). Memoized per cwd by frameworkFor() above, so this is
 		// one package.json read per workspace, not per turn.
 		const workspaceWithFramework = { ...workspace, framework: await frameworkFor(workspace.cwd) };
+		const hasImageAttachment = request.references.some(r => r.value instanceof vscode.ChatReferenceBinaryData);
 		const requestedModelId = request.model?.id;
 		const effectiveModel = resolveEffectiveModelName(
 			requestedModelId,
 			vscode.workspace.getConfiguration('covexcode').get<string>('model'),
+			hasImageAttachment,
 		);
 
 		// If user selected a BYOK model, verify that credentials exist
-		const modelDesc = resolveModelDescriptor(requestedModelId);
+		const modelDesc = resolveModelDescriptor(requestedModelId ?? effectiveModel);
 		if (modelDesc.isBYOK) {
 			const providerKey = await context.secrets.get(secretKeyForProvider(modelDesc.provider));
 			const envKey = modelDesc.envVar ? process.env[modelDesc.envVar] : undefined;
@@ -1045,9 +1047,14 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		};
 
+		const effectiveModelSupportsImages = agentImagesSupported && (modelDesc.capabilities.imageInput ?? true);
+		if (hasImageAttachment && !effectiveModelSupportsImages) {
+			stream.markdown(`⚠️ **${modelDesc.name}** does not support images. Switch to a vision model (like **DeepSeek Flash** or **GPT-4o**) using \`/model\` or the model picker to attach images.\n\n`);
+		}
+
 		const content = isInline && inlineEditorData
 			? inlineEditPrompt(request, inlineEditorData, workspaceWithFramework)
-			: await attachReferencesToPrompt(request, workspaceWithFramework, agentImagesSupported);
+			: await attachReferencesToPrompt(request, workspaceWithFramework, effectiveModelSupportsImages);
 		// Registered *after* the `await` above so a throw while reading an
 		// attachment (e.g. a binary reference whose bytes can't be loaded)
 		// can't leak these: they were previously added before any `try`, so
@@ -1622,11 +1629,19 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 				}
 				continue;
 			}
+			const mime = reference.value.mimeType;
+			if (mime && !mime.startsWith('image/')) {
+				continue;
+			}
 			const bytes = await reference.value.data();
+			if (bytes.byteLength > 8 * 1024 * 1024) {
+				sections.push('An attached image was omitted because it exceeds the 8 MB size limit.');
+				continue;
+			}
 			images.push({
 				type: 'image',
 				data: Buffer.from(bytes).toString('base64'),
-				mimeType: reference.value.mimeType,
+				mimeType: mime || 'image/png',
 			});
 			continue;
 		}

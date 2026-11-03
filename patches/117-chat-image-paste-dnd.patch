@@ -1,0 +1,231 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/chatImageUtils.ts b/src/vs/workbench/contrib/chat/browser/chatImageUtils.ts
+--- a/src/vs/workbench/contrib/chat/browser/chatImageUtils.ts
++++ b/src/vs/workbench/contrib/chat/browser/chatImageUtils.ts
+@@ -36,22 +36,16 @@ export async function resizeImage(data: Uint8Array | string, mimeType?: string):
+ 			URL.revokeObjectURL(url);
+ 			let { width, height } = img;
+ 
+-			if ((width <= 768 || height <= 768) && !isGif) {
+-				resolve(data);
+-				return;
+-			}
+-
+-			// Calculate the new dimensions while maintaining the aspect ratio
+-			if (width > 2048 || height > 2048) {
+-				const scaleFactor = 2048 / Math.max(width, height);
++			// covexcode-ide: Bound image dimensions to max 1200px and compress to high-efficiency
++			// JPEG (0.82 quality) so multi-image prompts stay well within the reverse proxy's
++			// request body limits and never trigger HTTP 502 Bad Gateway timeouts.
++			const maxDim = 1200;
++			if (width > maxDim || height > maxDim) {
++				const scaleFactor = maxDim / Math.max(width, height);
+ 				width = Math.round(width * scaleFactor);
+ 				height = Math.round(height * scaleFactor);
+ 			}
+ 
+-			const scaleFactor = 768 / Math.min(width, height);
+-			width = Math.round(width * scaleFactor);
+-			height = Math.round(height * scaleFactor);
+-
+ 			const canvas = document.createElement('canvas');
+ 			canvas.width = width;
+ 			canvas.height = height;
+@@ -59,8 +53,7 @@ export async function resizeImage(data: Uint8Array | string, mimeType?: string):
+ 			if (ctx) {
+ 				ctx.drawImage(img, 0, 0, width, height);
+ 
+-				const jpegTypes = ['image/jpeg', 'image/jpg'];
+-				const outputMimeType = mimeType && jpegTypes.includes(mimeType) ? 'image/jpeg' : 'image/png';
++				const outputMimeType = isGif ? 'image/gif' : 'image/jpeg';
+ 
+ 				canvas.toBlob(blob => {
+ 					if (blob) {
+@@ -73,7 +66,7 @@ export async function resizeImage(data: Uint8Array | string, mimeType?: string):
+ 					} else {
+ 						reject(new Error('Failed to create blob from canvas'));
+ 					}
+-				}, outputMimeType);
++				}, outputMimeType, 0.82);
+ 			} else {
+ 				reject(new Error('Failed to get canvas context'));
+ 			}
+
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatDragAndDrop.ts b/src/vs/workbench/contrib/chat/browser/widget/chatDragAndDrop.ts
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatDragAndDrop.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatDragAndDrop.ts
+@@ -237,8 +237,16 @@ export class ChatDragAndDrop extends Themable {
+ 	private async resolveAttachmentsFromDragEvent(e: DragEvent): Promise<IChatRequestVariableEntry[]> {
+ 		if (!this.isDragEventSupported(e)) {
+ 			return [];
+ 		}
+ 
++		// covexcode-ide: Resolve directly-dropped image files (e.g. dragged from Finder/Explorer).
++		// guessDropType() returns IMAGE for these events but the stock resolver never calls
++		// resolveHTMLAttachContext for them, so they silently return [].
++		if (containsImageDragType(e) && containsDragType(e, DataTransfers.FILES)) {
++			const contexts = await this.resolveHTMLAttachContext(e);
++			if (contexts.length > 0) { return contexts; }
++		}
++
+ 		if (containsDragType(e, CodeDataTransfers.NOTEBOOK_CELL_OUTPUT)) {
+ 			const notebookOutputData = extractNotebookCellOutputDropData(e);
+ 			if (notebookOutputData) {
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts b/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
+--- a/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
+@@ -2847,8 +2847,49 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
+ 		this._register(this._inputEditor.onDidBlurEditorWidget(() => {
+ 			CopyPasteController.get(this._inputEditor)?.clearWidgets();
+ 			DropIntoEditorController.get(this._inputEditor)?.clearWidgets();
+ 		}));
+ 
++		// covexcode-ide: Paste images from clipboard → attach as square thumbnail chips.
++		// Mirrors the Cursor / Antigravity UX: Cmd+V (macOS) / Ctrl+V (Win/Linux) with
++		// an image on the clipboard stages it in the attachment bar instead of inserting
++		// raw bytes into the text editor.  Text pastes fall through unmodified.
++		this._register(dom.addDisposableListener(this._inputEditorElement, 'paste', async (e: ClipboardEvent) => {
++			const items = Array.from(e.clipboardData?.items ?? []);
++			const imageItems = items.filter(item => item.type.startsWith('image/'));
++			if (imageItems.length === 0) {
++				return; // no images on the clipboard — normal text paste can proceed
++			}
++
++			// Consume the event so the editor does not also try to insert binary data.
++			e.preventDefault();
++			e.stopPropagation();
++
++			// Build unique names for the pasted attachments.
++			const existingNames = new Set<string>(this._attachmentModel.attachments.map(a => a.name));
++			const makeUniqueName = (base: string): string => {
++				let name = base;
++				let n = 1;
++				while (existingNames.has(name)) {
++					name = `${base} ${++n}`;
++				}
++				existingNames.add(name);
++				return name;
++			};
++
++			for (const item of imageItems) {
++				const file = item.getAsFile();
++				if (!file) { continue; }
++				try {
++					const buffer = await file.arrayBuffer();
++					const data = await resizeImage(new Uint8Array(buffer), file.type);
++					const name = makeUniqueName('Pasted Image');
++					this._attachmentModel.addContext({ id: `pasted-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, fullName: name, value: data, kind: 'image', isPasted: true, mimeType: file.type });
++				} catch (err) {
++					this.logService.error('[covexcode] clipboard image paste failed:', err);
++				}
++			}
++		}));
++
+ 		const hoverDelegate = this._register(createInstantHoverDelegate());
+ 
+ 		const { location } = this.getWidgetLocationInfo(widget);
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+@@ -4374,4 +4374,102 @@
+ /* Voice mode: green disconnect button */
+ .chat-input-container .chat-input-toolbars .codicon-debug-disconnect {
+ 	color: var(--vscode-charts-green, #3fb950) !important;
+ }
++
++/*
++ * covexcode-ide: Cursor/Antigravity-style 56 × 56 px square image thumbnail chips
++ * in the chat INPUT staging area (above the text box).  Images pasted with
++ * Cmd+V / Ctrl+V or drag-dropped show as object-fit: cover square cards with a
++ * hoverable ✕ remove button in the top-right corner.
++ *
++ * Scope is intentionally limited to .interactive-input-part so the collapsible
++ * IO history cards keep their own larger 88 × 88 upstream styles.
++ */
++
++/* ── Square chip shell ─────────────────────────────────────────── */
++.interactive-session .interactive-input-part
++	.chat-attached-context
++	.chat-attached-context-attachment.image-attachment {
++	box-sizing: border-box;
++	width: 56px;
++	height: 56px;
++	border-radius: 6px;
++	padding: 0;
++	overflow: hidden;
++	position: relative;
++	border: 1px solid var(--vscode-chat-requestBorder,
++	               var(--vscode-widget-border,
++	               rgba(128, 128, 128, 0.35)));
++	background-color: var(--vscode-input-background);
++	transition: border-color 0.12s ease, box-shadow 0.12s ease;
++}
++
++.interactive-session .interactive-input-part
++	.chat-attached-context
++	.chat-attached-context-attachment.image-attachment:hover {
++	border-color: var(--vscode-focusBorder, rgba(128, 128, 128, 0.7));
++	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
++}
++
++/* ── Pill container fills the chip entirely ─────────────────────── */
++.interactive-session .interactive-input-part
++	.chat-attached-context
++	.chat-attached-context-attachment.image-attachment
++	.chat-attached-context-pill {
++	width: 100%;
++	height: 100%;
++	padding: 0;
++	margin: 0;
++	display: flex;
++	align-items: center;
++	justify-content: center;
++}
++
++/* ── Thumbnail: object-fit cover, fills the whole 56 × 56 square ── */
++.interactive-session .interactive-input-part
++	.chat-attached-context
++	.chat-attached-context-attachment.image-attachment
++	.chat-attached-context-pill-image {
++	width: 100%;
++	height: 100%;
++	border-radius: 5px;
++	margin: 0;
++	object-fit: cover;
++	display: block;
++}
++
++/* ── Filename label: hidden — the thumbnail is the identifier ────── */
++.interactive-session .interactive-input-part
++	.chat-attached-context
++	.chat-attached-context-attachment.image-attachment
++	.chat-attached-context-custom-text {
++	display: none;
++}
++
++/* ── Remove button (✕): top-right, revealed on hover ─────────────── */
++.interactive-session .interactive-input-part
++	.chat-attached-context
++	.chat-attached-context-attachment.image-attachment
++	.monaco-button.codicon-close {
++	position: absolute !important;
++	top: 2px;
++	right: 2px;
++	width: 16px;
++	height: 16px;
++	border-radius: 50%;
++	background: rgba(0, 0, 0, 0.55) !important;
++	color: #fff !important;
++	font-size: 10px !important;
++	opacity: 0;
++	transition: opacity 0.1s ease;
++	display: flex !important;
++	align-items: center;
++	justify-content: center;
++}
++
++.interactive-session .interactive-input-part
++	.chat-attached-context
++	.chat-attached-context-attachment.image-attachment:hover
++	.monaco-button.codicon-close {
++	opacity: 1;
++}
