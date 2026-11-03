@@ -4,11 +4,11 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createSessionUsage, sessionUsageFootnote, sessionUsageMeter } from './sessionUsage';
+import { createSessionUsage, formatCompact, sessionUsageFootnote, sessionUsageMeter } from './sessionUsage';
 import type { SessionUpdate } from './acpClient';
 
-function usageUpdate(used: unknown, size?: unknown): SessionUpdate {
-	return { sessionUpdate: 'usage_update', used, size } as SessionUpdate;
+function usageUpdate(used: unknown, size?: unknown, prompt_tokens?: unknown): SessionUpdate {
+	return { sessionUpdate: 'usage_update', used, size, prompt_tokens } as SessionUpdate;
 }
 
 test('total() accumulates across a multi-turn session and reset() zeroes it', () => {
@@ -69,4 +69,56 @@ test('sessionUsageMeter appends an estimated cost when a rate is given', () => {
 
 test('sessionUsageMeter keeps sub-cent estimates non-zero', () => {
 	assert.equal(sessionUsageMeter(1000, 0.35), '1,000 tokens spent · ~$0.00035');
+});
+
+test('circleMeter is undefined when session is empty or very low (< 5%)', () => {
+	const session = createSessionUsage();
+	assert.equal(session.circleMeter(128_000), undefined);
+
+	// 1,000 of 128,000 is < 1%
+	session.record(usageUpdate(1000, 128_000, 1000));
+	assert.equal(session.circleMeter(128_000), undefined);
+});
+
+test('circleMeter shows blue circle with tokens left when active and under 80%', () => {
+	const session = createSessionUsage();
+	// 40,000 of 128,000 = ~31%
+	session.record(usageUpdate(40_000, 128_000, 40_000));
+	const meter = session.circleMeter(128_000);
+	assert.ok(meter);
+	assert.equal(meter.colorTheme, 'blue');
+	assert.equal(meter.tokensLeft, 88_000);
+	assert.equal(meter.percent, 31);
+	assert.equal(meter.text, '$(circle-filled) 88k left');
+	assert.ok(meter.tooltip.includes('88,000 tokens left'));
+});
+
+test('circleMeter shows red circle warning when almost full (>= 80%)', () => {
+	const session = createSessionUsage();
+	// 110,000 of 128,000 = ~86%
+	session.record(usageUpdate(110_000, 128_000, 110_000));
+	const meter = session.circleMeter(128_000);
+	assert.ok(meter);
+	assert.equal(meter.colorTheme, 'red');
+	assert.equal(meter.percent, 86);
+	assert.equal(meter.text, '$(circle-filled) 18k left');
+	assert.ok(meter.tooltip.includes('almost full'));
+});
+
+test('circleMeter shows limit reached when 100% full', () => {
+	const session = createSessionUsage();
+	session.record(usageUpdate(128_000, 128_000, 128_000));
+	const meter = session.circleMeter(128_000);
+	assert.ok(meter);
+	assert.equal(meter.colorTheme, 'red');
+	assert.equal(meter.percent, 100);
+	assert.equal(meter.tokensLeft, 0);
+	assert.equal(meter.text, '$(circle-filled) Limit reached');
+});
+
+test('formatCompact formats numbers cleanly', () => {
+	assert.equal(formatCompact(88_000), '88k');
+	assert.equal(formatCompact(120_500), '121k');
+	assert.equal(formatCompact(1_500_000), '1.5M');
+	assert.equal(formatCompact(900), '900');
 });
