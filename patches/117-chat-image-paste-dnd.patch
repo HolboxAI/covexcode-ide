@@ -126,11 +126,10 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPart.ts
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4374,4 +4374,102 @@
- /* Voice mode: green disconnect button */
- .chat-input-container .chat-input-toolbars .codicon-debug-disconnect {
- 	color: var(--vscode-charts-green, #3fb950) !important;
+@@ -4507,3 +4507,101 @@ a[href*="permission.review"] {
  }
+ 
+ .interactive-session a[data-href*="permission"]:focus-visible,
 +
 +/*
 + * covexcode-ide: Cursor/Antigravity-style 56 × 56 px square image thumbnail chips
