@@ -42,7 +42,7 @@ export const COVEXCODE_MODELS: readonly CovexcodeModelDescriptor[] = [
 		isBYOK: false,
 		isDefault: true,
 		provider: 'covexcode',
-		capabilities: { toolCalling: true, imageInput: true, agentMode: true },
+		capabilities: { toolCalling: true, imageInput: false, agentMode: true },
 	},
 	{
 		id: 'deepseek-v4-flash',
@@ -227,7 +227,10 @@ export function resolveModelDescriptor(modelId?: string): CovexcodeModelDescript
  * Resolves the concrete model name to send to the backend / CLI.
  * If 'auto' or unspecified, returns the configured model or 'deepseek-v4-pro'.
  */
-export function resolveEffectiveModelName(modelId?: string, configuredModel?: string): string {
+export function resolveEffectiveModelName(modelId?: string, configuredModel?: string, hasImages?: boolean): string {
+	if (hasImages && (!modelId || modelId === 'auto' || modelId === 'covexcode')) {
+		return 'deepseek-v4-flash';
+	}
 	if (!modelId || modelId === 'auto') {
 		const cfg = configuredModel?.trim();
 		return cfg && cfg !== 'auto' && cfg !== 'covexcode' ? cfg : DEFAULT_INCLUDED_MODEL;
