@@ -1,0 +1,29 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+@@ -4605,3 +4605,21 @@
+ .interactive-session .interactive-input-part
+ 	.chat-attached-context
+ 	.chat-attached-context-attachment.image-attachment:hover
+ 	.monaco-button.codicon-close {
+ 	opacity: 1;
+ }
++
++/*
++ * covexcode-ide: Seamless chat copying & continuous mouse drag selection.
++ * Enables smooth selection across conversation turns and container boundaries,
++ * preventing divider borders and widgets from swallowing drag events.
++ */
++
++.interactive-session .chat-list-container,
++.interactive-session .interactive-item-container,
++.interactive-session .monaco-list-row {
++	user-select: text !important;
++	-webkit-user-select: text !important;
++}
++
++.interactive-session .chat-list-container .turn-separator,
++.interactive-session .chat-list-container .chat-separator,
++.interactive-session .interactive-item-container .chat-row-border {
++	pointer-events: none;
++}

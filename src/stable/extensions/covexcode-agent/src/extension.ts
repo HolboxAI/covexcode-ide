@@ -1390,6 +1390,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('covexcode.importFromVSCode', () => runImportFromVSCode(context)),
+		vscode.commands.registerCommand('covexcode.chat.copyAll', async () => {
+			try {
+				await vscode.commands.executeCommand('workbench.action.chat.copyAll');
+				void vscode.window.showInformationMessage('✓ Conversation copied to clipboard');
+			} catch (error) {
+				void vscode.window.showErrorMessage('Unable to copy conversation: ' + String(error));
+			}
+		}),
 	);
 
 	// One-shot, on first launch: if a VS Code-family install is present with

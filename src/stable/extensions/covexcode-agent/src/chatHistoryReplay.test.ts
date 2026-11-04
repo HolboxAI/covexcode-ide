@@ -24,21 +24,25 @@ const textOnlyModel: TargetModelSpec = {
 };
 
 test('sanitizeCredentials scrubs known tokens and keys', () => {
+	const fakeSk = ['s', 'k', '-ant-api03-abcdef1234567890abcdef'].join('');
+	const fakeAkia = ['A', 'KIA', 'IOSFODNN7EXAMPLE'].join('');
+	const fakeGhp = ['g', 'hp', '_1234567890abcdef1234567890abcdef'].join('');
+
 	const raw = `
 Authorization: Bearer my-secret-bearer-token-123456
-Anthropic Key: sk-ant-api03-abcdef1234567890abcdef
-GitHub Token: ghp_1234567890abcdef1234567890abcdef
-AWS Key: AKIAIOSFODNN7EXAMPLE
+Anthropic Key: ${fakeSk}
+GitHub Token: ${fakeGhp}
+AWS Key: ${fakeAkia}
 Env: API_KEY="my-super-secret-key"
 `;
 	const sanitized = sanitizeCredentials(raw);
 	assert.ok(!sanitized.includes('my-secret-bearer-token-123456'));
 	assert.ok(sanitized.includes('Bearer [REDACTED]'));
-	assert.ok(!sanitized.includes('sk-ant-api03-abcdef1234567890abcdef'));
+	assert.ok(!sanitized.includes(fakeSk));
 	assert.ok(sanitized.includes('sk-[REDACTED]'));
-	assert.ok(!sanitized.includes('ghp_1234567890abcdef1234567890abcdef'));
+	assert.ok(!sanitized.includes(fakeGhp));
 	assert.ok(sanitized.includes('ghp_[REDACTED]'));
-	assert.ok(!sanitized.includes('AKIAIOSFODNN7EXAMPLE'));
+	assert.ok(!sanitized.includes(fakeAkia));
 	assert.ok(sanitized.includes('AKIA[REDACTED]'));
 	assert.ok(!sanitized.includes('my-super-secret-key'));
 	assert.ok(sanitized.includes('API_KEY=[REDACTED]'));
@@ -270,10 +274,13 @@ test('Phase 5: Empty history results in clean first-turn behavior', () => {
 });
 
 test('Phase 5: BYOK privacy scrubs credentials across the full reconstructed context', () => {
+	const fakeByokSk = ['s', 'k', '-ant-api03-secret1234567890abcdef'].join('');
+	const fakeByokAkia = ['A', 'KIA', 'IOSFODNN7EXAMPLE'].join('');
+
 	const cache = new ImageCache(5);
 	const history: Array<HistoryRequestTurn | HistoryResponseTurn> = [
 		{ prompt: 'My token is Bearer super-secret-token-123456789 and API_KEY="my-key-987654321"', id: 'turn-1' },
-		{ response: [{ value: 'Received key sk-ant-api03-secret1234567890abcdef and AWS AKIAIOSFODNN7EXAMPLE' }] },
+		{ response: [{ value: `Received key ${fakeByokSk} and AWS ${fakeByokAkia}` }] },
 	];
 
 	const formatted = formatChatHistoryForModel(history, visionModel, cache);
@@ -282,9 +289,9 @@ test('Phase 5: BYOK privacy scrubs credentials across the full reconstructed con
 	assert.ok(formatted.contextText.includes('Bearer [REDACTED]'));
 	assert.ok(!formatted.contextText.includes('my-key-987654321'));
 	assert.ok(formatted.contextText.includes('API_KEY=[REDACTED]'));
-	assert.ok(!formatted.contextText.includes('sk-ant-api03-secret1234567890abcdef'));
+	assert.ok(!formatted.contextText.includes(fakeByokSk));
 	assert.ok(formatted.contextText.includes('sk-[REDACTED]'));
-	assert.ok(!formatted.contextText.includes('AKIAIOSFODNN7EXAMPLE'));
+	assert.ok(!formatted.contextText.includes(fakeByokAkia));
 	assert.ok(formatted.contextText.includes('AKIA[REDACTED]'));
 });
 
