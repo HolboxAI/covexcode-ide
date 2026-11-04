@@ -150,6 +150,16 @@ function configuredCovexcodePath(): string {
 let extensionContext: vscode.ExtensionContext | undefined;
 
 /**
+ * Set during activation. The first-run/setup wizard signs in to covexcode.com
+ * through `signInSetupResult()` (which bypasses the VS Code authentication
+ * provider), so after that path writes the credential files it calls this hook
+ * to make the Accounts UI and the status-bar account indicator reflect the new
+ * session immediately. Without it they stay stale ("Sign in") until the window
+ * is reloaded even though the browser authorization already completed.
+ */
+let refreshAccountSurfaces: (() => void) | undefined;
+
+/**
  * Resolve and create the directory the agent (and the IDE's own account and
  * inline-completion code) should use. Kept in one place so a settings change
  * cannot leave the extension and the child process pointing at different
@@ -528,6 +538,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		onCredentialsSaved: applyAccountCredentials,
 		onLoggedOut: clearAccountCredentials,
 	});
+	refreshAccountSurfaces = () => {
+		authProvider.refreshFromDisk();
+		updateAccountIndicator();
+	};
 	updateAccountIndicator();
 	void heartbeatOnce();
 	const heartbeatTimer = setInterval(() => {
@@ -2234,6 +2248,7 @@ async function signInSetupResult(): Promise<SetupResult | undefined> {
 	try {
 		const creds = await runBrowserDeviceLogin();
 		saveAccountCredentials(creds);
+		refreshAccountSurfaces?.();
 		void heartbeatOnce();
 		return {
 			provider: creds.provider,
