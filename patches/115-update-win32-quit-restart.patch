@@ -1,14 +1,96 @@
 diff --git a/src/vs/platform/update/electron-main/updateService.win32.ts b/src/vs/platform/update/electron-main/updateService.win32.ts
-index 246b3b3..5318a7f 100644
+index 246b3b3..34202aa 100644
 --- a/src/vs/platform/update/electron-main/updateService.win32.ts
 +++ b/src/vs/platform/update/electron-main/updateService.win32.ts
-@@ -564,22 +564,39 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
+@@ -5,7 +5,7 @@
+ 
+ import { ChildProcess, spawn } from 'child_process';
+ import { app } from 'electron';
+-import { existsSync, unlinkSync } from 'fs';
++import { existsSync, unlinkSync, writeFileSync } from 'fs';
+ import { mkdir, readFile, unlink } from 'fs/promises';
+ import { release, tmpdir } from 'os';
+ import { Delayer, ProcessTimeRunOnceScheduler, timeout } from '../../../base/common/async.js';
+@@ -564,22 +564,95 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
  			}
  		} else {
  			const type = getUpdateType();
 -			if (type == UpdateType.WindowsInstaller) {
 -				this.logService.info(`update#doQuitAndInstall - msiexec.exe /i ${this.availableUpdate.packagePath}`);
--
++			const packagePath = this.availableUpdate.packagePath;
++			const exePath = process.execPath;
++			const exeName = basename(exePath, '.exe');
++			const quote = (value: string) => value.replace(/'/g, "''");
++			const programFiles = [process.env['ProgramFiles'], process.env['ProgramFiles(x86)']]
++				.filter((dir): dir is string => !!dir);
++			const needsElevation = type === UpdateType.WindowsInstaller
++				|| programFiles.some(dir => exePath.toLowerCase().startsWith(dir.toLowerCase()));
++
++			// Start-Process -Verb RunAs hands the process to ShellExecute, so
++			// -Wait returns as soon as UAC is accepted -- not when the
++			// installer finishes. The old helper therefore restarted the app
++			// while setup was still replacing files; with /mergetasks
++			// suppressing runcode, nothing restarted it afterwards. Run the
++			// installer from an elevated PowerShell that can actually wait.
++			const installerCommand = type === UpdateType.WindowsInstaller
++				? `Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i "${quote(packagePath)}" /quiet /norestart' -Wait -PassThru -ErrorAction Stop`
++				: `Start-Process -FilePath '${quote(packagePath)}' -ArgumentList '/silent /log /mergetasks=!runcode,!desktopicon,!quicklaunchicon' -Wait -PassThru -ErrorAction Stop`;
++			const innerScript = [
++				`$ErrorActionPreference = 'Stop'`,
++				`$p = ${installerCommand}`,
++				`if ($p -and $p.ExitCode -ne 0) { exit $p.ExitCode }`,
++			].join('; ');
++
++			const stamp = Date.now();
++			const scriptPath = path.join(tmpdir(), `covexcode-update-${stamp}.ps1`);
++			const logPath = path.join(tmpdir(), `covexcode-update-${stamp}.log`);
++			const installerBlock = needsElevation
++				? [
++					`$inner = '${quote(innerScript)}'`,
++					`$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))`,
++					`$p = Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded -Verb RunAs -Wait -PassThru -ErrorAction Stop`,
++				].join('; ')
++				: `$p = ${installerCommand}`;
++			const script = [
++				`$ErrorActionPreference = 'Stop'`,
++				`$log = '${quote(logPath)}'`,
++				`function Write-UpdateLog([string]$message) { try { Add-Content -Path $log -Value ((Get-Date).ToString('s') + ' ' + $message) } catch { } }`,
++				`try {`,
++				`  Write-UpdateLog 'helper started; waiting for app pid ${process.pid}'`,
++				`  try { Wait-Process -Id ${process.pid} -Timeout 30 -ErrorAction Stop } catch { Write-UpdateLog ('wait for app failed: ' + $_) }`,
++				`  $deadline = (Get-Date).AddSeconds(15)`,
++				`  while ((Get-Process -Name '${quote(exeName)}' -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 250 }`,
++				`  Start-Sleep -Milliseconds 500`,
++				`  Write-UpdateLog 'running installer'`,
++				`  try {`,
++				`    ${installerBlock}`,
++				`    if ($p) { Write-UpdateLog ('installer exit code ' + $p.ExitCode) }`,
++				`  } catch {`,
++				`    Write-UpdateLog ('installer failed: ' + $_)`,
++				`  }`,
++				`  $started = $false`,
++				`  for ($i = 0; $i -lt 20; $i++) {`,
++				`    if (Get-Process -Name '${quote(exeName)}' -ErrorAction SilentlyContinue) { $started = $true; break }`,
++				`    try {`,
++				`      Start-Process -FilePath '${quote(exePath)}' -WorkingDirectory '${quote(path.dirname(exePath))}' -ErrorAction Stop`,
++				`      Write-UpdateLog 'started app'`,
++				`      $started = $true`,
++				`      break`,
++				`    } catch {`,
++				`      Write-UpdateLog ('start failed: ' + $_)`,
++				`      Start-Sleep -Milliseconds 500`,
++				`    }`,
++				`  }`,
++				`  if (-not $started) {`,
++				`    try { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + '${quote(exePath)}' + '"') -ErrorAction Stop; Write-UpdateLog 'started app via explorer' } catch { Write-UpdateLog ('explorer start failed: ' + $_) }`,
++				`  }`,
++				`} catch {`,
++				`  Write-UpdateLog ('fatal: ' + $_)`,
++				`}`,
++			].join('\r\n');
++			const env = { ...process.env };
++			delete env.__COMPAT_LAYER;
+ 
 -				spawn('msiexec.exe', ['/i', this.availableUpdate.packagePath], {
 -					detached: true,
 -					stdio: ['ignore', 'ignore', 'ignore'],
@@ -21,34 +103,15 @@ index 246b3b3..5318a7f 100644
 -					stdio: ['ignore', 'ignore', 'ignore'],
 -					env: { ...process.env, __COMPAT_LAYER: 'RunAsInvoker' }
 -				});
--			}
-+			const packagePath = this.availableUpdate.packagePath;
-+			const exePath = process.execPath;
-+			const exeName = basename(exePath, '.exe');
-+			const quote = (value: string) => value.replace(/'/g, "''");
-+			const programFiles = [process.env['ProgramFiles'], process.env['ProgramFiles(x86)']]
-+				.filter((dir): dir is string => !!dir);
-+			const needsElevation = type === UpdateType.WindowsInstaller
-+				|| programFiles.some(dir => exePath.toLowerCase().startsWith(dir.toLowerCase()));
-+			const runAs = needsElevation ? ' -Verb RunAs' : '';
-+			const installer = type === UpdateType.WindowsInstaller
-+				? `Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i "${quote(packagePath)}" /quiet /norestart'${runAs} -Wait -ErrorAction Stop`
-+				: `Start-Process -FilePath '${quote(packagePath)}' -ArgumentList '/silent /log /mergetasks=!runcode,!desktopicon,!quicklaunchicon'${runAs} -Wait -ErrorAction Stop`;
-+			const script = [
-+				`$ErrorActionPreference = 'SilentlyContinue'`,
-+				`$deadline = (Get-Date).AddSeconds(30)`,
-+				`while ((Get-Process -Name '${quote(exeName)}' -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }`,
-+				`Start-Sleep -Milliseconds 750`,
-+				`try { ${installer} } catch { }`,
-+				`Start-Sleep -Seconds 2`,
-+				`if (-not (Get-Process -Name '${quote(exeName)}' -ErrorAction SilentlyContinue)) { Start-Process -FilePath '${quote(exePath)}' }`,
-+			].join('; ');
-+			const env = { ...process.env };
-+			delete env.__COMPAT_LAYER;
++			try {
++				writeFileSync(scriptPath, script, 'utf8');
++			} catch (e) {
++				this.logService.error('update#doQuitAndInstall - could not write helper script', e);
+ 			}
 +
-+			this.logService.info(`update#doQuitAndInstall - waiting for exit, then applying ${type === UpdateType.WindowsInstaller ? 'msiexec' : 'setup'} from a detached helper`);
++			this.logService.info(`update#doQuitAndInstall - waiting for exit, then applying ${type === UpdateType.WindowsInstaller ? 'msiexec' : 'setup'} from a detached helper; log: ${logPath}`);
 +
-+			const helper = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script], {
++			const helper = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath], {
 +				detached: true,
 +				stdio: 'ignore',
 +				windowsHide: true,
