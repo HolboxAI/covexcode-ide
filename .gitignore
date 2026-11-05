@@ -20,6 +20,7 @@ extensions/**/dist/
 /vscode-*/
 /VSCode-*/
 /assets/
+/Covexcode QA.app/
 /dev/build.env
 *.tar.gz
 *.zip

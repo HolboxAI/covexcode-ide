@@ -57,6 +57,7 @@ import {
 } from './chatPermission';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
+import { computeFileDiffSummary } from './diffPreview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
 import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
 import {
@@ -1000,6 +1001,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		// a fresh Map per requestHandler call, same lifetime as `stream`.
 		const toolCallTitles = new Map<string, string>();
 		const shownBrowserPreviews = new Set<string>();
+		const collectedDiffs = new Map<string, CollectedDiff>();
 		const turnUsage = createTurnUsage();
 		// Inline edit carries the editor buffer and the paths whose diffs were
 		// already emitted, so renderUpdate can convert each `diff` into a
@@ -1010,7 +1012,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit, collectedDiffs);
 				updateUsageIndicator();
 			}
 		};
@@ -1089,6 +1091,12 @@ export function activate(context: vscode.ExtensionContext): void {
 				for (const fsPath of inlineEdit.touched) {
 					stream.textEdit(vscode.Uri.file(fsPath), true);
 				}
+			}
+			// After a clean panel turn, summarize every file the agent changed
+			// in one collapsible "Changed N files" dropdown. Inline-edit turns
+			// already rendered their own in-editor diffs, so this is panel-only.
+			if (!inlineEdit && collectedDiffs.size > 0) {
+				renderDiffSummary(collectedDiffs, diffContentProvider, workspace.cwd, stream);
 			}
 			// Rendered only on a clean turn end, never after an error -- a
 			// failed turn's partial usage would be a misleading number. One
@@ -1767,6 +1775,66 @@ function renderToolCallInvocation(update: SessionUpdate, title: string, stream: 
 }
 
 /**
+ * Renders the end-of-turn "Changed N files" summary from the diffs collected
+ * during the turn. Text changes become `ChatResponseDiffEntry`s -- the native
+ * collapsible file list whose header reads "Changed N files" and whose entries
+ * open VS Code's Git-style diff editor (red/green gutters, line numbers) on
+ * click. Binary files cannot go through that editor, so they get a plain note
+ * instead of being rendered as garbage text.
+ */
+function renderDiffSummary(
+	diffs: Map<string, CollectedDiff>,
+	diffContentProvider: DiffContentProvider,
+	cwd: string,
+	stream: vscode.ChatResponseStream,
+): void {
+	const entries: vscode.ChatResponseDiffEntry[] = [];
+	const binaryNotes: vscode.MarkdownString[] = [];
+
+	for (const diff of diffs.values()) {
+		const summary = computeFileDiffSummary({
+			oldText: diff.oldText,
+			newText: diff.newText,
+			hunks: diff.hunks,
+		});
+
+		if (summary.isBinary) {
+			const note = new vscode.MarkdownString(undefined, true);
+			note.appendMarkdown('$(file-binary) `');
+			note.appendText(diff.path);
+			note.appendMarkdown('` — binary file changed\n\n');
+			binaryNotes.push(note);
+			continue;
+		}
+
+		const originalUri = diff.oldText !== undefined
+			? diffContentProvider.register(diff.oldText)
+			: undefined;
+		const modifiedUri = summary.status === 'deleted'
+			? undefined
+			: diffContentProvider.register(diff.newText);
+
+		const fsPath = resolvePathAgainstCwd(cwd, diff.path);
+		const goToFileUri = fs.existsSync(fsPath) ? vscode.Uri.file(fsPath) : undefined;
+
+		entries.push({
+			originalUri,
+			modifiedUri,
+			goToFileUri,
+			added: summary.added,
+			removed: summary.removed,
+		});
+	}
+
+	for (const note of binaryNotes) {
+		stream.markdown(note);
+	}
+	if (entries.length > 0) {
+		stream.push(new vscode.ChatResponseMultiDiffPart(entries, 'covexcode changes'));
+	}
+}
+
+/**
  * Auto-opens the Integrated Browser the moment a shell command's own output
  * mentions a dev server it just started (a "Local: http://localhost:5173/"
  * line, the same shape `npm run dev`/`vite`/`python3 -m http.server` all
@@ -1825,6 +1893,14 @@ interface InlineEditContext {
 	touched: Set<string>;
 }
 
+/** A file change collected from the agent during one turn, keyed by path. */
+interface CollectedDiff {
+	path: string;
+	oldText?: string;
+	newText: string;
+	hunks?: DiffHunk[];
+}
+
 function renderUpdate(
 	update: SessionUpdate,
 	stream: vscode.ChatResponseStream,
@@ -1834,6 +1910,7 @@ function renderUpdate(
 	turnUsage: TurnUsage,
 	sessionUsage: SessionUsage,
 	inlineEdit: InlineEditContext | undefined,
+	collectedDiffs: Map<string, CollectedDiff>,
 ): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -1863,6 +1940,21 @@ function renderUpdate(
 					stream.markdown(line);
 				}
 				break;
+			}
+			// Panel turns keep every applied `diff` the agent emitted, so the
+			// end-of-turn summary can list each changed file with its real
+			// added/removed counts. Only completed tool calls are collected -- a
+			// rejected or failed write must never show up as a change. Inline-edit
+			// turns render those diffs in the editor instead, so they are
+			// intentionally not collected here.
+			if (update.content?.type === 'diff' && update.status === 'completed') {
+				const diff = update.content;
+				collectedDiffs.set(diff.path, {
+					path: diff.path,
+					oldText: diff.oldText,
+					newText: diff.newText,
+					hunks: diff.hunks,
+				});
 			}
 			if (update.toolCallId && update.title) {
 				toolCallTitles.set(update.toolCallId, update.title);
