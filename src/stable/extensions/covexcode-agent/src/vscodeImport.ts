@@ -80,21 +80,27 @@ export function userDataDirFor(
 	nameShort: string,
 	env: NodeJS.ProcessEnv = process.env,
 ): string {
+	const p = platform === 'win32' ? path.win32 : path.posix;
 	if (platform === 'darwin') {
-		return path.join(home, 'Library', 'Application Support', nameShort);
+		return p.join(home, 'Library', 'Application Support', nameShort);
 	}
 	if (platform === 'win32') {
-		const appData = env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
-		return path.join(appData, nameShort);
+		const appData = env.APPDATA ?? p.join(home, 'AppData', 'Roaming');
+		return p.join(appData, nameShort);
 	}
-	const configHome = env.XDG_CONFIG_HOME ?? path.join(home, '.config');
-	return path.join(configHome, nameShort);
+	const configHome = env.XDG_CONFIG_HOME ?? p.join(home, '.config');
+	return p.join(configHome, nameShort);
 }
 
 /** Resolves the installed-extensions directory for a product's `dataFolderName`
  * (`~/.<dataFolderName>/extensions` on every platform). */
-export function extensionsDirFor(home: string, dataFolderName: string): string {
-	return path.join(home, dataFolderName, 'extensions');
+export function extensionsDirFor(
+	home: string,
+	dataFolderName: string,
+	platform?: NodeJS.Platform,
+): string {
+	const p = platform === 'win32' ? path.win32 : path.posix;
+	return p.join(home, dataFolderName, 'extensions');
 }
 
 /** The installs that actually exist on this machine, i.e. whose user-data
@@ -104,11 +110,12 @@ export function detectSourceInstalls(
 	platform: NodeJS.Platform,
 	env: NodeJS.ProcessEnv = process.env,
 ): SourceInstall[] {
+	const p = platform === 'win32' ? path.win32 : path.posix;
 	const found: SourceInstall[] = [];
 	for (const kind of KNOWN_SOURCE_INSTALLS) {
 		const userDataDir = userDataDirFor(home, platform, kind.nameShort, env);
-		const extensionsDir = extensionsDirFor(home, kind.dataFolderName);
-		if (fs.existsSync(path.join(userDataDir, 'User')) || fs.existsSync(extensionsDir)) {
+		const extensionsDir = extensionsDirFor(home, kind.dataFolderName, platform);
+		if (fs.existsSync(p.join(userDataDir, 'User')) || fs.existsSync(extensionsDir)) {
 			found.push({ ...kind, userDataDir, extensionsDir });
 		}
 	}

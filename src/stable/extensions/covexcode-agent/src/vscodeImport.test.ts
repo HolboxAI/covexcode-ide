@@ -37,13 +37,42 @@ test('userDataDirFor() follows the platform-specific app-data convention', () =>
 	);
 	assert.equal(
 		userDataDirFor('C:\\Users\\u', 'win32', 'Code', { APPDATA: 'C:\\Users\\u\\AppData\\Roaming' }),
-		path.join('C:\\Users\\u\\AppData\\Roaming', 'Code'),
+		'C:\\Users\\u\\AppData\\Roaming\\Code',
+	);
+});
+
+test('userDataDirFor() uses platform-specific separators regardless of host', () => {
+	assert.equal(userDataDirFor('/home/u', 'linux', 'Code', {}), '/home/u/.config/Code');
+	assert.equal(userDataDirFor('/Users/u', 'darwin', 'Code', {}), '/Users/u/Library/Application Support/Code');
+	assert.equal(
+		userDataDirFor('C:\\Users\\u', 'win32', 'Code', { APPDATA: 'C:\\Users\\u\\AppData\\Roaming' }),
+		'C:\\Users\\u\\AppData\\Roaming\\Code',
+	);
+	assert.equal(
+		userDataDirFor('C:\\Users\\u', 'win32', 'Code', {}),
+		'C:\\Users\\u\\AppData\\Roaming\\Code',
+	);
+	assert.equal(
+		userDataDirFor('C:\\Users\\First Last\\', 'win32', 'Code', {}),
+		'C:\\Users\\First Last\\AppData\\Roaming\\Code',
+	);
+	assert.equal(
+		userDataDirFor('c:\\users\\u\\', 'win32', 'Code', {}),
+		'c:\\users\\u\\AppData\\Roaming\\Code',
 	);
 });
 
 test('extensionsDirFor() is home-relative for every product', () => {
 	assert.equal(extensionsDirFor('/home/u', '.vscode'), '/home/u/.vscode/extensions');
 	assert.equal(extensionsDirFor('/Users/u', '.cursor'), '/Users/u/.cursor/extensions');
+});
+
+test('extensionsDirFor() uses platform-specific separators regardless of host', () => {
+	assert.equal(extensionsDirFor('/home/u', '.vscode', 'linux'), '/home/u/.vscode/extensions');
+	assert.equal(extensionsDirFor('/Users/u', '.cursor', 'darwin'), '/Users/u/.cursor/extensions');
+	assert.equal(extensionsDirFor('C:\\Users\\u', '.vscode', 'win32'), 'C:\\Users\\u\\.vscode\\extensions');
+	assert.equal(extensionsDirFor('C:\\Users\\First Last\\', '.vscode', 'win32'), 'C:\\Users\\First Last\\.vscode\\extensions');
+	assert.equal(extensionsDirFor('c:\\users\\u\\', '.vscode', 'win32'), 'c:\\users\\u\\.vscode\\extensions');
 });
 
 test('detectSourceInstalls() finds an install by its User directory', async () => {
@@ -59,8 +88,8 @@ test('detectSourceInstalls() finds an install by its User directory', async () =
 		assert.ok(!ids.includes('cursor'));
 
 		const code = installs.find(i => i.id === 'vscode')!;
-		assert.equal(code.userDataDir, path.join(home, '.config', 'Code'));
-		assert.equal(code.extensionsDir, path.join(home, '.vscode', 'extensions'));
+		assert.equal(code.userDataDir, path.posix.join(home, '.config', 'Code'));
+		assert.equal(code.extensionsDir, path.posix.join(home, '.vscode', 'extensions'));
 	} finally {
 		await rm(home, { recursive: true, force: true });
 	}
