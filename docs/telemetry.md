@@ -56,6 +56,42 @@ _Note: on Linux, the app update service is disabled completely at build-time eve
 
 By default, we keep the preference `telemetry.feedback.enabled` enabled. It's used to allow the button `Report Issue...` to be used on the app depending on the context. It does not send any data by having it enabled (other options already cover it). If you want, you can disable this behavior by toggling the preference value.
 
+### Feedback endpoint
+
+The `covexcode-agent` extension can show an optional feedback window when a user rejects an agent permission request, and a general window via the `/feedback` slash command. Sending is gated by `telemetry.telemetryLevel` (not `off`) and `telemetry.feedback.enabled`, and the endpoint is configured with `covexcode.feedback.endpoint` (empty by default).
+
+When the endpoint is empty or the POST fails, the payload is queued in extension storage (capped, oldest dropped) and retried on next startup or next submit — never shown as an error. The endpoint should accept a single JSON POST body with `Content-Type: application/json`; `type` tells the two payloads apart:
+
+```json
+{
+  "feedbackId": "<UUID v4>",
+  "type": "reject",
+  "feedback": "<trimmed, max 10000 chars>",
+  "sessionId": "<ACP session id>",
+  "turnId": "<ACP turn number, empty if the turn had not finished>",
+  "files": ["<workspace-relative paths only>"],
+  "model": "<effective model name>",
+  "provider": "<provider id, may be empty>",
+  "ideVersion": "<VS Code version string>",
+  "timestamp": "<ISO 8601>"
+}
+```
+
+```json
+{
+  "feedbackId": "<UUID v4>",
+  "type": "general",
+  "feedback": "<trimmed, max 10000 chars>",
+  "ideVersion": "<VS Code version string>",
+  "model": "<effective model name>",
+  "provider": "<provider id, may be empty>",
+  "os": "<darwin|win32|linux>",
+  "timestamp": "<ISO 8601>"
+}
+```
+
+No file contents, diffs, API keys, absolute local paths, or chat history are included.
+
 ## <a id="replacements"></a>Replacements to Microsoft Online Services
 
 When searching the `@tag:usesOnlineServices` filter, note that while the "Update: Mode" setting description still says "The updates are fetched from a Microsoft online service", VSCodium's build script [sets the `updateUrl` field](https://github.com/VSCodium/vscodium/blob/8cc366bb76d6c0ddb64374f9530b42094646a660/prepare_vscode.sh#L132-L133) in `product.json` directly to the GitHub page, so enabling that setting won't actually result in any calls to the Microsoft online service.

@@ -72,6 +72,10 @@
           {
             "name": "help",
             "description": "List every slash command."
+          },
+          {
+            "name": "feedback",
+            "description": "Send feedback about Covexcode"
           }
         ]
       }
@@ -219,6 +223,12 @@
           "default": "auto",
           "order": 8,
           "markdownDescription": "How often the session asks before running tools. `auto` (default) asks only about destructive actions; `manual` asks about every write and command. Toggle with the `/mode` chat command or **covexcode: Toggle Permission Mode**."
+        },
+        "covexcode.feedback.endpoint": {
+          "type": "string",
+          "default": "",
+          "order": 9,
+          "markdownDescription": "HTTPS endpoint that receives optional reject-feedback as a JSON POST. Leave empty to queue feedback locally until an endpoint is configured. See `feedbackService.ts` in the covexcode-agent extension for the request shape."
         }
       }
     }

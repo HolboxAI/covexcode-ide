@@ -121,6 +121,8 @@ import {
 	resolveModelDescriptor,
 	secretKeyForProvider,
 } from './models';
+import { buildFeedbackPayload, FeedbackService, feedbackOs, postFeedbackJson, shouldSendFeedback, type FeedbackStorage } from './feedbackService';
+import { showFeedbackWindow, showRejectFeedback } from './feedbackUi';
 
 const PARTICIPANT_ID = 'covexcode.agent';
 const COVEXCODE_COMMAND = 'covexcode';
@@ -418,6 +420,98 @@ export function activate(context: vscode.ExtensionContext): void {
 	// of over-eager behavior the auto-open feature needs to avoid. See
 	// renderUpdate's own doc comment on this whole mechanism.
 	const openedDevServerUrls = new Set<string>();
+	// Reject feedback is queued locally until covexcode.feedback.endpoint is set.
+	// `activeTurnId` is only known once the ACP turn completes, so the feedback
+	// window reads it lazily at submit time rather than at reject time.
+	let activeTurnId = '';
+	const feedbackStorage: FeedbackStorage = {
+		get: <T>(key: string): T | undefined => context.globalState.get<T>(key),
+		update: (key, value) => context.globalState.update(key, value),
+	};
+	const feedbackService = new FeedbackService(
+		feedbackStorage,
+		{
+			async send(payload) {
+				const endpoint = vscode.workspace.getConfiguration('covexcode').get<string>('feedback.endpoint', '').trim();
+				if (!endpoint) {
+					throw new Error('covexcode.feedback.endpoint is empty');
+				}
+				await postFeedbackJson(endpoint, payload);
+			},
+		},
+	);
+	const feedbackEnabled = (): boolean => {
+		const telemetry = vscode.workspace.getConfiguration('telemetry');
+		return shouldSendFeedback(
+			telemetry.get<string>('telemetryLevel', 'off'),
+			telemetry.get<boolean>('feedback.enabled', true),
+		);
+	};
+	const showRejectFeedbackFor = (request: RequestPermissionRequest, toolCallId: string, files: string[]): void => {
+		if (!feedbackEnabled()) {
+			return;
+		}
+		const model = sessionModel ?? '';
+		const knownModel = COVEXCODE_MODELS.find(candidate => candidate.id === model);
+		const provider = (knownModel?.provider ?? vscode.workspace.getConfiguration('covexcode').get<string>('provider', '')).trim();
+		showRejectFeedback(
+			{
+				sessionId: request.sessionId,
+				toolCallId,
+				files,
+				model,
+				provider,
+				turnId: () => activeTurnId,
+			},
+			feedback => {
+				if (!feedbackEnabled()) {
+					return;
+				}
+				void feedbackService.submit(buildFeedbackPayload({
+					type: 'reject',
+					feedback,
+					sessionId: request.sessionId,
+					turnId: activeTurnId,
+					files,
+					model,
+					provider,
+					ideVersion: vscode.version,
+				})).catch(() => {});
+			},
+		);
+	};
+	// General feedback opened by the `/feedback` slash command. Shares the same
+	// window, queue, and sender as reject feedback (see feedbackUi.ts).
+	const openGeneralFeedback = (prefill: string): void => {
+		const model = sessionModel ?? '';
+		const knownModel = COVEXCODE_MODELS.find(candidate => candidate.id === model);
+		const provider = (knownModel?.provider ?? vscode.workspace.getConfiguration('covexcode').get<string>('provider', '')).trim();
+		showFeedbackWindow({
+			mode: 'general',
+			heading: 'Tell us what you think about Covexcode',
+			placeholder: 'Tell us what you think about Covexcode',
+			prefill,
+			onSubmit: feedback => {
+				if (!feedbackEnabled()) {
+					return;
+				}
+				void feedbackService.submit(buildFeedbackPayload({
+					type: 'general',
+					feedback,
+					model,
+					provider,
+					ideVersion: vscode.version,
+					os: feedbackOs(),
+				})).catch(() => {});
+				// Brief, non-modal confirmation. A queued/failed send never shows
+				// an error -- the queue retries silently.
+				vscode.window.setStatusBarMessage('Thanks for the feedback', 3000);
+			},
+		});
+	};
+	if (feedbackEnabled()) {
+		void feedbackService.flush().catch(() => {});
+	}
 
 	const diffContentProvider = new DiffContentProvider();
 	context.subscriptions.push(
@@ -891,6 +985,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	void refreshFrameworkSurfaces();
 
 	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
+		activeTurnId = '';
 		if (!vscode.workspace.isTrusted) {
 			stream.markdown(restrictedModeMarkdown());
 			return;
@@ -919,6 +1014,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (request.command === 'mode') {
 			const next = await togglePermissionMode();
 			stream.markdown(permissionModeMarkdown(next));
+			return;
+		}
+		if (request.command === 'feedback') {
+			if (!feedbackEnabled()) {
+				stream.markdown('Feedback is turned off in settings.');
+				return;
+			}
+			openGeneralFeedback(request.prompt);
 			return;
 		}
 
@@ -1019,7 +1122,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd).then(respond);
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor).then(respond);
 			} else {
 				respond({ outcome: 'cancelled' });
 			}
@@ -1075,6 +1178,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			// can't leave the shared session in a stale mode (`mode` is per-turn,
 			// but covexcode keeps the last value when the field is omitted).
 			const turnResult = await activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			activeTurnId = String(turnResult.turn);
 			// A turn stopped by the tool-step limit or the output cap used to
 			// look like the agent simply stopped after its last step. Say which
 			// limit was hit and how to continue.
@@ -2472,6 +2576,7 @@ async function askPermission(
 	stream: vscode.ChatResponseStream,
 	permissionGate: PermissionGate,
 	cwd: string,
+	onReject: (request: RequestPermissionRequest, toolCallId: string, files: string[]) => void,
 ): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
@@ -2481,6 +2586,7 @@ async function askPermission(
 
 	const diff = request.toolCall.content;
 	const hunks = diff?.type === 'diff' && diff.hunks && diff.hunks.length > 0 ? diff.hunks : undefined;
+	const affectedFiles = diff?.type === 'diff' && diff.path ? [diff.path] : [];
 	if (diff?.type === 'diff') {
 		await showDiff(diff, diffContentProvider, cwd);
 	}
@@ -2542,6 +2648,10 @@ async function askPermission(
 		pushToolInvocation(toolCallId, toolTitle, 'plan', 'completed', stream);
 	} else {
 		pushToolInvocation(toolCallId, toolTitle, pending.kind, 'pending', stream);
+	}
+
+	if (answer.choice === 'reject') {
+		onReject(request, toolCallId, affectedFiles);
 	}
 
 	return permissionOutcomeFromGate(answer, allow, reject);
