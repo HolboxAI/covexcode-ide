@@ -19,6 +19,7 @@ export const IDE_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{ name: '/rollback', description: 'undo every file the session wrote' },
 	{ name: '/doctor', description: "check this install's health" },
 	{ name: '/help', description: 'list every slash command' },
+	{ name: '/feedback', description: 'Send feedback about Covexcode' },
 ];
 
 /** The `/help` readout, generated from the list so it can't drift. */
