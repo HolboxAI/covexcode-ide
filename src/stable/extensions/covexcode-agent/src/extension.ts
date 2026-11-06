@@ -121,7 +121,7 @@ import {
 	resolveModelDescriptor,
 	secretKeyForProvider,
 } from './models';
-import { buildFeedbackPayload, FeedbackService, feedbackOs, postFeedbackJson, shouldSendFeedback, type FeedbackStorage } from './feedbackService';
+import { buildFeedbackPayload, DEFAULT_FEEDBACK_ENDPOINT, FeedbackService, feedbackOs, postFeedbackJson, shouldSendFeedback, type FeedbackStorage } from './feedbackService';
 import { showFeedbackWindow, showRejectFeedback } from './feedbackUi';
 
 const PARTICIPANT_ID = 'covexcode.agent';
@@ -420,7 +420,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	// of over-eager behavior the auto-open feature needs to avoid. See
 	// renderUpdate's own doc comment on this whole mechanism.
 	const openedDevServerUrls = new Set<string>();
-	// Reject feedback is queued locally until covexcode.feedback.endpoint is set.
+	// Feedback goes to covexcode.com by default; clearing
+	// `covexcode.feedback.endpoint` falls back to a local queue.
 	// `activeTurnId` is only known once the ACP turn completes, so the feedback
 	// window reads it lazily at submit time rather than at reject time.
 	let activeTurnId = '';
@@ -432,7 +433,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		feedbackStorage,
 		{
 			async send(payload) {
-				const endpoint = vscode.workspace.getConfiguration('covexcode').get<string>('feedback.endpoint', '').trim();
+				const endpoint = vscode.workspace.getConfiguration('covexcode').get<string>('feedback.endpoint', DEFAULT_FEEDBACK_ENDPOINT).trim();
 				if (!endpoint) {
 					throw new Error('covexcode.feedback.endpoint is empty');
 				}

@@ -7,15 +7,14 @@ import { randomUUID } from 'node:crypto';
 /**
  * Reject/general feedback submission.
  *
- * The covexcode.com endpoint does not exist yet, so the IDE side is built
- * behind a small interface and every payload that cannot be posted is queued
- * locally (capped, oldest-first) instead of lost. This module deliberately
- * has no `vscode` import so the limit/queue/retry logic can be unit tested
- * directly.
+ * Feedback posts to `https://covexcode.com/api/feedback`, which stores the
+ * submission for the admin feedback page. Any payload that cannot be posted
+ * is queued locally (capped, oldest-first) and retried, so a network outage
+ * cannot lose it. This module deliberately has no `vscode` import so the
+ * limit/queue/retry logic can be unit tested directly.
  *
- * TODO(covexcode.com): build the matching HTTPS endpoint. The client sends a
- * single JSON object as the POST body with `Content-Type: application/json`.
- * `type` tells the two payloads apart:
+ * The client sends a single JSON object as the POST body with
+ * `Content-Type: application/json`. `type` tells the two payloads apart:
  *
  *   reject:
  *   {
@@ -52,6 +51,9 @@ export const FEEDBACK_MAX_LENGTH = 10_000;
 export const FEEDBACK_QUEUE_KEY = 'covexcode.feedback.queue.v1';
 export const FEEDBACK_QUEUE_MAX_ITEMS = 20;
 export const FEEDBACK_POST_TIMEOUT_MS = 5_000;
+
+/** Where feedback goes unless `covexcode.feedback.endpoint` overrides it. */
+export const DEFAULT_FEEDBACK_ENDPOINT = 'https://covexcode.com/api/feedback';
 
 export type FeedbackType = 'general' | 'reject';
 export type FeedbackOs = 'darwin' | 'win32' | 'linux';

@@ -58,7 +58,7 @@ By default, we keep the preference `telemetry.feedback.enabled` enabled. It's us
 
 ### Feedback endpoint
 
-The `covexcode-agent` extension can show an optional feedback window when a user rejects an agent permission request, and a general window via the `/feedback` slash command. Sending is gated by `telemetry.telemetryLevel` (not `off`) and `telemetry.feedback.enabled`, and the endpoint is configured with `covexcode.feedback.endpoint` (empty by default).
+The `covexcode-agent` extension can show an optional feedback window when a user rejects an agent permission request, and a general window via the `/feedback` slash command. Sending is gated by `telemetry.telemetryLevel` (not `off`) and `telemetry.feedback.enabled`, and the endpoint defaults to `https://covexcode.com/api/feedback` (`covexcode.feedback.endpoint`).
 
 When the endpoint is empty or the POST fails, the payload is queued in extension storage (capped, oldest dropped) and retried on next startup or next submit — never shown as an error. The endpoint should accept a single JSON POST body with `Content-Type: application/json`; `type` tells the two payloads apart:
 

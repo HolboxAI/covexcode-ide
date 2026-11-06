@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {
 	buildFeedbackPayload,
+	DEFAULT_FEEDBACK_ENDPOINT,
 	FEEDBACK_MAX_LENGTH,
 	FEEDBACK_QUEUE_MAX_ITEMS,
 	feedbackForSubmission,
@@ -79,6 +80,10 @@ function fakeTransport(): FeedbackTransport & { sent: FeedbackPayload[]; fail: b
 	};
 	return transport;
 }
+
+test('the default endpoint is the covexcode feedback route', () => {
+	assert.equal(DEFAULT_FEEDBACK_ENDPOINT, 'https://covexcode.com/api/feedback');
+});
 
 test('normalizeFeedback trims and enforces the 10000-char limit', () => {
 	assert.equal(normalizeFeedback('  keep me  '), 'keep me');
