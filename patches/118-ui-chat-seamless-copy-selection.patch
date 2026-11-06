@@ -1,7 +1,7 @@
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4605,3 +4605,21 @@
+@@ -4605,6 +4605,25 @@
  .interactive-session .interactive-input-part
  	.chat-attached-context
  	.chat-attached-context-attachment.image-attachment:hover
