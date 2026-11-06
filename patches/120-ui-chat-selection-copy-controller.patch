@@ -1,0 +1,350 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts b/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
+index f90f3a9..1b414d2 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
+@@ -210,6 +210,9 @@ function upvoteAnimationSettingToEnum(value: string | undefined): ClickAnimation
+ }
+ 
+ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<ChatTreeItem, FuzzyScore, IChatListItemTemplate> {
++
++	readonly rowItemMap = new WeakMap<HTMLElement, ChatTreeItem>();
++	readonly itemRowMap = new WeakMap<ChatTreeItem, HTMLElement>();
+ 	static readonly ID = 'item';
+ 
+ 	private readonly codeBlocksByResponseId = new Map<string, IChatCodeBlockInfo[]>();
+@@ -697,6 +700,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
+ 	}
+ 
+ 	renderElement(node: ITreeNode<ChatTreeItem, FuzzyScore>, index: number, templateData: IChatListItemTemplate, details?: IListElementRenderDetails): void {
++		const row = templateData.rowContainer.closest('.monaco-list-row') as HTMLElement | null;
++		if (row) {
++			this.rowItemMap.set(row, node.element);
++		}
++		this.itemRowMap.set(node.element, templateData.rowContainer);
+ 		templateData.allocatedHeight = details?.height;
+ 		this._elementBeingRendered = node.element;
+ 		try {
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatListWidget.ts b/src/vs/workbench/contrib/chat/browser/widget/chatListWidget.ts
+index ca65a77..3ef839a 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatListWidget.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatListWidget.ts
+@@ -34,6 +34,7 @@ import { CodeBlockPart } from './chatContentParts/codeBlockPart.js';
+ import { ChatListDelegate, ChatListItemRenderer, IChatListItemTemplate, IChatRendererDelegate } from './chatListRenderer.js';
+ import { ChatEditorOptions } from './chatOptions.js';
+ import { ChatPendingDragController } from './chatPendingDragAndDrop.js';
++import { ChatSelectionCopyController } from './chatSelectionCopyController.js';
+ 
+ export interface IChatListWidgetStyles {
+ 	listForeground?: string;
+@@ -177,6 +178,7 @@ export class ChatListWidget extends Disposable {
+ 
+ 	private readonly _tree: WorkbenchObjectTree<ChatTreeItem, FuzzyScore>;
+ 	private readonly _renderer: ChatListItemRenderer;
++	private readonly _selectionCopyController: ChatSelectionCopyController;
+ 
+ 	private _viewModel: IChatViewModel | undefined;
+ 	private _visible = true;
+@@ -400,6 +402,15 @@ export class ChatListWidget extends Disposable {
+ 			}
+ 		));
+ 
++		this._selectionCopyController = this._register(
++			scopedInstantiationService.createInstance(
++				ChatSelectionCopyController,
++				() => this._viewModel,
++				this._tree.getHTMLElement(),
++				this._renderer
++			)
++		);
++
+ 		// Create scroll-down button
+ 		this._scrollDownButton = this._register(new Button(this._container, {
+ 			buttonBackground: asCssVariable(buttonSecondaryBackground),
+@@ -513,6 +524,7 @@ export class ChatListWidget extends Disposable {
+ 	 */
+ 	setViewModel(viewModel: IChatViewModel | undefined): void {
+ 		this._viewModel = viewModel;
++		this._selectionCopyController?.onDidChangeViewModel();
+ 		this._renderer.updateViewModel(viewModel);
+ 	}
+ 
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatSelectionCopyController.ts b/src/vs/workbench/contrib/chat/browser/widget/chatSelectionCopyController.ts
+new file mode 100644
+index 0000000..7aaeef2
+--- /dev/null
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatSelectionCopyController.ts
+@@ -0,0 +1,274 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) Microsoft Corporation. All rights reserved.
++ *  Licensed under the MIT License. See License.txt in the project root for license information.
++ *--------------------------------------------------------------------------------------------*/
++
++import * as dom from '../../../../../base/browser/dom.js';
++import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
++import { IChatRequestViewModel, IChatResponseViewModel, IChatViewModel, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
++import { ChatTreeItem } from '../chat.js';
++import { stringifyItem } from '../actions/chatActions.js';
++import type { ChatListItemRenderer } from './chatListRenderer.js';
++
++export class ChatSelectionCopyController extends Disposable {
++	private trackedAnchorItem: ChatTreeItem | undefined;
++	private trackedFocusItem: ChatTreeItem | undefined;
++	private caretItem: ChatTreeItem | undefined;
++	private isMouseDown = false;
++	private selectAllActive = false;
++
++	constructor(
++		private readonly getViewModel: () => IChatViewModel | undefined,
++		private readonly treeDomNode: HTMLElement,
++		private readonly renderer: ChatListItemRenderer,
++	) {
++		super();
++		this.registerListeners();
++	}
++
++	private get rowsContainer(): HTMLElement | null {
++		return this.treeDomNode.querySelector<HTMLElement>('.monaco-list-rows');
++	}
++
++	private registerListeners(): void {
++		const store = this._register(new DisposableStore());
++		const win = dom.getWindow(this.treeDomNode);
++
++		store.add(dom.addDisposableListener(this.treeDomNode, 'mousedown', (e: MouseEvent) => {
++			if (e.button !== 0) {
++				return;
++			}
++			this.isMouseDown = true;
++			this.selectAllActive = false;
++
++			const target = e.target as HTMLElement | null;
++			if (!target || target.closest('button, a, input, textarea, .monaco-toolbar, .monaco-editor')) {
++				this.clearTrackedState();
++				return;
++			}
++
++			const clickedItem = this.itemFromElement(target);
++			if (e.shiftKey && this.caretItem) {
++				this.trackedAnchorItem = this.caretItem;
++				this.trackedFocusItem = clickedItem;
++			} else {
++				this.trackedAnchorItem = clickedItem;
++				this.trackedFocusItem = clickedItem;
++			}
++		}));
++
++		const handleMouseRelease = () => {
++			this.isMouseDown = false;
++			const sel = win.getSelection();
++			if (sel?.isCollapsed) {
++				if (this.trackedAnchorItem) {
++					this.caretItem = this.trackedAnchorItem;
++				}
++				this.clearTrackedState();
++			}
++		};
++
++		store.add(dom.addDisposableListener(win, 'mouseup', handleMouseRelease));
++		store.add(dom.addDisposableListener(win, 'blur', handleMouseRelease));
++		store.add(dom.addDisposableListener(win, 'dragend', handleMouseRelease));
++		store.add(dom.addDisposableListener(win, 'pointercancel', handleMouseRelease));
++
++		store.add(dom.addDisposableListener(win.document, 'selectionchange', () => {
++			const sel = win.getSelection();
++			if (!sel) {
++				return;
++			}
++
++			const isInsideTree = (node: Node | null) => !!node && this.treeDomNode.contains(node);
++			if (!isInsideTree(sel.anchorNode) && !isInsideTree(sel.focusNode)) {
++				this.caretItem = undefined;
++				return;
++			}
++
++			if (!sel.isCollapsed && sel.focusNode) {
++				const isForward = !!sel.anchorNode && !!(sel.anchorNode.compareDocumentPosition(sel.focusNode) & Node.DOCUMENT_POSITION_FOLLOWING);
++				const el = this.boundaryToElement(sel.focusNode, sel.focusOffset, isForward);
++				const item = this.itemFromElement(el);
++				if (item) {
++					this.trackedFocusItem = item;
++				}
++			} else if (!this.isMouseDown && sel.isCollapsed) {
++				this.clearTrackedState();
++				this.selectAllActive = false;
++			}
++		}));
++
++		store.add(dom.addDisposableListener(this.treeDomNode, 'copy', (e: ClipboardEvent) => {
++			this.handleCopy(e, win);
++		}));
++	}
++
++	public onDidChangeViewModel(): void {
++		this.clearTrackedState();
++		this.caretItem = undefined;
++		this.selectAllActive = false;
++	}
++
++	public triggerSelectAll(): void {
++		const win = dom.getWindow(this.treeDomNode);
++		const sel = win.getSelection();
++		const rows = this.rowsContainer;
++		if (sel && rows) {
++			sel.selectAllChildren(rows);
++			this.selectAllActive = true;
++		}
++	}
++
++	private handleCopy(e: ClipboardEvent, win: Window): void {
++		const target = e.target as HTMLElement | null;
++		if (target?.closest('.monaco-editor, textarea, input')) {
++			return;
++		}
++
++		const viewModel = this.getViewModel();
++		const allItems = viewModel?.getItems() ?? [];
++		if (allItems.length === 0) {
++			return;
++		}
++
++		const sel = win.getSelection();
++		if (!sel || sel.rangeCount === 0) {
++			return;
++		}
++		const range = sel.getRangeAt(0);
++		const rows = this.rowsContainer;
++
++		const isLiveSelectAll = this.selectAllActive && !!rows && (
++			range.startContainer === rows &&
++			range.startOffset === 0 &&
++			range.endContainer === rows &&
++			range.endOffset >= rows.childNodes.length - 1
++		);
++
++		if (isLiveSelectAll) {
++			try {
++				const payload = allItems
++					.filter((item): item is (IChatRequestViewModel | IChatResponseViewModel) => isRequestVM(item) || (isResponseVM(item) && !item.errorDetails?.responseIsFiltered))
++					.map(item => stringifyItem(item, true))
++					.filter(Boolean)
++					.join('\n\n');
++
++				if (payload) {
++					e.preventDefault();
++					e.clipboardData?.setData('text/plain', payload);
++				}
++			} catch (err) {
++				console.error('[ChatCopyController] Select-all serialization failed:', err);
++			}
++			return;
++		}
++
++		if (sel.isCollapsed) {
++			return;
++		}
++
++		const startEl = this.boundaryToElement(range.startContainer, range.startOffset, false);
++		const endEl = this.boundaryToElement(range.endContainer, range.endOffset, true);
++
++		const startItem = this.trackedAnchorItem ?? this.itemFromElement(startEl);
++		const endItem = this.trackedFocusItem ?? this.itemFromElement(endEl);
++
++		if (!startItem || !endItem || startItem === endItem) {
++			return;
++		}
++
++		const indexA = allItems.indexOf(startItem);
++		const indexB = allItems.indexOf(endItem);
++		if (indexA === -1 || indexB === -1) {
++			return;
++		}
++
++		const firstIdx = Math.min(indexA, indexB);
++		const lastIdx = Math.max(indexA, indexB);
++
++		try {
++			const chunks: string[] = [];
++			for (let i = firstIdx; i <= lastIdx; i++) {
++				const item = allItems[i];
++				if (isResponseVM(item) && item.errorDetails?.responseIsFiltered) {
++					continue;
++				}
++
++				const isStartEdge = (i === firstIdx);
++				const isEndEdge = (i === lastIdx);
++
++				if (isStartEdge || isEndEdge) {
++					const rowEl = this.renderer.itemRowMap.get(item);
++					const hasIntersectingCodeBlock = rowEl
++						? Array.from(rowEl.querySelectorAll<HTMLElement>('.monaco-editor')).some(ed => range.intersectsNode(ed))
++						: false;
++
++					const boundaryNode = isStartEdge ? range.startContainer : range.endContainer;
++					if (!rowEl || !rowEl.contains(boundaryNode) || hasIntersectingCodeBlock) {
++						chunks.push(stringifyItem(item as any, true));
++					} else {
++						const rawEdgeText = this.extractEdgeText(range, rowEl, isStartEdge ? 'start' : 'end');
++						chunks.push(this.formatTurnChunk(item, rawEdgeText));
++					}
++				} else {
++					chunks.push(stringifyItem(item as any, true));
++				}
++			}
++
++			const payload = chunks.filter(Boolean).join('\n\n');
++			if (payload) {
++				e.preventDefault();
++				e.clipboardData?.setData('text/plain', payload);
++			}
++		} catch (err) {
++			console.error('[ChatCopyController] Multi-turn serialization failed:', err);
++		}
++	}
++
++	private extractEdgeText(range: Range, rowEl: HTMLElement, side: 'start' | 'end'): string {
++		const edgeRange = range.cloneRange();
++		if (side === 'start') {
++			edgeRange.setEnd(rowEl, rowEl.childNodes.length);
++		} else {
++			edgeRange.setStart(rowEl, 0);
++		}
++
++		const fragment = edgeRange.cloneContents();
++		fragment.querySelectorAll('.monaco-toolbar, .chat-item-actions, .sr-only, .codicon').forEach(el => el.remove());
++		fragment.querySelectorAll('p, li, div, h1, h2, h3, h4, h5, h6, pre, br').forEach(el => el.after('\n'));
++
++		return (fragment.textContent || '').trim();
++	}
++
++	private formatTurnChunk(item: ChatTreeItem, text: string): string {
++		if (!text) return '';
++		const username = (isRequestVM(item) || isResponseVM(item)) && item.username ? `${item.username}: ` : '';
++		return `${username}${text}`;
++	}
++
++	private boundaryToElement(node: Node, offset: number, isEnd: boolean): Element | null {
++		if (node.nodeType === Node.ELEMENT_NODE) {
++			const el = node as HTMLElement;
++			const targetOffset = isEnd ? offset - 1 : offset;
++			if (targetOffset < 0) {
++				return (el.previousElementSibling as HTMLElement | null)?.lastElementChild ?? el.previousElementSibling ?? el;
++			}
++			if (targetOffset >= el.childNodes.length) {
++				return (el.lastElementChild as HTMLElement | null) ?? el;
++			}
++			const child = el.childNodes[targetOffset];
++			return (child instanceof Element) ? child : child?.parentElement ?? el;
++		}
++		return node.parentElement;
++	}
++
++	private itemFromElement(el: Element | null): ChatTreeItem | undefined {
++		const row = el?.closest('.monaco-list-row') as HTMLElement | null;
++		return row ? this.renderer.rowItemMap.get(row) : undefined;
++	}
++
++	private clearTrackedState(): void {
++		this.trackedAnchorItem = undefined;
++		this.trackedFocusItem = undefined;
++	}
++}
