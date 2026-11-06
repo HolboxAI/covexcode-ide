@@ -226,9 +226,9 @@
         },
         "covexcode.feedback.endpoint": {
           "type": "string",
-          "default": "",
+          "default": "https://covexcode.com/api/feedback",
           "order": 9,
-          "markdownDescription": "HTTPS endpoint that receives optional reject-feedback as a JSON POST. Leave empty to queue feedback locally until an endpoint is configured. See `feedbackService.ts` in the covexcode-agent extension for the request shape."
+          "markdownDescription": "HTTPS endpoint that receives optional reject-feedback as a JSON POST. Defaults to `https://covexcode.com/api/feedback`; set it to empty or a custom URL to change where feedback goes. See `feedbackService.ts` in the covexcode-agent extension for the request shape."
         }
       }
     }
