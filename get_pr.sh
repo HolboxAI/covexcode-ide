@@ -12,7 +12,9 @@ if [[ -n "${PULL_REQUEST_ID}" ]]; then
 
   git config --global user.email "$( echo "${GITHUB_USERNAME}" | awk '{print tolower($0)}' )-ci@not-real.com"
   git config --global user.name "${GITHUB_USERNAME} CI"
-  git fetch --unshallow
+  if [[ "$( git rev-parse --is-shallow-repository 2>/dev/null )" == "true" ]]; then
+    git fetch --unshallow
+  fi
   git fetch origin "pull/${PULL_REQUEST_ID}/head"
   git checkout FETCH_HEAD
   git merge --no-edit "origin/${BRANCH_NAME}"
