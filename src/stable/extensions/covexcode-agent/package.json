@@ -141,8 +141,23 @@
         "command": "covexcode.togglePermissionMode",
         "title": "covexcode: Toggle Permission Mode (Auto / Manual)",
         "category": "covexcode"
+      },
+      {
+        "command": "covexcode.chat.copyAll",
+        "title": "Copy Conversation",
+        "category": "covexcode",
+        "icon": "$(copy)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "covexcode.chat.copyAll",
+          "when": "view == 'workbench.panel.chat.view'",
+          "group": "navigation@1"
+        }
+      ]
+    },
     "authentication": [
       {
         "id": "covexcode",
