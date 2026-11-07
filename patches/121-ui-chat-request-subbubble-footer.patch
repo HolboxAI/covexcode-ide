@@ -30,10 +30,15 @@ index 9a15ccd..17f47af 100644
  			]
  		});
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts b/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
-index 1b414d2..e9b12a1 100644
+index 1b414d2..0f1acbc 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
 +++ b/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
-@@ -14,6 +14,7 @@ import { ITreeNode, ITreeRenderer } from '../../../../../base/browser/ui/tree/tr
+@@ -10,10 +10,12 @@ import { IActionViewItemOptions } from '../../../../../base/browser/ui/actionbar
+ import { alert } from '../../../../../base/browser/ui/aria/aria.js';
+ import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
+ import { CachedListVirtualDelegate, IListElementRenderDetails } from '../../../../../base/browser/ui/list/list.js';
++import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
+ import { ITreeNode, ITreeRenderer } from '../../../../../base/browser/ui/tree/tree.js';
  import { IAction } from '../../../../../base/common/actions.js';
  import { coalesce, distinct } from '../../../../../base/common/arrays.js';
  import { Codicon } from '../../../../../base/common/codicons.js';
@@ -41,7 +46,7 @@ index 1b414d2..e9b12a1 100644
  import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
  import { canceledName } from '../../../../../base/common/errors.js';
  import { Emitter, Event } from '../../../../../base/common/event.js';
-@@ -143,6 +144,8 @@ export interface IChatListItemTemplate {
+@@ -143,6 +145,8 @@ export interface IChatListItemTemplate {
  	/** Height allocated by the list for the currently rendered row. */
  	allocatedHeight?: number;
  	readonly titleToolbar?: MenuWorkbenchToolBar;
@@ -50,23 +55,73 @@ index 1b414d2..e9b12a1 100644
  	readonly header?: HTMLElement;
  	readonly footerToolbar: MenuWorkbenchToolBar;
  	readonly footerDetailsContainer: HTMLElement;
-@@ -543,11 +546,14 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
+@@ -209,6 +213,22 @@ function upvoteAnimationSettingToEnum(value: string | undefined): ClickAnimation
+ 	}
+ }
+ 
++function formatAntigravityDate(ts: number): string {
++	const d = new Date(ts);
++	const day = d.getDate();
++	const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
++	const month = months[d.getMonth()];
++	const year = d.getFullYear();
++	let hours = d.getHours();
++	const minutes = String(d.getMinutes()).padStart(2, '0');
++	const ampm = hours >= 12 ? 'pm' : 'am';
++	hours = hours % 12;
++	if (hours === 0) {
++		hours = 12;
++	}
++	return `${day} ${month} ${year} at ${hours}:${minutes}${ampm}`;
++}
++
+ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<ChatTreeItem, FuzzyScore, IChatListItemTemplate> {
+ 
+ 	readonly rowItemMap = new WeakMap<HTMLElement, ChatTreeItem>();
+@@ -543,19 +563,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
  		const scopedInstantiationService = templateDisposables.add(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, contextKeyService])));
  
  		const requestHover = dom.append(rowContainer, $('.request-hover'));
+-		let titleToolbar: MenuWorkbenchToolBar | undefined;
+-		if (this.rendererOptions.noHeader) {
+-			header.classList.add('hidden');
+-		} else {
+-			titleToolbar = templateDisposables.add(scopedInstantiationService.createInstance(MenuWorkbenchToolBar, requestHover, MenuId.ChatMessageTitle, {
+-				menuOptions: {
+-					shouldForwardArgs: true
+-				},
+-				toolbarOptions: {
+-					shouldInlineSubmenu: submenu => submenu.actions.length <= 1
+-				},
+-			}));
+-		}
+ 		this.hoverHidden(requestHover);
+ 
+ 		const checkpointContainer = dom.append(rowContainer, $('.checkpoint-container'));
+@@ -587,6 +594,22 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
+ 		const detail = dom.append(detailContainer, $('span.detail'));
+ 		dom.append(detailContainer, $('span.chat-animated-ellipsis'));
+ 		const value = dom.append(valueParent, $('.value'));
 +		const requestFooter = dom.append(rowContainer, $('.chat-request-footer'));
 +		const requestTimestamp = dom.append(requestFooter, $('span.chat-request-timestamp'));
 +		const requestActions = dom.append(requestFooter, $('.chat-request-actions'));
- 		let titleToolbar: MenuWorkbenchToolBar | undefined;
- 		if (this.rendererOptions.noHeader) {
- 			header.classList.add('hidden');
- 		} else {
--			titleToolbar = templateDisposables.add(scopedInstantiationService.createInstance(MenuWorkbenchToolBar, requestHover, MenuId.ChatMessageTitle, {
++		let titleToolbar: MenuWorkbenchToolBar | undefined;
++		if (this.rendererOptions.noHeader) {
++			header.classList.add('hidden');
++		} else {
 +			titleToolbar = templateDisposables.add(scopedInstantiationService.createInstance(MenuWorkbenchToolBar, requestActions, MenuId.ChatMessageTitle, {
- 				menuOptions: {
- 					shouldForwardArgs: true
- 				},
-@@ -660,7 +666,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
++				menuOptions: {
++					shouldForwardArgs: true
++				},
++				toolbarOptions: {
++					shouldInlineSubmenu: submenu => submenu.actions.length <= 1
++				},
++			}));
++		}
+ 		const elementDisposables = templateDisposables.add(new DisposableStore());
+ 
+ 		const footerToolbarContainer = dom.append(rowContainer, $('.chat-footer-toolbar'));
+@@ -660,7 +683,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
  		}));
  		const connectionObserver = document.createElement('connection-observer') as dom.ConnectionObserverElement;
  		dom.append(container, connectionObserver);
@@ -75,7 +130,7 @@ index 1b414d2..e9b12a1 100644
  
  		connectionObserver.onDidDisconnect = () => {
  			template.renderedPartsMounted = false;
-@@ -835,6 +841,26 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
+@@ -835,6 +858,27 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
  		templateData.avatarContainer.classList.toggle('hidden', hideChatUserIdentity);
  
  		this.hoverHidden(templateData.requestHover);
@@ -93,7 +148,8 @@ index 1b414d2..e9b12a1 100644
 +				templateData.elementDisposables.add(this.hoverService.setupManagedHover(
 +					getDefaultHoverDelegate('element'),
 +					templateData.requestTimestamp,
-+					() => new Date(element.timestamp).toLocaleString()
++					() => formatAntigravityDate(element.timestamp),
++					{ position: { hoverPosition: HoverPosition.BELOW } }
 +				));
 +			}
 +		} else {
@@ -102,24 +158,11 @@ index 1b414d2..e9b12a1 100644
  		dom.clearNode(templateData.detail);
  		if (isResponseVM(element)) {
  			this.renderDetail(element, templateData);
-@@ -3325,7 +3351,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
- 					e.stopPropagation();
- 					this._onDidClickRequest.fire(templateData);
- 				}));
--				markdownPart.addDisposable(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), markdownPart.domNode, localize('requestMarkdownPartTitle', "Click to Edit"), { trapFocus: true }));
-+				markdownPart.addDisposable(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), markdownPart.domNode, () => {
-+					const rel = fromNow(element.timestamp, true);
-+					const relStr = rel === 'now' ? 'just now' : rel;
-+					return `${relStr} \u00B7 ${new Date(element.timestamp).toLocaleString()}`;
-+				}, { trapFocus: true }));
- 			}
- 			markdownPart.addDisposable(dom.addDisposableListener(markdownPart.domNode, dom.EventType.FOCUS, () => {
- 				this.hoverVisible(templateData.requestHover);
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-index abbb8e4..e6934af 100644
+index abbb8e4..ff4f9f3 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4381,3 +4381,103 @@ have to be updated for changes to the rules above, or to support more deeply nes
+@@ -4381,3 +4381,104 @@ have to be updated for changes to the rules above, or to support more deeply nes
  .chat-input-container .chat-input-toolbars .codicon-debug-disconnect {
  	color: var(--vscode-charts-green, #3fb950) !important;
  }
@@ -132,6 +175,7 @@ index abbb8e4..e6934af 100644
 +	gap: 6px;
 +	margin-top: 2px;
 +	margin-right: 4px;
++	order: 999;
 +	opacity: 0;
 +	transition: opacity 120ms ease-in-out;
 +	user-select: none;
