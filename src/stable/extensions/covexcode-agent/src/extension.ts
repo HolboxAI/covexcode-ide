@@ -1388,6 +1388,23 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 
 	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.getTurnChanges', async (turn?: number) => {
+			if (!client || !sessionId) {
+				return [];
+			}
+			try {
+				const { changes } = await client.listChanges(sessionId);
+				if (turn === undefined) {
+					return changes.filter(c => c.action !== 'blocked');
+				}
+				return changes.filter(c => c.turn >= turn && c.action !== 'blocked');
+			} catch {
+				return [];
+			}
+		}),
+	);
+
+	context.subscriptions.push(
 		// Closes a real gap: before this, a mistyped API key (or a switch to
 		// a different provider) had no in-product fix -- `ensureCredentials`
 		// only re-prompts when a value is *missing*, never when it's wrong,

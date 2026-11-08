@@ -276,3 +276,209 @@ index abbb8e4..ff4f9f3 100644
 +	opacity: 1;
 +	transform: scale(1);
 +}
+
++/* Antigravity-style in-chat Confirm Undo modal */
++.chat-confirm-undo-backdrop {
++	position: absolute;
++	inset: 0;
++	z-index: 1000;
++	display: flex;
++	align-items: center;
++	justify-content: center;
++	background: rgba(0, 0, 0, 0.6);
++	backdrop-filter: blur(3px);
++	-webkit-backdrop-filter: blur(3px);
++	padding: 16px;
++	box-sizing: border-box;
++	animation: confirmUndoFadeIn 100ms ease;
++}
++
++@keyframes confirmUndoFadeIn {
++	from { opacity: 0; }
++	to { opacity: 1; }
++}
++
++.chat-confirm-undo-card {
++	width: 100%;
++	max-width: 380px;
++	min-width: 260px;
++	background: var(--vscode-editorWidget-background, #18181b);
++	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
++	border-radius: 12px;
++	padding: 18px 20px;
++	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
++	display: flex;
++	flex-direction: column;
++	gap: 12px;
++	color: var(--vscode-foreground, #f4f4f5);
++	box-sizing: border-box;
++	animation: confirmUndoCardIn 120ms cubic-bezier(0.16, 1, 0.3, 1);
++}
++
++@keyframes confirmUndoCardIn {
++	from { opacity: 0; transform: scale(0.96) translateY(-4px); }
++	to { opacity: 1; transform: scale(1) translateY(0); }
++}
++
++.chat-confirm-undo-card .confirm-undo-header {
++	display: flex;
++	align-items: center;
++	justify-content: space-between;
++}
++
++.chat-confirm-undo-card .confirm-undo-title {
++	font-size: 16px;
++	font-weight: 600;
++	color: var(--vscode-foreground, #ffffff);
++}
++
++.chat-confirm-undo-card .confirm-undo-close {
++	background: transparent;
++	border: none;
++	color: var(--vscode-descriptionForeground, #a1a1aa);
++	cursor: pointer;
++	font-size: 16px;
++	padding: 4px;
++	display: flex;
++	align-items: center;
++	justify-content: center;
++	border-radius: 4px;
++}
++
++.chat-confirm-undo-card .confirm-undo-close:hover {
++	color: var(--vscode-foreground, #ffffff);
++	background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
++}
++
++.chat-confirm-undo-card .confirm-undo-subtitle {
++	font-size: 13px;
++	color: var(--vscode-descriptionForeground, #a1a1aa);
++	line-height: 1.4;
++}
++
++.chat-confirm-undo-card .confirm-undo-checkbox-row {
++	display: flex;
++	align-items: center;
++	gap: 8px;
++	font-size: 13px;
++	font-weight: 500;
++	cursor: pointer;
++	user-select: none;
++	color: var(--vscode-foreground, #ffffff);
++	margin-top: 2px;
++}
++
++.chat-confirm-undo-card .confirm-undo-checkbox {
++	appearance: none;
++	-webkit-appearance: none;
++	width: 16px;
++	height: 16px;
++	border-radius: 4px;
++	border: 1px solid var(--vscode-checkbox-border, #3b82f6);
++	background-color: var(--vscode-checkbox-background, #0284c7);
++	display: grid;
++	place-content: center;
++	cursor: pointer;
++	margin: 0;
++}
++
++.chat-confirm-undo-card .confirm-undo-checkbox:checked::before {
++	content: "";
++	width: 9px;
++	height: 5px;
++	border-left: 2px solid #ffffff;
++	border-bottom: 2px solid #ffffff;
++	transform: rotate(-45deg) translate(1px, -1px);
++}
++
++.chat-confirm-undo-card .confirm-undo-checkbox:not(:checked) {
++	background: transparent;
++	border-color: var(--vscode-descriptionForeground, #71717a);
++}
++
++.chat-confirm-undo-card .confirm-undo-file-list {
++	display: flex;
++	flex-direction: column;
++	gap: 6px;
++	max-height: 140px;
++	overflow-y: auto;
++	padding-left: 4px;
++	margin-top: 2px;
++}
++
++.chat-confirm-undo-card .confirm-undo-file-item {
++	display: flex;
++	align-items: center;
++	gap: 8px;
++	font-size: 13px;
++	color: var(--vscode-foreground, #e4e4e7);
++}
++
++.chat-confirm-undo-card .confirm-undo-file-item .file-icon {
++	font-size: 14px;
++	color: var(--vscode-descriptionForeground, #a1a1aa);
++	flex-shrink: 0;
++}
++
++.chat-confirm-undo-card .confirm-undo-file-item .file-path {
++	flex-grow: 1;
++	overflow: hidden;
++	text-overflow: ellipsis;
++	white-space: nowrap;
++}
++
++.chat-confirm-undo-card .confirm-undo-file-item .action-tag {
++	font-size: 12px;
++	font-weight: 500;
++	flex-shrink: 0;
++}
++
++.chat-confirm-undo-card .confirm-undo-file-item .action-tag.action-delete {
++	color: var(--vscode-errorForeground, #ef4444);
++}
++
++.chat-confirm-undo-card .confirm-undo-file-item .action-tag.action-restore {
++	color: var(--vscode-textLink-foreground, #38bdf8);
++}
++
++.chat-confirm-undo-card .confirm-undo-footer {
++	display: flex;
++	align-items: center;
++	justify-content: flex-end;
++	gap: 8px;
++	margin-top: 8px;
++}
++
++.chat-confirm-undo-card .confirm-undo-btn {
++	padding: 6px 14px;
++	border-radius: 6px;
++	font-size: 13px;
++	cursor: pointer;
++	font-family: inherit;
++	border: none;
++	transition: background 100ms ease;
++}
++
++.chat-confirm-undo-card .confirm-undo-cancel {
++	background: transparent;
++	color: var(--vscode-descriptionForeground, #a1a1aa);
++}
++
++.chat-confirm-undo-card .confirm-undo-cancel:hover {
++	color: var(--vscode-foreground, #ffffff);
++	background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
++}
++
++.chat-confirm-undo-card .confirm-undo-confirm {
++	background: var(--vscode-button-background, #0284c7);
++	color: var(--vscode-button-foreground, #ffffff);
++	font-weight: 500;
++	display: flex;
++	align-items: center;
++	gap: 4px;
++}
++
++.chat-confirm-undo-card .confirm-undo-confirm:hover {
++	background: var(--vscode-button-hoverBackground, #0369a1);
++}
++

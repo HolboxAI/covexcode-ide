@@ -53,7 +53,8 @@ index ca65a77..3ef839a 100644
 +				ChatSelectionCopyController,
 +				() => this._viewModel,
 +				this._tree.getHTMLElement(),
-+				this._renderer
++				this._renderer,
++				() => this._tree
 +			)
 +		);
 +
@@ -92,14 +93,80 @@ index 0000000..7aaeef2
 +	private caretItem: ChatTreeItem | undefined;
 +	private isMouseDown = false;
 +	private selectAllActive = false;
++	private autoScrollRaf: number | null = null;
++	private autoScrollSpeed = 0;
++	private lastMouseX = 0;
++	private lastMouseY = 0;
 +
 +	constructor(
 +		private readonly getViewModel: () => IChatViewModel | undefined,
 +		private readonly treeDomNode: HTMLElement,
 +		private readonly renderer: ChatListItemRenderer,
++		private readonly getTree?: () => any,
 +	) {
 +		super();
 +		this.registerListeners();
++	}
++
++	private scrollBy(delta: number): void {
++		const tree = this.getTree ? this.getTree() : undefined;
++		if (tree && typeof tree.scrollTop === 'number') {
++			tree.scrollTop += delta;
++			return;
++		}
++		const scrollable = this.treeDomNode.querySelector<HTMLElement>('.monaco-scrollable-element');
++		if (scrollable) {
++			scrollable.scrollTop += delta;
++		}
++	}
++
++	private startAutoScroll(): void {
++		if (this.autoScrollRaf !== null) {
++			return;
++		}
++		const win = dom.getWindow(this.treeDomNode);
++		const loop = () => {
++			if (!this.isMouseDown || this.autoScrollSpeed === 0) {
++				this.stopAutoScroll();
++				return;
++			}
++			this.scrollBy(this.autoScrollSpeed);
++			const sel = win.getSelection();
++			if (sel && sel.rangeCount > 0 && (sel as any).extend) {
++				const rect = this.treeDomNode.getBoundingClientRect();
++				const clampX = Math.max(rect.left + 24, Math.min(rect.right - 24, this.lastMouseX || ((rect.left + rect.right) / 2)));
++				const clampY = this.autoScrollSpeed < 0 ? rect.top + 8 : rect.bottom - 8;
++				const doc = win.document;
++				const range = (doc as any).caretRangeFromPoint ? (doc as any).caretRangeFromPoint(clampX, clampY) : null;
++				let extended = false;
++				if (range && range.startContainer) {
++					try {
++						(sel as any).extend(range.startContainer, range.startOffset);
++						extended = true;
++					} catch {}
++				}
++				if (!extended) {
++					const rows = this.treeDomNode.querySelectorAll('.monaco-list-row');
++					if (rows.length > 0) {
++						const targetRow = this.autoScrollSpeed < 0 ? rows[0] : rows[rows.length - 1];
++						try {
++							(sel as any).extend(targetRow, this.autoScrollSpeed < 0 ? 0 : targetRow.childNodes.length);
++						} catch {}
++					}
++				}
++			}
++			this.autoScrollRaf = win.requestAnimationFrame(loop);
++		};
++		this.autoScrollRaf = win.requestAnimationFrame(loop);
++	}
++
++	private stopAutoScroll(): void {
++		if (this.autoScrollRaf !== null) {
++			const win = dom.getWindow(this.treeDomNode);
++			win.cancelAnimationFrame(this.autoScrollRaf);
++			this.autoScrollRaf = null;
++		}
++		this.autoScrollSpeed = 0;
 +	}
 +
 +	private get rowsContainer(): HTMLElement | null {
@@ -133,7 +200,29 @@ index 0000000..7aaeef2
 +			}
 +		}));
 +
++		store.add(dom.addDisposableListener(win, 'mousemove', (e: MouseEvent) => {
++			if (!this.isMouseDown) {
++				return;
++			}
++			this.lastMouseX = e.clientX;
++			this.lastMouseY = e.clientY;
++			const rect = this.treeDomNode.getBoundingClientRect();
++			const threshold = 40;
++			if (e.clientY < rect.top + threshold) {
++				const dist = Math.max(1, (rect.top + threshold) - e.clientY);
++				this.autoScrollSpeed = -Math.min(32, Math.max(3, dist * 0.5));
++				this.startAutoScroll();
++			} else if (e.clientY > rect.bottom - threshold) {
++				const dist = Math.max(1, e.clientY - (rect.bottom - threshold));
++				this.autoScrollSpeed = Math.min(32, Math.max(3, dist * 0.5));
++				this.startAutoScroll();
++			} else {
++				this.stopAutoScroll();
++			}
++		}));
++
 +		const handleMouseRelease = () => {
++			this.stopAutoScroll();
 +			this.isMouseDown = false;
 +			const sel = win.getSelection();
 +			if (sel?.isCollapsed) {
