@@ -240,7 +240,15 @@ index abbb8e4..ff4f9f3 100644
 +	color: var(--vscode-icon-foreground);
 +}
 +
-+.interactive-item-container.interactive-request .request-hover {
++.interactive-item-container.interactive-request {
++	display: flex !important;
++	flex-direction: column !important;
++	align-items: flex-end !important;
++}
++
++.interactive-item-container.interactive-request .request-hover,
++.interactive-item-container.interactive-request .checkpoint-container,
++.interactive-item-container.interactive-request .checkpoint-restore-container {
 +	display: none !important;
 +}
 +

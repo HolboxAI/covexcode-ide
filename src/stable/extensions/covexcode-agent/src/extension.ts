@@ -1344,9 +1344,46 @@ export function activate(context: vscode.ExtensionContext): void {
 		// edit in turn 2 is undone while turn 1's edit survives. covexcode's
 		// journal keeps the per-turn before-state for exactly this; the request
 		// uses `restoreBeforeTurn`, not the first-touch `turn` filter.
-		vscode.commands.registerCommand('covexcode.restoreCheckpoint', async (turn?: number, knownChanges?: ChangeEntry[]) => {
+		vscode.commands.registerCommand('covexcode.restoreCheckpoint', async (turn?: number, knownChanges?: any[]) => {
+			const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
+			const toDeletePaths = (knownChanges || [])
+				.map(c => typeof c === 'string' ? c : (c.action === 'delete' ? c.path : undefined))
+				.filter((p): p is string => Boolean(p));
+
+			const deleteKnownFilesAndCloseTabs = async () => {
+				for (const p of toDeletePaths) {
+					const trimmed = p.trim();
+					try {
+						const fileUri = path.isAbsolute(trimmed)
+							? vscode.Uri.file(trimmed)
+							: (wsFolder ? vscode.Uri.joinPath(wsFolder, trimmed) : undefined);
+						if (fileUri) {
+							await vscode.workspace.fs.delete(fileUri, { useTrash: false });
+						}
+					} catch {}
+					try {
+						const wsPath = wsFolder?.fsPath;
+						const absPath = path.isAbsolute(trimmed) ? trimmed : (wsPath ? path.join(wsPath, trimmed) : undefined);
+						if (absPath && fs.existsSync(absPath)) {
+							fs.unlinkSync(absPath);
+						}
+					} catch {}
+				}
+				try {
+					for (const tabGroup of vscode.window.tabGroups.all) {
+						for (const tab of tabGroup.tabs) {
+							const uri = (tab.input as any)?.uri as vscode.Uri | undefined;
+							if (uri && toDeletePaths.some(p => uri.fsPath.endsWith(p.trim()))) {
+								await vscode.window.tabGroups.close(tab);
+							}
+						}
+					}
+				} catch {}
+			};
+
 			if (!client || !sessionId) {
-				void vscode.window.showInformationMessage("covexcode: no session yet -- send a message first.");
+				await deleteKnownFilesAndCloseTabs();
+				void vscode.window.showInformationMessage("covexcode: rolled back turn files.");
 				return;
 			}
 			// No turn argument (e.g. invoked from the command palette) means
@@ -1358,6 +1395,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const activeClient = client;
 			const activeSessionId = sessionId;
 			try {
+				await deleteKnownFilesAndCloseTabs();
 				// covexcode's rollback restores the files and truncates the
 				// model's conversation history to the same turn, so the next
 				// prompt continues from the restored checkpoint rather than
@@ -1368,30 +1406,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				// prompt even if that leaves its history array empty.
 				restoredCheckpoint = true;
 
-				// Guarantee newly created files from this turn are deleted on disk
-				const toDelete = knownChanges?.filter(c => c.action === 'delete') || [];
-				const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
-				for (const c of toDelete) {
-					try {
-						const fileUri = path.isAbsolute(c.path)
-							? vscode.Uri.file(c.path)
-							: (wsFolder ? vscode.Uri.joinPath(wsFolder, c.path) : undefined);
-						if (fileUri) {
-							await vscode.workspace.fs.delete(fileUri, { useTrash: false });
-						}
-					} catch {}
-				}
-				// Close any open editor tabs for deleted files
-				try {
-					for (const tabGroup of vscode.window.tabGroups.all) {
-						for (const tab of tabGroup.tabs) {
-							const uri = (tab.input as any)?.uri as vscode.Uri | undefined;
-							if (uri && toDelete.some(c => uri.fsPath.endsWith(c.path))) {
-								await vscode.window.tabGroups.close(tab);
-							}
-						}
-					}
-				} catch {}
+				await deleteKnownFilesAndCloseTabs();
 
 				if (!summary.startsWith("Rolled back nothing")) {
 					void vscode.window.showInformationMessage(`covexcode: [turn ${turn}] ${summary}`);
@@ -1408,6 +1423,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					void vscode.window.showWarningMessage(`covexcode: [turn ${turn}] ${summary}`);
 				}
 			} catch (error) {
+				await deleteKnownFilesAndCloseTabs();
 				void vscode.window.showErrorMessage(`covexcode: couldn't restore checkpoint (${describeError(error)})`);
 			}
 		}),

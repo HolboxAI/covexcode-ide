@@ -108,11 +108,28 @@ index 0000000..7aaeef2
 +		this.registerListeners();
 +	}
 +
++	private getScrollContainer(): HTMLElement {
++		const tree = this.getTree ? this.getTree() : null;
++		if (tree && typeof tree.getHTMLElement === 'function') {
++			const el = tree.getHTMLElement();
++			if (el) {
++				return el;
++			}
++		}
++		return this.treeDomNode.querySelector<HTMLElement>('.monaco-list') || this.treeDomNode.querySelector<HTMLElement>('.chat-list-container') || this.treeDomNode;
++	}
++
 +	private scrollBy(delta: number): void {
-+		const tree = this.getTree ? this.getTree() : undefined;
-+		if (tree && typeof tree.scrollTop === 'number') {
-+			tree.scrollTop += delta;
-+			return;
++		const tree = this.getTree ? this.getTree() : null;
++		if (tree) {
++			if (typeof tree.scrollTop === 'number') {
++				tree.scrollTop += delta;
++				return;
++			}
++			if (typeof tree.setScrollTop === 'function') {
++				tree.setScrollTop((tree.getScrollTop?.() || 0) + delta);
++				return;
++			}
 +		}
 +		const scrollable = this.treeDomNode.querySelector<HTMLElement>('.monaco-scrollable-element');
 +		if (scrollable) {
@@ -133,7 +150,8 @@ index 0000000..7aaeef2
 +			this.scrollBy(this.autoScrollSpeed);
 +			const sel = win.getSelection();
 +			if (sel && sel.rangeCount > 0 && (sel as any).extend) {
-+				const rect = this.treeDomNode.getBoundingClientRect();
++				const scrollContainer = this.getScrollContainer();
++				const rect = scrollContainer.getBoundingClientRect();
 +				const clampX = Math.max(rect.left + 24, Math.min(rect.right - 24, this.lastMouseX || ((rect.left + rect.right) / 2)));
 +				const clampY = this.autoScrollSpeed < 0 ? rect.top + 8 : rect.bottom - 8;
 +				const doc = win.document;
@@ -146,7 +164,7 @@ index 0000000..7aaeef2
 +					} catch {}
 +				}
 +				if (!extended) {
-+					const rows = this.treeDomNode.querySelectorAll('.monaco-list-row');
++					const rows = scrollContainer.querySelectorAll('.monaco-list-row');
 +					if (rows.length > 0) {
 +						const targetRow = this.autoScrollSpeed < 0 ? rows[0] : rows[rows.length - 1];
 +						try {
@@ -206,8 +224,9 @@ index 0000000..7aaeef2
 +			}
 +			this.lastMouseX = e.clientX;
 +			this.lastMouseY = e.clientY;
-+			const rect = this.treeDomNode.getBoundingClientRect();
-+			const threshold = 40;
++			const scrollContainer = this.getScrollContainer();
++			const rect = scrollContainer.getBoundingClientRect();
++			const threshold = 45;
 +			if (e.clientY < rect.top + threshold) {
 +				const dist = Math.max(1, (rect.top + threshold) - e.clientY);
 +				this.autoScrollSpeed = -Math.min(32, Math.max(3, dist * 0.5));
