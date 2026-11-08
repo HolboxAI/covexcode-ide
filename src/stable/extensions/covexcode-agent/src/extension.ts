@@ -1344,7 +1344,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		// edit in turn 2 is undone while turn 1's edit survives. covexcode's
 		// journal keeps the per-turn before-state for exactly this; the request
 		// uses `restoreBeforeTurn`, not the first-touch `turn` filter.
-		vscode.commands.registerCommand('covexcode.restoreCheckpoint', async (turn?: number) => {
+		vscode.commands.registerCommand('covexcode.restoreCheckpoint', async (turn?: number, knownChanges?: ChangeEntry[]) => {
 			if (!client || !sessionId) {
 				void vscode.window.showInformationMessage("covexcode: no session yet -- send a message first.");
 				return;
@@ -1367,6 +1367,32 @@ export function activate(context: vscode.ExtensionContext): void {
 				// command returns; keep the ACP session alive for the next
 				// prompt even if that leaves its history array empty.
 				restoredCheckpoint = true;
+
+				// Guarantee newly created files from this turn are deleted on disk
+				const toDelete = knownChanges?.filter(c => c.action === 'delete') || [];
+				const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
+				for (const c of toDelete) {
+					try {
+						const fileUri = path.isAbsolute(c.path)
+							? vscode.Uri.file(c.path)
+							: (wsFolder ? vscode.Uri.joinPath(wsFolder, c.path) : undefined);
+						if (fileUri) {
+							await vscode.workspace.fs.delete(fileUri, { useTrash: false });
+						}
+					} catch {}
+				}
+				// Close any open editor tabs for deleted files
+				try {
+					for (const tabGroup of vscode.window.tabGroups.all) {
+						for (const tab of tabGroup.tabs) {
+							const uri = (tab.input as any)?.uri as vscode.Uri | undefined;
+							if (uri && toDelete.some(c => uri.fsPath.endsWith(c.path))) {
+								await vscode.window.tabGroups.close(tab);
+							}
+						}
+					}
+				} catch {}
+
 				if (!summary.startsWith("Rolled back nothing")) {
 					void vscode.window.showInformationMessage(`covexcode: [turn ${turn}] ${summary}`);
 					return;
@@ -1394,7 +1420,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			try {
 				const { changes } = await client.listChanges(sessionId);
-				if (turn === undefined) {
+				if (turn === undefined || turn <= 1) {
 					return changes.filter(c => c.action !== 'blocked');
 				}
 				return changes.filter(c => c.turn >= turn && c.action !== 'blocked');
