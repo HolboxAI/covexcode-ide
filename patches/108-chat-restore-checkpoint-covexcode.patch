@@ -37,13 +37,11 @@ index 04899d62..f737627c 100644
 +		// requires one) never renders. Physically drop the turns after the
 +		// restored checkpoint instead, and clear the checkpoint marker the action
 +		// set so the restored turn isn't removed again on the next send.
-+		const idsToRemove = chatRequests.slice(itemIndex).map(request => request.id);
++		const idsToRemove = chatRequests.slice(itemIndex + 1).map(request => request.id);
 +		for (const id of idsToRemove) {
 +			await chatService.removeRequest(sessionResource, id);
 +		}
 +		widget?.viewModel?.model.setCheckpoint(undefined);
-+		widget?.onDidChangeItems();
-+		widget?.listWidget?.refresh();
 +		return true;
 +	}
 +

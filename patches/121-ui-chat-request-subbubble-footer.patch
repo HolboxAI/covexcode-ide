@@ -11,19 +11,255 @@ index 7d38984..af396e1 100644
  				category: CHAT_CATEGORY,
  				icon: Codicon.copy,
 diff --git a/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingActions.ts b/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingActions.ts
-index 9a15ccd..1100eb6 100644
+index 9a15ccd..5f27f02 100644
 --- a/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingActions.ts
 +++ b/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingActions.ts
-@@ -379,7 +379,7 @@ async function restoreSnapshotWithConfirmationByRequestId(accessor: ServicesAcce
- 		// requires one) never renders. Physically drop the turns after the
- 		// restored checkpoint instead, and clear the checkpoint marker the action
- 		// set so the restored turn isn't removed again on the next send.
+@@ -7,7 +7,7 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
+ import { Codicon } from '../../../../../base/common/codicons.js';
+ import { KeyCode, KeyMod } from '../../../../../base/common/keyCodes.js';
+ import { alert } from '../../../../../base/browser/ui/aria/aria.js';
+-import { basename } from '../../../../../base/common/resources.js';
++import { basename, joinPath } from '../../../../../base/common/resources.js';
+ import { URI, UriComponents } from '../../../../../base/common/uri.js';
+ import { isCodeEditor } from '../../../../../editor/browser/editorBrowser.js';
+ import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
+@@ -24,7 +24,9 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
+ import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
+ import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+ import { EditorActivation } from '../../../../../platform/editor/common/editor.js';
++import { IFileService } from '../../../../../platform/files/common/files.js';
+ import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
++import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+ import { IEditorService } from '../../../../services/editor/common/editorService.js';
+ import { IChatRequestVariableEntry, isImplicitVariableEntry, isPromptFileVariableEntry, isPromptTextVariableEntry, isStringVariableEntry, isWorkspaceVariableEntry } from '../../common/attachments/chatVariableEntries.js';
+ import { isChatViewTitleActionContext } from '../../common/actions/chatActions.js';
+@@ -351,11 +353,162 @@ function filterToUserAttachedContext(attachedContext: readonly IChatRequestVaria
+ 	);
+ }
+ 
++interface ITurnFileChange {
++	readonly path: string;
++	readonly action: string;
++	readonly turn?: number;
++}
++
++interface IConfirmUndoResult {
++	readonly confirmed: boolean;
++	readonly revertFiles: boolean;
++}
++
++function resolveChangeResourceUri(changePath: string, workspaceFolder: URI | undefined): URI | undefined {
++	const trimmed = changePath.trim();
++	if (!trimmed) {
++		return undefined;
++	}
++	if (trimmed.startsWith('/') || /^[A-Za-z]:[\\/]/.test(trimmed)) {
++		return URI.file(trimmed);
++	}
++	return workspaceFolder ? joinPath(workspaceFolder, trimmed.replace(/\\/g, '/')) : undefined;
++}
++
++function showConfirmUndoModal(widget: IChatWidget | undefined, changes: readonly ITurnFileChange[]): Promise<IConfirmUndoResult> {
++	const sessionHost = (widget?.domNode.querySelector('.interactive-session') as HTMLElement | null) ?? widget?.domNode;
++	if (!sessionHost) {
++		return Promise.resolve({ confirmed: true, revertFiles: true });
++	}
++
++	sessionHost.querySelectorAll('.chat-confirm-undo-backdrop').forEach(el => el.remove());
++
++	const doc = sessionHost.ownerDocument;
++	return new Promise<IConfirmUndoResult>(resolve => {
++		const backdrop = doc.createElement('div');
++		backdrop.className = 'chat-confirm-undo-backdrop';
++
++		const card = doc.createElement('div');
++		card.className = 'chat-confirm-undo-card';
++		card.setAttribute('role', 'dialog');
++		card.setAttribute('aria-modal', 'true');
++		backdrop.appendChild(card);
++
++		const header = doc.createElement('div');
++		header.className = 'confirm-undo-header';
++		const titleEl = doc.createElement('div');
++		titleEl.className = 'confirm-undo-title';
++		titleEl.textContent = localize('chat.confirmUndo.title', "Confirm Undo");
++		const closeBtn = doc.createElement('button');
++		closeBtn.type = 'button';
++		closeBtn.className = 'confirm-undo-close';
++		closeBtn.setAttribute('aria-label', localize('chat.confirmUndo.close', "Close"));
++		closeBtn.textContent = '✕';
++		header.append(titleEl, closeBtn);
++		card.appendChild(header);
++
++		const subtitle = doc.createElement('div');
++		subtitle.className = 'confirm-undo-subtitle';
++		subtitle.textContent = changes.length > 0
++			? localize('chat.confirmUndo.subtitleWithChanges', "Confirming this undo action will make the following changes:")
++			: localize('chat.confirmUndo.subtitleNoChanges', "Confirming this undo action will remove this message and all subsequent messages from the chat.");
++		card.appendChild(subtitle);
++
++		let checkbox: HTMLInputElement | undefined;
++		if (changes.length > 0) {
++			const checkboxRow = doc.createElement('label');
++			checkboxRow.className = 'confirm-undo-checkbox-row';
++			checkbox = doc.createElement('input');
++			checkbox.type = 'checkbox';
++			checkbox.className = 'confirm-undo-checkbox';
++			checkbox.checked = true;
++			const checkboxLabel = doc.createElement('span');
++			checkboxLabel.textContent = localize('chat.confirmUndo.revertFiles', "Revert file changes");
++			checkboxRow.append(checkbox, checkboxLabel);
++			card.appendChild(checkboxRow);
++
++			const fileList = doc.createElement('div');
++			fileList.className = 'confirm-undo-file-list';
++			for (const change of changes) {
++				const item = doc.createElement('div');
++				item.className = 'confirm-undo-file-item';
++				const icon = doc.createElement('span');
++				icon.className = 'file-icon codicon codicon-file';
++				const pathSpan = doc.createElement('span');
++				pathSpan.className = 'file-path';
++				pathSpan.textContent = change.path;
++				pathSpan.title = change.path;
++				const actionTag = doc.createElement('span');
++				const isDelete = change.action === 'delete';
++				actionTag.className = `action-tag ${isDelete ? 'action-delete' : 'action-restore'}`;
++				actionTag.textContent = isDelete
++					? localize('chat.confirmUndo.actionDelete', "Delete")
++					: localize('chat.confirmUndo.actionRestore', "Restore");
++				item.append(icon, pathSpan, actionTag);
++				fileList.appendChild(item);
++			}
++			card.appendChild(fileList);
++		}
++
++		const footer = doc.createElement('div');
++		footer.className = 'confirm-undo-footer';
++		const cancelBtn = doc.createElement('button');
++		cancelBtn.type = 'button';
++		cancelBtn.className = 'confirm-undo-btn confirm-undo-cancel';
++		cancelBtn.textContent = localize('chat.confirmUndo.cancel', "Cancel");
++		const confirmBtn = doc.createElement('button');
++		confirmBtn.type = 'button';
++		confirmBtn.className = 'confirm-undo-btn confirm-undo-confirm';
++		confirmBtn.textContent = localize('chat.confirmUndo.confirm', "Confirm ↵");
++		footer.append(cancelBtn, confirmBtn);
++		card.appendChild(footer);
++
++		let settled = false;
++		const finish = (result: IConfirmUndoResult) => {
++			if (settled) {
++				return;
++			}
++			settled = true;
++			doc.removeEventListener('keydown', onKeyDown, true);
++			backdrop.remove();
++			resolve(result);
++		};
++
++		const onKeyDown = (e: KeyboardEvent) => {
++			if (e.key === 'Escape') {
++				e.preventDefault();
++				e.stopPropagation();
++				finish({ confirmed: false, revertFiles: false });
++			} else if (e.key === 'Enter' && doc.activeElement !== cancelBtn && doc.activeElement !== closeBtn) {
++				e.preventDefault();
++				e.stopPropagation();
++				finish({ confirmed: true, revertFiles: checkbox ? checkbox.checked : true });
++			}
++		};
++
++		backdrop.addEventListener('click', e => {
++			if (e.target === backdrop) {
++				finish({ confirmed: false, revertFiles: false });
++			}
++		});
++		closeBtn.addEventListener('click', () => finish({ confirmed: false, revertFiles: false }));
++		cancelBtn.addEventListener('click', () => finish({ confirmed: false, revertFiles: false }));
++		confirmBtn.addEventListener('click', () => finish({ confirmed: true, revertFiles: checkbox ? checkbox.checked : true }));
++		doc.addEventListener('keydown', onKeyDown, true);
++
++		sessionHost.appendChild(backdrop);
++		confirmBtn.focus();
++	});
++}
++
+ async function restoreSnapshotWithConfirmationByRequestId(accessor: ServicesAccessor, sessionResource: URI, requestId: string): Promise<boolean> {
+ 	const configurationService = accessor.get(IConfigurationService);
+ 	const dialogService = accessor.get(IDialogService);
++	const commandService = accessor.get(ICommandService);
++	const fileService = accessor.get(IFileService);
++	const workspaceContextService = accessor.get(IWorkspaceContextService);
+ 	const chatWidgetService = accessor.get(IChatWidgetService);
+-	const widget = chatWidgetService.getWidgetBySessionResource(sessionResource);
++	const widget = chatWidgetService.getWidgetBySessionResource(sessionResource) ?? chatWidgetService.lastFocusedWidget;
+ 	const chatService = accessor.get(IChatService);
+ 	const chatModel = chatService.getSession(sessionResource);
+ 	if (!chatModel) {
+@@ -370,16 +523,51 @@ async function restoreSnapshotWithConfirmationByRequestId(accessor: ServicesAcce
+ 
+ 	// covexcode: the covexcode-agent participant writes files directly and keeps its
+ 	// own rollback journal, so it has no IChatEditingSession and VS Code's native
+-	// restore path below would be a no-op. Delegate the native "Restore Checkpoint"
+-	// action to the extension, scoped to the 1-based turn this request corresponds
+-	// to (each user request is one covexcode turn).
+-	if (chatRequests[itemIndex].response?.agent?.id === 'covexcode.agent') {
+-		await accessor.get(ICommandService).executeCommand('covexcode.restoreCheckpoint', itemIndex + 1);
+-		// covexcode has no editing session, so VS Code's checkpoint dimming (which
+-		// requires one) never renders. Physically drop the turns after the
+-		// restored checkpoint instead, and clear the checkpoint marker the action
+-		// set so the restored turn isn't removed again on the next send.
 -		const idsToRemove = chatRequests.slice(itemIndex + 1).map(request => request.id);
++	// restore path below would be a no-op. Prompt inside the chatbox and delegate
++	// file rollback + turn removal for the selected request and all subsequent turns.
++	const isCovexcodeSession = chatRequests[itemIndex].response?.agent?.id === 'covexcode.agent'
++		|| widget?.lockedAgentId === 'covexcode.agent'
++		|| chatRequests.some(request => request.response?.agent?.id === 'covexcode.agent');
++	if (isCovexcodeSession) {
++		const turn = itemIndex + 1;
++		let changes: ITurnFileChange[] = [];
++		try {
++			const rawChanges = await commandService.executeCommand<ITurnFileChange[]>('covexcode.getTurnChanges', turn);
++			if (Array.isArray(rawChanges)) {
++				changes = rawChanges;
++			}
++		} catch {
++			changes = [];
++		}
++
++		const { confirmed, revertFiles } = await showConfirmUndoModal(widget, changes);
++		if (!confirmed) {
++			widget?.viewModel?.model.setCheckpoint(undefined);
++			return false;
++		}
++
++		await chatService.cancelCurrentRequestForSession(sessionResource, 'restoreCheckpoint');
++
++		if (revertFiles) {
++			await commandService.executeCommand('covexcode.restoreCheckpoint', turn, changes);
++			const wsFolder = workspaceContextService.getWorkspace().folders[0]?.uri;
++			for (const change of changes) {
++				if (change.action === 'delete') {
++					const resource = resolveChangeResourceUri(change.path, wsFolder);
++					if (resource) {
++						try {
++							if (await fileService.exists(resource)) {
++								await fileService.del(resource, { useTrash: false });
++							}
++						} catch {
++							// Best-effort cleanup alongside extension rollback
++						}
++					}
++				}
++			}
++		}
++
 +		const idsToRemove = chatRequests.slice(itemIndex).map(request => request.id);
  		for (const id of idsToRemove) {
  			await chatService.removeRequest(sessionResource, id);
  		}
-@@ -470,12 +470,13 @@ registerAction2(class RemoveAction extends Action2 {
+@@ -470,12 +658,13 @@ registerAction2(class RemoveAction extends Action2 {
  				when: ContextKeyExpr.and(ChatContextKeys.inChatSession, EditorContextKeys.textInputFocus.negate(), ChatContextKeys.inChatQuestionCarousel.negate()),
  				weight: KeybindingWeight.WorkbenchContrib,
  			},
@@ -168,12 +404,12 @@ index 1b414d2..0f1acbc 100644
  		if (isResponseVM(element)) {
  			this.renderDetail(element, templateData);
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-index abbb8e4..ff4f9f3 100644
+index e94af70..54b6cd6 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4381,3 +4381,104 @@ have to be updated for changes to the rules above, or to support more deeply nes
- .chat-input-container .chat-input-toolbars .codicon-debug-disconnect {
- 	color: var(--vscode-charts-green, #3fb950) !important;
+@@ -4630,3 +4630,308 @@ a[href*="permission.review"] {
+ .interactive-session .interactive-item-container .chat-row-border {
+ 	pointer-events: none;
  }
 +
 +/* Antigravity-style sub-bubble request footer */
@@ -284,7 +520,7 @@ index abbb8e4..ff4f9f3 100644
 +	opacity: 1;
 +	transform: scale(1);
 +}
-
++
 +/* Antigravity-style in-chat Confirm Undo modal */
 +.chat-confirm-undo-backdrop {
 +	position: absolute;
@@ -480,4 +716,3 @@ index abbb8e4..ff4f9f3 100644
 +.chat-confirm-undo-card .confirm-undo-confirm:active {
 +	background: #075985;
 +}
-+
