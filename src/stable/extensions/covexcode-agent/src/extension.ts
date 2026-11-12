@@ -57,7 +57,7 @@ import {
 } from './chatPermission';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
-import { computeFileDiffSummary } from './diffPreview';
+import { computeFileDiffSummary, isPlausibleBeforeImage, MUTATING_TOOL_ACTIONS, READING_TOOL_ACTIONS, selectTurnChanges, snapshotTouches, TurnFileObserver, toolTitlePath } from './diffPreview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
 import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
 import {
@@ -413,6 +413,17 @@ export function activate(context: vscode.ExtensionContext): void {
 	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
 	const sessionUsage = createSessionUsage();
 	const permissionGate = new PermissionGate();
+	// Per-path `touches` counts from the session's rollback journal, updated at
+	// the end of every turn. A file changed this turn is one whose count grew --
+	// see selectTurnChanges for why the journal's own `turn` field cannot be
+	// used for that. Spans the whole session, so it lives here and is cleared by
+	// discardSession().
+	const journalTouches = new Map<string, number>();
+	// The content each journaled file had at the END of a previous turn. It is
+	// the pre-image for this turn's edit when the agent never inspected the file
+	// first (it can go straight to `edit` on a file it edited before), which is
+	// the remaining case where no other source can supply one.
+	const lastKnownFiles = new Map<string, string>();
 	const promptedTrustFolders = new Set<string>();
 	// Persists for the life of the extension host, not just one turn -- a
 	// dev server started earlier in the conversation is still running, and
@@ -719,6 +730,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessionCwd = undefined;
 		sessionModel = undefined;
 		agentImagesSupported = false;
+		// The rollback journal belongs to the session, so its per-path touch
+		// counters and cached contents must not survive into a new one.
+		journalTouches.clear();
+		lastKnownFiles.clear();
 		sessionUsage.reset();
 		updateUsageIndicator();
 	}
@@ -1106,7 +1121,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		const toolCallTitles = new Map<string, string>();
 		const shownBrowserPreviews = new Set<string>();
 		const collectedDiffs = new Map<string, CollectedDiff>();
-		const turnUsage = createTurnUsage();
+		// Before-images for files this turn mutates without asking for approval;
+		// see TurnFileObserver.
+		const observedFiles = new TurnFileObserver();		const turnUsage = createTurnUsage();
 		// Inline edit carries the editor buffer and the paths whose diffs were
 		// already emitted, so renderUpdate can convert each `diff` into a
 		// `stream.textEdit` and the end of the turn can finalize them.
@@ -1116,7 +1133,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit, collectedDiffs);
+				try {
+					renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit, collectedDiffs, observedFiles, workspace.cwd);
+				} catch {
+					// A cancelled or already-finished turn closes the response stream,
+					// but covexcode keeps emitting notifications for a moment after
+					// that, and every push then throws "Response stream has been
+					// closed". Un guarded this logged 413 errors in a single second
+					// on a cancelled turn and took the rest of that turn's rendering
+					// -- including the end-of-turn diff summary -- down with it.
+				}
 				updateUsageIndicator();
 			}
 		};
@@ -1125,7 +1151,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor).then(respond);
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, collectedDiffs).then(respond);
 			} else {
 				respond({ outcome: 'cancelled' });
 			}
@@ -1200,8 +1226,15 @@ export function activate(context: vscode.ExtensionContext): void {
 			// After a clean panel turn, summarize every file the agent changed
 			// in one collapsible "Changed N files" dropdown. Inline-edit turns
 			// already rendered their own in-editor diffs, so this is panel-only.
-			if (!inlineEdit && collectedDiffs.size > 0) {
-				renderDiffSummary(collectedDiffs, diffContentProvider, workspace.cwd, stream);
+			if (!inlineEdit) {
+				// covexcode attaches a `Diff` to a permission request only, so a turn
+				// that edited files without stopping for approval leaves
+				// `collectedDiffs` empty. Ask the journal which files this turn touched
+				// before concluding there is nothing to show.
+				await appendJournalEntries(activeClient, activeSessionId, turnResult.turn, workspace.cwd, collectedDiffs, observedFiles, journalTouches, lastKnownFiles);
+				if (collectedDiffs.size > 0) {
+					renderDiffSummary(collectedDiffs, diffContentProvider, workspace.cwd, stream);
+				}
 			}
 			// Rendered only on a clean turn end, never after an error -- a
 			// failed turn's partial usage would be a misleading number. One
@@ -1897,11 +1930,32 @@ function renderDiffSummary(
 	const binaryNotes: vscode.MarkdownString[] = [];
 
 	for (const diff of diffs.values()) {
+		const fsPath = resolvePathAgainstCwd(cwd, diff.path);
+		const goToFileUri = fs.existsSync(fsPath) ? vscode.Uri.file(fsPath) : undefined;
+
+		// No before-image: the file really did change, but nothing here can
+		// honestly say what it looked like first. List the filename and let the
+		// row open the real file rather than fabricating a diff for it.
+		if (diff.listOnly) {
+			if (goToFileUri) {
+				entries.push({ modifiedUri: goToFileUri, goToFileUri });
+			}
+			continue;
+		}
+
 		const summary = computeFileDiffSummary({
 			oldText: diff.oldText,
 			newText: diff.newText,
 			hunks: diff.hunks,
 		});
+
+		// A file the turn touched but left exactly as it found it has nothing
+		// to show; listing it as "+0 −0" is only noise in the summary. Binary
+		// changes also have no textual diff, so they must fall through to the
+		// note below instead of being dropped here.
+		if (!summary.isBinary && summary.status === 'modified' && !summary.hasTextualDiff) {
+			continue;
+		}
 
 		if (summary.isBinary) {
 			const note = new vscode.MarkdownString(undefined, true);
@@ -1912,15 +1966,15 @@ function renderDiffSummary(
 			continue;
 		}
 
-		const originalUri = diff.oldText !== undefined
-			? diffContentProvider.register(diff.oldText)
-			: undefined;
-		const modifiedUri = summary.status === 'deleted'
-			? undefined
-			: diffContentProvider.register(diff.newText);
-
-		const fsPath = resolvePathAgainstCwd(cwd, diff.path);
-		const goToFileUri = fs.existsSync(fsPath) ? vscode.Uri.file(fsPath) : undefined;
+		// `ChatMultiDiffContentPart` only builds a diff when BOTH sides carry a
+		// URI -- with `undefined` on either side the row degrades to a plain file
+		// entry and the Git-style editor never opens. A new file's before-image
+		// is genuinely empty and a deleted file's after-image is genuinely empty,
+		// so register the empty side instead of dropping it: a brand-new file
+		// then shows every line added (green) and a deletion every line removed
+		// (red), which is the honest rendering of both.
+		const originalUri = diffContentProvider.register(diff.oldText ?? '', diff.path);
+		const modifiedUri = diffContentProvider.register(diff.newText, diff.path);
 
 		entries.push({
 			originalUri,
@@ -1936,6 +1990,98 @@ function renderDiffSummary(
 	}
 	if (entries.length > 0) {
 		stream.push(new vscode.ChatResponseMultiDiffPart(entries, 'covexcode changes'));
+	}
+}
+
+/**
+ * Fills in the files covexcode changed without stopping for approval.
+ *
+ * `ToolCallContent::diff` -- the only wire field carrying a file's before/after
+ * text -- rides exclusively on `session/request_permission`; a `tool_call_update`
+ * carries plain `content` text even for an `edit` that changed the file (verified
+ * against a real turn, where the edit completed with "Replaced 1 occurrence(s)"
+ * and no `diff` block at all). With the default `covexcode.permissionMode` of
+ * `auto` the agent is spawned with `COVEXCODE_TOOLS_APPROVAL=destructive`, so an
+ * ordinary edit never prompts either -- meaning no diff content is ever emitted,
+ * and before this fallback the end-of-turn summary could never render.
+ *
+ * `session/list_changes` still reports exactly which files this turn journaled.
+ * A path the journal marks `delete` didn't exist before the session, so its
+ * before-image is genuinely empty: it gets a real all-added diff with exact
+ * counts. Any other path only has its before-image inside covexcode's rollback
+ * journal, which no ACP method exposes -- those are listed by filename
+ * (`listOnly`) rather than given line counts nothing supports.
+ */
+async function appendJournalEntries(
+	client: AcpClient,
+	sessionId: string,
+	turn: number,
+	cwd: string,
+	diffs: Map<string, CollectedDiff>,
+	observed: TurnFileObserver,
+	lastTouches: Map<string, number>,
+	lastKnown: Map<string, string>,
+): Promise<void> {
+	let changes: ChangeEntry[];
+	try {
+		({ changes } = await client.listChanges(sessionId));
+	} catch {
+		// A journal read that fails must not turn a finished turn into an error.
+		return;
+	}
+	// Filter by the `touches` delta, not by `turn`: the journal pins `turn` to
+	// the first touch, so a file re-edited in a later turn would otherwise be
+	// dropped from that turn's summary. See selectTurnChanges.
+	const touchedThisTurn = selectTurnChanges(changes, lastTouches, turn);
+	// Snapshot even the entries that were skipped, so the next turn compares
+	// against the true journal state rather than a stale subset.
+	snapshotTouches(changes, lastTouches);
+	for (const change of touchedThisTurn) {
+		if (diffs.has(change.path)) {
+			continue;
+		}
+		const fsPath = resolvePathAgainstCwd(cwd, change.path);
+		// A path the journal says changed but that is no longer on disk was
+		// deleted this turn (the journal keeps `restore` for it, because it did
+		// exist before the session). Rendering that as a removal is the honest
+		// reading; dropping it would silently hide the deletion from the summary.
+		if (!fs.existsSync(fsPath)) {
+			const before = observed.beforeFor(change.path) ?? lastKnown.get(change.path);
+			lastKnown.delete(change.path);
+			diffs.set(change.path, before !== undefined && isPlausibleBeforeImage(before, '')
+				? { path: change.path, oldText: before, newText: '' }
+				: { path: change.path, newText: '', listOnly: true });
+			continue;
+		}
+		let newText: string;
+		try {
+			newText = await fs.promises.readFile(fsPath, 'utf8');
+		} catch {
+			continue;
+		}
+		// Every journaled file's current text is remembered, not only the ones
+		// diffed, so the next turn has a pre-image even for a file the agent
+		// edits without inspecting it first.
+		const previous = lastKnown.get(change.path);
+		lastKnown.set(change.path, newText);
+		if (change.action === 'delete') {
+			// The file did not exist before the session, so its before-image is
+			// genuinely absent and every line shows as added.
+			diffs.set(change.path, { path: change.path, newText });
+			continue;
+		}
+		// A file that existed before the session only has a before-image in
+		// covexcode's rollback journal, which no ACP method exposes. Two client-side
+		// sources can still supply one: this turn's own snapshot of the file taken
+		// before it was mutated, and the content a previous turn's summary already
+		// read. Whichever is available is used only if it looks like the whole file
+		// -- a fragment would otherwise report nearly every line as changed, which
+		// is what turned a one-line edit into "+239 -60" -- and otherwise the row
+		// falls back to a filename.
+		const candidate = observed.beforeFor(change.path) ?? previous;
+		diffs.set(change.path, candidate !== undefined && isPlausibleBeforeImage(candidate, newText)
+			? { path: change.path, oldText: candidate, newText }
+			: { path: change.path, newText, listOnly: true });
 	}
 }
 
@@ -2004,6 +2150,57 @@ interface CollectedDiff {
 	oldText?: string;
 	newText: string;
 	hunks?: DiffHunk[];
+	/**
+	 * The file is known to have changed, but no before-image is available, so
+	 * the row is listed by name only. Never carries invented line counts.
+	 */
+	listOnly?: boolean;
+}
+
+/** Files larger than this are never snapshotted as a before-image (they cannot be diffed usefully anyway). */
+const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Feeds the turn's read/mutation history into `observedFiles`, so a file this
+ * turn edited without stopping for approval still keeps a real before-image.
+ *
+ * The before-image is read **from disk**, not taken from the tool's own output:
+ * `grep` reports only matching lines with `path:line:` prefixes, so its payload
+ * is a fragment of the file and would poison the diff. Any inspecting tool
+ * (`read`, `view`, `grep`, `search`) runs while the file is still untouched, so
+ * reading it at that moment captures the true pre-edit state. A mutating tool
+ * freezing the path afterwards is what stops a later inspection -- models
+ * routinely re-read to verify -- from replacing it.
+ */
+function recordObservedFile(observed: TurnFileObserver, update: SessionUpdate, title: string | undefined, cwd: string): void {
+	if (!title) {
+		return;
+	}
+	const parsed = toolTitlePath(title);
+	if (!parsed) {
+		return;
+	}
+	if (MUTATING_TOOL_ACTIONS.has(parsed.action)) {
+		observed.noteMutation(parsed.path);
+		return;
+	}
+	if (!READING_TOOL_ACTIONS.has(parsed.action) && parsed.action !== 'grep' && parsed.action !== 'search') {
+		return;
+	}
+	if (observed.isFrozen(parsed.path) || observed.hasBefore(parsed.path)) {
+		return;
+	}
+	try {
+		const fsPath = resolvePathAgainstCwd(cwd, parsed.path);
+		const stat = fs.statSync(fsPath);
+		if (!stat.isFile() || stat.size > MAX_SNAPSHOT_BYTES) {
+			return;
+		}
+		observed.noteRead(parsed.path, fs.readFileSync(fsPath, 'utf8'));
+	} catch {
+		// A directory (`grep ... in src`), a missing file, or a permission error:
+		// there is simply no snapshot for this path.
+	}
 }
 
 function renderUpdate(
@@ -2016,6 +2213,8 @@ function renderUpdate(
 	sessionUsage: SessionUsage,
 	inlineEdit: InlineEditContext | undefined,
 	collectedDiffs: Map<string, CollectedDiff>,
+	observedFiles: TurnFileObserver,
+	cwd: string,
 ): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -2054,17 +2253,21 @@ function renderUpdate(
 			// intentionally not collected here.
 			if (update.content?.type === 'diff' && update.status === 'completed') {
 				const diff = update.content;
-				collectedDiffs.set(diff.path, {
-					path: diff.path,
-					oldText: diff.oldText,
-					newText: diff.newText,
-					hunks: diff.hunks,
-				});
+				// A single turn can touch the same file more than once (write,
+				// then edit). Keep the text the file had when the turn first saw
+				// it and the latest content, so the preview covers the whole turn
+				// instead of only the last edit. Dropping the earlier hunks makes
+				// the summary recount from the real original text.
+				const earlier = collectedDiffs.get(diff.path);
+				collectedDiffs.set(diff.path, earlier
+					? { path: diff.path, oldText: earlier.oldText, newText: diff.newText }
+					: { path: diff.path, oldText: diff.oldText, newText: diff.newText, hunks: diff.hunks });
 			}
 			if (update.toolCallId && update.title) {
 				toolCallTitles.set(update.toolCallId, update.title);
 			}
 			const title = update.title ?? (update.toolCallId ? toolCallTitles.get(update.toolCallId) : undefined);
+			recordObservedFile(observedFiles, update, title, cwd);
 			if (title && update.toolCallId) {
 				renderToolCallInvocation(update, title, stream);
 			} else if (title) {
@@ -2670,6 +2873,7 @@ async function askPermission(
 	permissionGate: PermissionGate,
 	cwd: string,
 	onReject: (request: RequestPermissionRequest, toolCallId: string, files: string[]) => void,
+	collectedDiffs: Map<string, CollectedDiff>,
 ): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
@@ -2725,6 +2929,18 @@ async function askPermission(
 		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks));
 	}
 	const answer = await wait;
+	// `request_permission` is the ONLY place covexcode puts a file's before/after
+	// text on the wire, so this is where a reviewed edit has to be collected
+	// from for the end-of-turn summary to be able to show it. A rejected edit
+	// changed nothing and must not appear as a change.
+	if (diff?.type === 'diff' && answer.choice !== 'reject' && answer.choice !== 'cancelled') {
+		collectedDiffs.set(diff.path, {
+			path: diff.path,
+			oldText: diff.oldText,
+			newText: diff.newText,
+			hunks: diff.hunks,
+		});
+	}
 	pendingReviews.delete(id);
 	// The user answered (Allow/Reject/Review). Remove the prompt from chat:
 	// `clearToPreviousToolInvocation` slices the response back to the pending
@@ -2876,9 +3092,34 @@ class DiffContentProvider implements vscode.TextDocumentContentProvider {
 		return this.documents.get(uri.toString()) ?? '';
 	}
 
-	/** Registers `content` under a fresh URI and returns it. Never removed -- see the class doc comment; the extension host's lifetime is short enough that this isn't worth the bookkeeping to garbage-collect. */
-	register(content: string): vscode.Uri {
-		const uri = vscode.Uri.from({ scheme: DIFF_SCHEME, path: `/${this.nextId++}` });
+	/**
+	 * Registers `content` under a fresh URI and returns it.
+	 *
+	 * `displayPath` (when given) becomes the URI's path so the native file
+	 * label and icon resolve to the real filename/path instead of an opaque
+	 * id -- `ChatMultiDiffContentPart` labels each row with
+	 * `basenameOrAuthority(modifiedUri ?? originalUri ?? goToFileUri)`, so a
+	 * bare `covexcode-diff:/1` would render every changed file as "1", "2",
+	 * ... The monotonically increasing id lives in the query string instead,
+	 * which keeps each registration unique even when two registrations share
+	 * a path (the before/after sides of one file) or the same file is diffed
+	 * again later.
+	 *
+	 * Content is never removed -- see the class doc comment; the extension
+	 * host's lifetime is short enough that this isn't worth the bookkeeping
+	 * to garbage-collect.
+	 */
+	register(content: string, displayPath?: string): vscode.Uri {
+		const id = this.nextId++;
+		// Normalize to forward slashes and strip any leading slashes so the
+		// path is a clean, deterministic relative path regardless of platform
+		// or whether the agent reported an absolute path.
+		const relPath = (displayPath ?? '').replace(/\\/g, '/').replace(/^\/+/, '');
+		const uri = vscode.Uri.from({
+			scheme: DIFF_SCHEME,
+			path: relPath ? `/${relPath}` : `/${id}`,
+			query: `v=${id}`,
+		});
 		this.documents.set(uri.toString(), content);
 		return uri;
 	}

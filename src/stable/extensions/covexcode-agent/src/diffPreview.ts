@@ -49,6 +49,209 @@ export interface DiffPreviewOptions {
 const BINARY_SAMPLE_LENGTH = 8192;
 const MAX_LCS_CELLS = 4_000_000;
 
+/** The fields of a `session/list_changes` entry the turn filter needs. */
+export interface JournalChangeLike {
+	path: string;
+	turn: number;
+	touches: number;
+	action: string;
+}
+
+/**
+ * Picks the journal entries that changed during the turn that just finished.
+ *
+ * Filtering on `entry.turn === finishedTurn` looks right and is wrong: the
+ * journal records the turn a file was FIRST touched in, not the latest one.
+ * Verified against the bundled agent -- editing `design-tokens.css` in turn 1
+ * and again in turn 2 leaves the entry at `{ turn: 1, touches: 2 }`, so a
+ * turn-equality filter drops the file from turn 2's summary and the "Changed N
+ * files" dropdown silently never appears again for that file. That is exactly
+ * the "it showed once, then stopped" symptom.
+ *
+ * `touches` is the counter that actually advances per turn (1 -> 2 above), so a
+ * file belongs to this turn when its count grew past the last snapshot. When
+ * there is no snapshot for a path -- the first turn, or a session resumed with
+ * journal entries this extension never saw -- the entry's own `turn` is the
+ * only signal left, and it is reliable in exactly that case.
+ *
+ * `blocked` entries are never file changes (covexcode only ran a shell command
+ * against them and kept no before-state), so they are always excluded.
+ */
+export function selectTurnChanges<T extends JournalChangeLike>(
+	changes: readonly T[],
+	previousTouches: ReadonlyMap<string, number>,
+	turn: number,
+): T[] {
+	return changes.filter(change => {
+		if (change.action === 'blocked') {
+			return false;
+		}
+		const previous = previousTouches.get(change.path);
+		if (previous === undefined) {
+			return change.turn === turn;
+		}
+		return change.touches > previous;
+	});
+}
+
+/**
+ * Records the current per-path `touches` counts into `into`, for the next turn
+ * to compare against. Written as a fill rather than a returned Map so callers
+ * never have to iterate a Map themselves -- this extension still compiles
+ * against an ES5 target, where Map iteration is not allowed.
+ */
+export function snapshotTouches(
+	changes: readonly JournalChangeLike[],
+	into: Map<string, number>,
+): void {
+	for (const change of changes) {
+		into.set(change.path, change.touches);
+	}
+}
+
+/**
+ * Whether `beforeText` can be trusted as the whole-file pre-image of
+ * `afterText`.
+ *
+ * The before-image on this path comes from the turn's own `read` result, and
+ * models routinely read only part of a file. A partial read is indistinguishable
+ * from a complete one by size alone, and feeding it in as if it were the whole
+ * file produces wildly wrong counts -- observed in a real end-to-end run, where
+ * a one-line change to a 239-line file (60 lines of which had been read) was
+ * reported as "+239 -60" instead of "+1 -1".
+ *
+ * A genuine pre-image of an ordinary edit is ~the same file, so the two texts
+ * must be nearly identical (BEFORE_IMAGE_MIN_COMMON_RATIO of the longer one)
+ * before their difference is worth showing. Anything less is reported as
+ * filename-only by the caller rather than with invented numbers; the counts
+ * stay exact for the case this path exists to serve (a small edit made without
+ * an approval prompt) and refuse to guess for a rewrite.
+ *
+ * A deleted file is accepted unconditionally: it is gone, so no read can be
+ * re-verified against it, and refusing would hide the change entirely.
+ */
+export function isPlausibleBeforeImage(beforeText: string, afterText: string): boolean {
+	const afterLines = splitDiffLines(afterText).length;
+	if (afterLines === 0) {
+		return true;
+	}
+	const beforeLines = splitDiffLines(beforeText).length;
+	if (beforeLines === 0) {
+		return false;
+	}
+	// countLineDiff is LCS-based, so `common` is the real number of unchanged
+	// lines -- and it reports whole-file counts when the input is too large to
+	// refine, which yields common === 0 and is rejected here as intended.
+	const { added, removed } = countLineDiff(beforeText, afterText);
+	const common = afterLines - added;
+	const unchanged = beforeLines - removed;
+	if (common !== unchanged) {
+		return false;
+	}
+	const longer = Math.max(beforeLines, afterLines);
+	return common / longer >= BEFORE_IMAGE_MIN_COMMON_RATIO;
+}
+
+const BEFORE_IMAGE_MIN_COMMON_RATIO = 0.9;
+
+/** Tool actions that write to the file, so their arrival means it is too late to read the before-image. */
+export const MUTATING_TOOL_ACTIONS: ReadonlySet<string> = new Set([
+	'edit', 'write', 'create', 'delete', 'apply_patch', 'str_replace',
+]);
+
+/** Tool actions that only inspect a file, so it is still untouched when they run. */
+export const READING_TOOL_ACTIONS: ReadonlySet<string> = new Set(['read', 'view', 'cat']);
+
+/**
+ * A tool-call title split into the action and the path it acted on, e.g.
+ * `read src/styles.css` -> `{ action: 'read', path: 'src/styles.css' }`.
+ *
+ * covexcode's tool titles are this agent build's only client-visible record of
+ * *which* file a call touched -- `tool_call_update` carries no path field of
+ * its own -- so the turn's read/mutation history is reconstructed from them.
+ * Returns `undefined` for any title that doesn't name a file (a shell command,
+ * a search), so a caller can never mistake one for a file operation.
+ *
+ * `grep`/`search` take a different shape (`grep <pattern> in <path>`) and are
+ * recognised because the agent very often inspects a file that way instead of
+ * reading it whole. Missing that case is what made the changed-files summary
+ * show a filename with no line counts at all: the agent grepped, never read,
+ * and the only before-image source was a `read` result.
+ */
+export function toolTitlePath(title: string): { action: string; path: string } | undefined {
+	const match = /^([a-z_]+)\s+(\S.*)$/i.exec(title.trim());
+	if (!match) {
+		return undefined;
+	}
+	const action = match[1].toLowerCase();
+	const rest = match[2].trim();
+	if (MUTATING_TOOL_ACTIONS.has(action) || READING_TOOL_ACTIONS.has(action)) {
+		return { action, path: rest };
+	}
+	if (action === 'grep' || action === 'search') {
+		// `lastIndexOf` because the pattern itself can contain " in ".
+		const marker = rest.lastIndexOf(' in ');
+		if (marker < 0) {
+			return undefined;
+		}
+		const path = rest.slice(marker + 4).trim();
+		return path ? { action, path } : undefined;
+	}
+	return undefined;
+}
+
+/**
+ * Tracks what each file looked like *before* this turn first mutated it, using
+ * the turn's own streamed tool results.
+ *
+ * This exists because covexcode puts a file's before/after text on the wire
+ * only inside `session/request_permission`; when an edit is applied without
+ * stopping for approval (the default `auto` permission mode) no such text is
+ * ever sent, and the journal behind `session/list_changes` keeps the
+ * before-image to itself. A `read` tool result *does* carry the file's text,
+ * and covexcode's `edit` requires an exact match, so the model reads before it
+ * writes -- which makes the last read taken before the first mutation a real
+ * before-image, not a guess.
+ *
+ * Freezing on the first mutation is what makes it correct: a read that happens
+ * *after* the edit (models often re-read to verify) must not overwrite the
+ * pre-edit text.
+ */
+export class TurnFileObserver {
+	private readonly reads = new Map<string, string>();
+	private readonly frozen = new Set<string>();
+
+	/** Records the text a `read` tool result returned for `path`. */
+	noteRead(path: string, text: string): void {
+		// Keep the FIRST pre-mutation snapshot: an earlier one is closer to the
+		// file's real state at turn start, and a later read is only useful if
+		// nothing was recorded before it.
+		if (!this.frozen.has(path) && !this.reads.has(path)) {
+			this.reads.set(path, text);
+		}
+	}
+
+	/** Whether a pre-mutation snapshot already exists for `path`. */
+	hasBefore(path: string): boolean {
+		return this.reads.has(path);
+	}
+
+	/** Whether `path` has already been mutated this turn. */
+	isFrozen(path: string): boolean {
+		return this.frozen.has(path);
+	}
+
+	/** Marks `path` as mutated this turn, freezing its before-image. */
+	noteMutation(path: string): void {
+		this.frozen.add(path);
+	}
+
+	/** The pre-mutation text seen for `path`, or `undefined` if never read first. */
+	beforeFor(path: string): string | undefined {
+		return this.reads.get(path);
+	}
+}
+
 /**
  * Splits text the way covexcode's own `str::lines()` does (split on `\n`,
  * drop the trailing empty string a final newline leaves behind, empty input
@@ -169,7 +372,10 @@ export function countLineDiff(oldText: string, newText: string): { added: number
 export function computeFileDiffSummary(opts: DiffPreviewOptions): FileDiffSummary {
 	const path = opts.newPath ?? opts.oldPath ?? '';
 	const oldText = opts.oldText;
-	const newText = opts.newText;
+	// Diffs arrive as protocol data, so a missing field is possible even
+	// though the type says otherwise. Treat it as "no content" instead of
+	// throwing and taking the whole chat response down with it.
+	const newText = opts.newText ?? '';
 
 	let status: FileChangeStatus;
 	if (opts.oldPath !== undefined && opts.newPath !== undefined && opts.oldPath !== opts.newPath) {
