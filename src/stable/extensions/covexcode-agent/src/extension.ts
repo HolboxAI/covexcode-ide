@@ -2,9 +2,21 @@
  *  Copyright (c) HolboxAI. Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
+import * as cp from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {
+	DEFAULT_HASH_SIZE_CAP_BYTES,
+	hashFileOnDisk,
+	type AcceptedSnapshot,
+} from './reviewChangesState';
+import {
+	ReviewController,
+	type GitBaselineResult,
+	type PublishedReviewEntry,
+	type PublishedReviewState,
+} from './reviewController';
 import {
 	PERMISSION_STORE_RELATIVE_PATH,
 	PermissionStore,
@@ -392,6 +404,119 @@ export function activate(context: vscode.ExtensionContext): void {
 	applyAgentState(context);
 	let client: AcpClient | undefined;
 	let sessionId: string | undefined;
+
+	const reviewDiffProvider = createReviewDiffContentProvider();
+	context.subscriptions.push(
+		reviewDiffProvider,
+		vscode.workspace.registerTextDocumentContentProvider('covexcode-review', reviewDiffProvider),
+	);
+	const reviewController = new ReviewController({
+		getWorkspaceRoots: () => (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath),
+		getClientForSession: (requestedSid) => {
+			const res = vscode.window.activeChatPanelSessionResource?.toString();
+			if (requestedSid && sessionId && requestedSid !== sessionId) {
+				return { sessionId: requestedSid, sessionResource: res };
+			}
+			return { client, sessionId, sessionResource: res };
+		},
+		getWorkspaceState: <T>(key: string) => context.workspaceState.get<T>(key),
+		updateWorkspaceState: async (key: string, value: unknown) => {
+			await context.workspaceState.update(key, value);
+		},
+		hashFile: (fsPath, capBytes) => hashFileOnDisk(fsPath, capBytes ?? DEFAULT_HASH_SIZE_CAP_BYTES),
+		readFileSnapshot: async (fsPath, capBytes): Promise<AcceptedSnapshot | undefined> => {
+			try {
+				const stat = await fs.promises.stat(fsPath);
+				if (!stat.isFile()) {
+					return undefined;
+				}
+				if (stat.size > (capBytes ?? DEFAULT_HASH_SIZE_CAP_BYTES)) {
+					return { oversized: true };
+				}
+				const buf = await fs.promises.readFile(fsPath);
+				return { contentBase64: buf.toString('base64') };
+			} catch {
+				return undefined;
+			}
+		},
+		readTextFile: async (fsPath) => {
+			try {
+				return await fs.promises.readFile(fsPath, 'utf8');
+			} catch {
+				return undefined;
+			}
+		},
+		writeFileSnapshot: async (fsPath, contentBase64) => {
+			await fs.promises.mkdir(path.dirname(fsPath), { recursive: true });
+			await fs.promises.writeFile(fsPath, Buffer.from(contentBase64, 'base64'));
+		},
+		deleteFileAndCloseTabs: async (fsPath) => {
+			await deletePathsAndCloseTabs([fsPath], vscode.workspace.workspaceFolders?.[0]?.uri);
+		},
+		isFileDirty: (fsPath) => {
+			const normTarget = process.platform === 'win32' || process.platform === 'darwin'
+				? path.resolve(fsPath).toLowerCase()
+				: path.resolve(fsPath);
+			return vscode.workspace.textDocuments.some(doc => {
+				if (!doc.isDirty || doc.uri.scheme !== 'file') {
+					return false;
+				}
+				const docPath = process.platform === 'win32' || process.platform === 'darwin'
+					? path.resolve(doc.uri.fsPath).toLowerCase()
+					: path.resolve(doc.uri.fsPath);
+				return docPath === normTarget;
+			});
+		},
+		confirmOverwrite: async (filePath, reason) => {
+			const detail = reason === 'dirty'
+				? `${filePath} has unsaved changes in an open editor. Rejecting will overwrite them.`
+				: `${filePath} was modified after the agent turn ended. Rejecting will overwrite those edits.`;
+			const choice = await vscode.window.showWarningMessage(
+				detail,
+				{ modal: true },
+				'Overwrite',
+			);
+			return choice === 'Overwrite';
+		},
+		confirmBulkReject: async (displayPaths) => {
+			const preview = displayPaths.slice(0, 12).join('\n');
+			const extra = displayPaths.length > 12 ? `\n...and ${displayPaths.length - 12} more` : '';
+			const choice = await vscode.window.showWarningMessage(
+				`Reject agent changes to ${displayPaths.length} files?`,
+				{ modal: true, detail: `${preview}${extra}` },
+				'Reject Files',
+			);
+			return choice === 'Reject Files';
+		},
+		notifyInfo: (message) => {
+			void vscode.window.showInformationMessage(message);
+		},
+		notifyWarning: (message) => {
+			void vscode.window.showWarningMessage(message);
+		},
+		gitBaseline: (rootPath, fsPath) => readGitHeadBaseline(rootPath, fsPath),
+		openDiffEditor: async ({ beforeContent, afterContent, afterFsPath, title, readOnlySingle }) => {
+			const name = path.basename(afterFsPath ?? title);
+			const beforeUri = reviewDiffProvider.set(`before/${Date.now()}/${name}`, beforeContent);
+			if (readOnlySingle) {
+				const doc = await vscode.workspace.openTextDocument(beforeUri);
+				await vscode.window.showTextDocument(doc, { preview: true });
+				return;
+			}
+			const afterUri = afterContent !== undefined
+				? reviewDiffProvider.set(`after/${Date.now()}/${name}`, afterContent)
+				: vscode.Uri.file(afterFsPath!);
+			await vscode.commands.executeCommand('vscode.diff', beforeUri, afterUri, title);
+		},
+		openPlainFile: async (fsPath) => {
+			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath));
+			await vscode.window.showTextDocument(doc, { preview: true });
+		},
+		publishState: (state: PublishedReviewState) => {
+			void vscode.commands.executeCommand('_covexcode.review.pushState', state).then(undefined, () => undefined);
+		},
+	});
+	context.subscriptions.push(reviewController);
 	let ready: Promise<void> | undefined;
 	// Last cwd handed to `session/new`. Compared at the start of each turn
 	// so File > Open Folder (or switching roots in a multi-root window)
@@ -1121,7 +1246,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			: undefined;
 
 		const onUpdate = (notification: SessionNotification) => {
-			if (notification.sessionId === activeSessionId) {
+			if (notification.sessionId === activeSessionId && !token.isCancellationRequested) {
 				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
 				updateUsageIndicator();
 			}
@@ -1130,8 +1255,14 @@ export function activate(context: vscode.ExtensionContext): void {
 			permissionRequest: RequestPermissionRequest,
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
+			if (token.isCancellationRequested) {
+				respond({ outcome: 'cancelled' });
+				return;
+			}
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor).then(respond);
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor)
+					.then(respond)
+					.catch(() => respond({ outcome: 'cancelled' }));
 			} else {
 				respond({ outcome: 'cancelled' });
 			}
@@ -1215,9 +1346,17 @@ export function activate(context: vscode.ExtensionContext): void {
 		// covexcode's own transport.rs docs on `session/cancel`. A cancelled
 		// request here still waits for the in-flight turn to finish rather
 		// than abandoning it silently.
+		const requestSessionResource = (request as vscode.ChatRequest & { sessionResource?: vscode.Uri }).sessionResource?.toString()
+			?? vscode.window.activeChatPanelSessionResource?.toString();
 		const onCancel = token.onCancellationRequested(() => {
 			permissionGate.cancelAll();
+			if (!isInline) {
+				void reviewController.onTurnEnded(activeSessionId, requestSessionResource);
+			}
 		});
+		if (!isInline) {
+			void reviewController.bindSession(activeSessionId, requestSessionResource);
+		}
 		try {
 			// `request.mode` only exists once the fork's `chatParticipantPrivate`
 			// proposal is on (see `patches/109-...`); read it defensively so the
@@ -1235,7 +1374,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			// look like the agent simply stopped after its last step. Say which
 			// limit was hit and how to continue.
 			const stopNote = stopReasonNote(turnResult.stopReason);
-			if (stopNote) {
+			if (stopNote && !token.isCancellationRequested) {
 				stream.markdown(`\n\n*${stopNote}*\n`);
 			}
 			// Finalize every resource that received a proposed diff so VS Code's
@@ -1255,11 +1394,13 @@ export function activate(context: vscode.ExtensionContext): void {
 			const footnote = [turnUsage.footnote(), sessionUsageFootnote(sessionUsage.total(), sessionCostRate())]
 				.filter((line): line is string => line !== undefined)
 				.join(' · ');
-			if (footnote) {
+			if (footnote && !token.isCancellationRequested) {
 				stream.markdown(`\n\n*${footnote}*\n`);
 			}
 		} catch (error) {
-			stream.markdown(`covexcode stopped responding: ${describeError(error)}`);
+			if (!token.isCancellationRequested) {
+				stream.markdown(`covexcode stopped responding: ${describeError(error)}`);
+			}
 			// Only tear down the session when the failure is actually fatal.
 			// Discarding on every prompt error would also throw away a healthy
 			// session (and the model's context) for a normal API/model error.
@@ -1272,6 +1413,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			activeClient.off('browserCheckRequest', onBrowserCheckRequest);
 			activeClient.off('browserInteractRequest', onBrowserInteractRequest);
 			onCancel.dispose();
+			if (!isInline) {
+				await reviewController.onTurnEnded(activeSessionId, requestSessionResource);
+			}
 		}
 	};
 
@@ -1326,6 +1470,12 @@ export function activate(context: vscode.ExtensionContext): void {
 						: { files: scope.files };
 				const summary = await activeClient.rollback(activeSessionId, options);
 				void vscode.window.showInformationMessage(`covexcode: ${summary}`);
+				const cleared = scope.kind === 'files' ? scope.files : undefined;
+				await reviewController.onExternalRollback(
+					activeSessionId,
+					cleared,
+					vscode.window.activeChatPanelSessionResource?.toString(),
+				);
 			} catch (error) {
 				void vscode.window.showErrorMessage(`covexcode: couldn't roll back (${describeError(error)})`);
 			}
@@ -1350,36 +1500,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				.map(c => typeof c === 'string' ? c : (c.action === 'delete' ? c.path : undefined))
 				.filter((p): p is string => Boolean(p));
 
-			const deleteKnownFilesAndCloseTabs = async () => {
-				for (const p of toDeletePaths) {
-					const trimmed = p.trim();
-					try {
-						const fileUri = path.isAbsolute(trimmed)
-							? vscode.Uri.file(trimmed)
-							: (wsFolder ? vscode.Uri.joinPath(wsFolder, trimmed) : undefined);
-						if (fileUri) {
-							await vscode.workspace.fs.delete(fileUri, { useTrash: false });
-						}
-					} catch {}
-					try {
-						const wsPath = wsFolder?.fsPath;
-						const absPath = path.isAbsolute(trimmed) ? trimmed : (wsPath ? path.join(wsPath, trimmed) : undefined);
-						if (absPath && fs.existsSync(absPath)) {
-							fs.unlinkSync(absPath);
-						}
-					} catch {}
-				}
-				try {
-					for (const tabGroup of vscode.window.tabGroups.all) {
-						for (const tab of tabGroup.tabs) {
-							const uri = (tab.input as any)?.uri as vscode.Uri | undefined;
-							if (uri && toDeletePaths.some(p => uri.fsPath.endsWith(p.trim()))) {
-								await vscode.window.tabGroups.close(tab);
-							}
-						}
-					}
-				} catch {}
-			};
+			const deleteKnownFilesAndCloseTabs = () => deletePathsAndCloseTabs(toDeletePaths, wsFolder);
 
 			if (!client || !sessionId) {
 				await deleteKnownFilesAndCloseTabs();
@@ -1425,9 +1546,98 @@ export function activate(context: vscode.ExtensionContext): void {
 			} catch (error) {
 				await deleteKnownFilesAndCloseTabs();
 				void vscode.window.showErrorMessage(`covexcode: couldn't restore checkpoint (${describeError(error)})`);
+			} finally {
+				await reviewController.onExternalRollback(
+					activeSessionId,
+					undefined,
+					vscode.window.activeChatPanelSessionResource?.toString(),
+				);
 			}
 		}),
 	);
+
+	// Helper to let command palette callers pick a pending review item when invoked without arguments.
+	const pickReviewEntryFromPalette = async (
+		sessionResource: string | undefined,
+		source: 'undoable' | 'blocked',
+		placeHolder: string,
+	): Promise<PublishedReviewEntry | undefined> => {
+		const state = await reviewController.getState(sessionResource);
+		const items = source === 'undoable' ? state.undoable : state.blocked;
+		if (items.length === 0) {
+			void vscode.window.showInformationMessage(
+				source === 'undoable' ? 'covexcode: no pending changes to review.' : 'covexcode: no un-undoable notices to dismiss.',
+			);
+			return undefined;
+		}
+		const picked = await vscode.window.showQuickPick(
+			items.map(entry => ({
+				label: entry.displayPath,
+				description: entry.kind,
+				detail: entry.reason,
+				entry,
+			})),
+			{ placeHolder },
+		);
+		return picked?.entry;
+	};
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.review.accept', async (targetPath?: string, sessionResource?: string) => {
+			if (targetPath) {
+				return reviewController.accept([targetPath], sessionResource);
+			}
+			const picked = await pickReviewEntryFromPalette(sessionResource, 'undoable', 'Select an agent change to accept');
+			if (!picked) {
+				return undefined;
+			}
+			return reviewController.accept([picked.path], sessionResource);
+		}),
+		vscode.commands.registerCommand('covexcode.review.acceptAll', async (sessionResource?: string) => {
+			return reviewController.acceptAll(sessionResource);
+		}),
+		vscode.commands.registerCommand('covexcode.review.reject', async (targetPath?: string, sessionResource?: string) => {
+			if (targetPath) {
+				return reviewController.reject([targetPath], sessionResource);
+			}
+			const picked = await pickReviewEntryFromPalette(sessionResource, 'undoable', 'Select an agent change to reject');
+			if (!picked) {
+				return undefined;
+			}
+			return reviewController.reject([picked.path], sessionResource);
+		}),
+		vscode.commands.registerCommand('covexcode.review.rejectAll', async (sessionResource?: string) => {
+			return reviewController.rejectAll(sessionResource);
+		}),
+		vscode.commands.registerCommand('covexcode.review.openDiff', async (targetPath?: string, sessionResource?: string) => {
+			if (targetPath) {
+				return reviewController.openDiff(targetPath, sessionResource);
+			}
+			const picked = await pickReviewEntryFromPalette(sessionResource, 'undoable', 'Select a changed file to inspect diff');
+			if (!picked) {
+				return undefined;
+			}
+			return reviewController.openDiff(picked.path, sessionResource);
+		}),
+		vscode.commands.registerCommand('covexcode.review.dismissBlocked', async (targetPath?: string, sessionResource?: string) => {
+			if (targetPath) {
+				return reviewController.dismissBlocked([targetPath], sessionResource);
+			}
+			const picked = await pickReviewEntryFromPalette(sessionResource, 'blocked', 'Select a notice to dismiss');
+			if (!picked) {
+				return undefined;
+			}
+			return reviewController.dismissBlocked([picked.path], sessionResource);
+		}),
+		vscode.commands.registerCommand('covexcode.review.getState', async (sessionResource?: string) => {
+			return reviewController.getState(sessionResource);
+		}),
+		vscode.window.onDidChangeActiveChatPanelSessionResource(resource => {
+			void reviewController.onSessionSwitched(resource?.toString());
+		}),
+	);
+
+	void reviewController.rehydrate();
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('covexcode.getTurnChanges', async (turn?: number) => {
@@ -3285,6 +3495,138 @@ async function openBrowserPane(url: string): Promise<void> {
 
 function delay(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function createReviewDiffContentProvider(): vscode.TextDocumentContentProvider & {
+	set(key: string, text: string): vscode.Uri;
+	dispose(): void;
+} {
+	const contents = new Map<string, string>();
+	const emitter = new vscode.EventEmitter<vscode.Uri>();
+	return {
+		onDidChange: emitter.event,
+		set(key: string, text: string): vscode.Uri {
+			const safePath = key.split('/').map(encodeURIComponent).join('/');
+			const uri = vscode.Uri.from({ scheme: 'covexcode-review', path: `/${safePath}` });
+			contents.set(uri.toString(), text);
+			emitter.fire(uri);
+			return uri;
+		},
+		provideTextDocumentContent(uri: vscode.Uri): string {
+			return contents.get(uri.toString()) ?? '';
+		},
+		dispose(): void {
+			contents.clear();
+			emitter.dispose();
+		},
+	};
+}
+
+function normalizeTabComparePath(p: string): string {
+	const resolved = path.resolve(p);
+	try {
+		const dir = fs.realpathSync(path.dirname(resolved));
+		const real = path.join(dir, path.basename(resolved));
+		return process.platform === 'win32' || process.platform === 'darwin' ? real.toLowerCase() : real;
+	} catch {
+		return process.platform === 'win32' || process.platform === 'darwin' ? resolved.toLowerCase() : resolved;
+	}
+}
+
+async function deletePathsAndCloseTabs(rawPaths: readonly string[], wsFolder: vscode.Uri | undefined): Promise<void> {
+	const normalizedTargets: string[] = [];
+	for (const p of rawPaths) {
+		const trimmed = p.trim();
+		const wsPath = wsFolder?.fsPath;
+		const absPath = path.isAbsolute(trimmed) ? trimmed : (wsPath ? path.join(wsPath, trimmed) : undefined);
+		if (absPath) {
+			normalizedTargets.push(normalizeTabComparePath(absPath));
+		}
+		try {
+			const fileUri = path.isAbsolute(trimmed)
+				? vscode.Uri.file(trimmed)
+				: (wsFolder ? vscode.Uri.joinPath(wsFolder, trimmed) : undefined);
+			if (fileUri) {
+				await vscode.workspace.fs.delete(fileUri, { useTrash: false });
+			}
+		} catch {}
+		try {
+			if (absPath && fs.existsSync(absPath)) {
+				fs.unlinkSync(absPath);
+			}
+		} catch {}
+	}
+	try {
+		const matchesDeletedTarget = (uri: vscode.Uri | undefined): boolean => {
+			if (!uri || uri.scheme !== 'file') {
+				return false;
+			}
+			const normUri = normalizeTabComparePath(uri.fsPath);
+			return normalizedTargets.some(target => target === normUri)
+				|| rawPaths.some(p => {
+					const suffix = p.trim();
+					return process.platform === 'win32' || process.platform === 'darwin'
+						? normUri.endsWith(suffix.toLowerCase())
+						: normUri.endsWith(suffix);
+				});
+		};
+		for (const tabGroup of vscode.window.tabGroups.all) {
+			for (const tab of tabGroup.tabs) {
+				const input = tab.input as {
+					uri?: vscode.Uri;
+					modified?: vscode.Uri;
+					original?: vscode.Uri;
+					textDiffs?: ReadonlyArray<{ modified?: vscode.Uri; original?: vscode.Uri }>;
+				} | undefined;
+				if (!input) {
+					continue;
+				}
+				const matchesMultiDiff = Array.isArray(input.textDiffs)
+					&& input.textDiffs.length > 0
+					&& input.textDiffs.every(td => matchesDeletedTarget(td.modified));
+				if (matchesDeletedTarget(input.uri) || matchesDeletedTarget(input.modified) || matchesMultiDiff) {
+					await vscode.window.tabGroups.close(tab);
+				}
+			}
+		}
+	} catch {}
+}
+
+async function readGitHeadBaseline(rootPath: string, fsPath: string): Promise<GitBaselineResult> {
+	const execGit = (args: string[]): Promise<{ ok: boolean; stdout: string }> =>
+		new Promise(resolve => {
+			cp.execFile('git', args, { cwd: rootPath, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+				if (err) {
+					resolve({ ok: false, stdout: '' });
+					return;
+				}
+				resolve({ ok: true, stdout });
+			});
+		});
+
+	const top = await execGit(['rev-parse', '--show-toplevel']);
+	if (!top.ok) {
+		return { available: false };
+	}
+	const repoRoot = top.stdout.trim();
+	const relToRepo = path.relative(repoRoot, fsPath).replace(/\\/g, '/');
+	if (!relToRepo || relToRepo.startsWith('..') || path.isAbsolute(relToRepo)) {
+		return { available: false };
+	}
+	// Require no staged changes so we don't confuse pre-existing staged edits with the agent's baseline.
+	const stagedCheck = await execGit(['diff', '--cached', '--quiet', '--', relToRepo]);
+	if (!stagedCheck.ok) {
+		return { available: false };
+	}
+	const headContent = await execGit(['show', `HEAD:${relToRepo}`]);
+	if (!headContent.ok) {
+		return { available: false };
+	}
+	return {
+		available: true,
+		beforeContent: headContent.stdout,
+		existedBefore: true,
+	};
 }
 
 export function deactivate(): void {

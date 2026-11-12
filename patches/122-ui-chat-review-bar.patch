@@ -1,0 +1,719 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatReviewChangesBar.ts b/src/vs/workbench/contrib/chat/browser/widget/chatReviewChangesBar.ts
+new file mode 100644
+index 0000000..976b430
+--- /dev/null
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatReviewChangesBar.ts
+@@ -0,0 +1,408 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) HolboxAI. Licensed under the MIT License.
++ *--------------------------------------------------------------------------------------------*/
++
++import { Codicon } from '../../../../../base/common/codicons.js';
++import { Emitter, Event } from '../../../../../base/common/event.js';
++import { Disposable } from '../../../../../base/common/lifecycle.js';
++import { ThemeIcon } from '../../../../../base/common/themables.js';
++import { URI } from '../../../../../base/common/uri.js';
++import { localize } from '../../../../../nls.js';
++import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
++
++export type ReviewEntryKind = 'added' | 'modified' | 'deleted' | 'shell';
++
++export interface IReviewBarEntry {
++	readonly path: string;
++	readonly displayPath: string;
++	readonly fsPath: string;
++	readonly kind: ReviewEntryKind;
++	readonly touches: number;
++	readonly undoable: boolean;
++	readonly reason?: string;
++}
++
++export interface IReviewBarState {
++	readonly sessionResource?: string;
++	readonly sessionId?: string;
++	readonly undoable: readonly IReviewBarEntry[];
++	readonly blocked: readonly IReviewBarEntry[];
++}
++
++const pushStateEmitter = new Emitter<IReviewBarState>();
++let pushCommandRegistered = false;
++
++function ensurePushCommandRegistered(): void {
++	if (pushCommandRegistered) {
++		return;
++	}
++	pushCommandRegistered = true;
++	CommandsRegistry.registerCommand('_covexcode.review.pushState', (_accessor, state: IReviewBarState) => {
++		if (state && Array.isArray(state.undoable) && Array.isArray(state.blocked)) {
++			pushStateEmitter.fire(state);
++		}
++	});
++}
++
++function middleTruncatePath(filePath: string, maxChars = 48): string {
++	if (filePath.length <= maxChars) {
++		return filePath;
++	}
++	const slash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
++	if (slash > 0) {
++		const fileName = filePath.slice(slash);
++		const prefixLen = Math.max(8, maxChars - fileName.length - 3);
++		if (prefixLen + 3 + fileName.length <= maxChars) {
++			return `${filePath.slice(0, prefixLen)}...${fileName}`;
++		}
++	}
++	const head = Math.ceil((maxChars - 3) / 2);
++	const tail = Math.floor((maxChars - 3) / 2);
++	return `${filePath.slice(0, head)}...${filePath.slice(filePath.length - tail)}`;
++}
++
++function kindLabel(kind: ReviewEntryKind): string {
++	switch (kind) {
++		case 'added':
++			return localize('covexcode.review.kindAdded', 'Added');
++		case 'modified':
++			return localize('covexcode.review.kindModified', 'Modified');
++		case 'deleted':
++			return localize('covexcode.review.kindDeleted', 'Deleted');
++		case 'shell':
++			return localize('covexcode.review.kindShell', 'Shell');
++	}
++}
++
++export class ChatReviewChangesBar extends Disposable {
++	public readonly domNode: HTMLElement;
++
++	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
++	public readonly onDidChangeHeight: Event<void> = this._onDidChangeHeight.event;
++
++	private sessionResource: URI | undefined;
++	private state: IReviewBarState = { undoable: [], blocked: [] };
++	private collapsed = false;
++	private readonly rowMainButtons: HTMLButtonElement[] = [];
++
++	constructor(
++		@ICommandService private readonly commandService: ICommandService,
++	) {
++		super();
++		ensurePushCommandRegistered();
++
++		const root = document.createElement('section');
++		root.className = 'covexcode-review-bar';
++		root.setAttribute('role', 'region');
++		root.setAttribute('aria-label', localize('covexcode.review.regionLabel', 'Pending Agent Changes'));
++		root.style.display = 'none';
++		this.domNode = root;
++
++		this._register(pushStateEmitter.event(pushed => {
++			if (!this.matchesSession(pushed.sessionResource)) {
++				return;
++			}
++			this.applyState(pushed);
++		}));
++
++		// Prevent ancestor chat/workbench keydown handlers from calling preventDefault()
++		// on Enter/Space when a Review Bar button is focused.
++		root.addEventListener('keydown', event => {
++			if (event.target instanceof HTMLButtonElement && (event.key === 'Enter' || event.key === ' ')) {
++				event.stopPropagation();
++			}
++		});
++	}
++
++	public get height(): number {
++		return this.domNode.style.display === 'none' ? 0 : this.domNode.offsetHeight;
++	}
++
++	public setSessionResource(resource: URI | undefined): void {
++		const prev = this.sessionResource?.toString();
++		const next = resource?.toString();
++		this.sessionResource = resource;
++		if (prev !== next) {
++			this.applyState({ sessionResource: next, undoable: [], blocked: [] });
++		}
++		if (next) {
++			void this.pullState(next);
++		}
++	}
++
++	private async pullState(resourceStr: string): Promise<void> {
++		try {
++			const state = await this.commandService.executeCommand<IReviewBarState>('covexcode.review.getState', resourceStr);
++			if (state && this.matchesSession(state.sessionResource ?? resourceStr)) {
++				this.applyState(state);
++			}
++		} catch {
++			// Extension host may still be activating at startup; push event will follow once ready.
++		}
++	}
++
++	private matchesSession(pushedResource: string | undefined): boolean {
++		const ownResource = this.sessionResource?.toString();
++		if (!ownResource) {
++			return false;
++		}
++		return pushedResource === ownResource;
++	}
++
++	private applyState(next: IReviewBarState): void {
++		this.state = {
++			sessionResource: next.sessionResource,
++			sessionId: next.sessionId,
++			undoable: Array.isArray(next.undoable) ? next.undoable : [],
++			blocked: Array.isArray(next.blocked) ? next.blocked : [],
++		};
++		this.render();
++	}
++
++	private createIconSpan(icon: ThemeIcon): HTMLElement {
++		const span = document.createElement('span');
++		span.className = ThemeIcon.asClassName(icon);
++		span.setAttribute('aria-hidden', 'true');
++		return span;
++	}
++
++	private clearChildren(el: HTMLElement): void {
++		while (el.firstChild) {
++			el.removeChild(el.firstChild);
++		}
++	}
++
++	private runCommand(commandId: string, ...args: unknown[]): void {
++		void this.commandService.executeCommand(commandId, ...args);
++	}
++
++	private handleListKeyDown(event: KeyboardEvent): void {
++		if (this.rowMainButtons.length === 0) {
++			return;
++		}
++		const active = document.activeElement as HTMLElement | null;
++		const currentIdx = this.rowMainButtons.findIndex(btn => btn === active || btn.parentElement?.contains(active));
++		if (currentIdx === -1) {
++			return;
++		}
++
++		let nextIdx = -1;
++		if (event.key === 'ArrowDown') {
++			nextIdx = Math.min(this.rowMainButtons.length - 1, currentIdx + 1);
++		} else if (event.key === 'ArrowUp') {
++			nextIdx = Math.max(0, currentIdx - 1);
++		} else if (event.key === 'Home') {
++			nextIdx = 0;
++		} else if (event.key === 'End') {
++			nextIdx = this.rowMainButtons.length - 1;
++		}
++
++		if (nextIdx >= 0 && nextIdx !== currentIdx) {
++			event.preventDefault();
++			event.stopPropagation();
++			this.rowMainButtons[nextIdx]?.focus();
++		}
++	}
++
++	private render(restoreToggleFocus = false): void {
++		const activeEl = document.activeElement;
++		const hadToggleFocus = restoreToggleFocus || (
++			activeEl instanceof HTMLElement &&
++			this.domNode.contains(activeEl) &&
++			activeEl.classList.contains('covexcode-review-toggle')
++		);
++		this.clearChildren(this.domNode);
++		this.rowMainButtons.length = 0;
++
++		const undoable = this.state.undoable;
++		const blocked = this.state.blocked;
++		const resStr = this.sessionResource?.toString();
++
++		if (undoable.length === 0 && blocked.length === 0) {
++			this.domNode.style.display = 'none';
++			this._onDidChangeHeight.fire();
++			return;
++		}
++
++		this.domNode.style.display = '';
++
++		if (undoable.length > 0) {
++			const header = document.createElement('div');
++			header.className = 'covexcode-review-header';
++
++			const toggleBtn = document.createElement('button');
++			toggleBtn.type = 'button';
++			toggleBtn.className = 'covexcode-review-toggle';
++			toggleBtn.setAttribute('aria-expanded', String(!this.collapsed));
++			toggleBtn.appendChild(this.createIconSpan(this.collapsed ? Codicon.chevronRight : Codicon.chevronDown));
++
++			const countLabel = document.createElement('span');
++			countLabel.className = 'covexcode-review-count';
++			countLabel.textContent = undoable.length === 1
++				? localize('covexcode.review.oneFileChanged', '1 file changed')
++				: localize('covexcode.review.nFilesChanged', '{0} files changed', undoable.length);
++			toggleBtn.appendChild(countLabel);
++
++			toggleBtn.addEventListener('click', () => {
++				this.collapsed = !this.collapsed;
++				this.render(true);
++			});
++			header.appendChild(toggleBtn);
++
++			const bulkActions = document.createElement('div');
++			bulkActions.className = 'covexcode-review-bulk-actions';
++
++			const rejectAllBtn = document.createElement('button');
++			rejectAllBtn.type = 'button';
++			rejectAllBtn.className = 'covexcode-review-btn covexcode-review-btn-reject';
++			rejectAllBtn.textContent = localize('covexcode.review.rejectAll', 'Reject All');
++			rejectAllBtn.title = localize('covexcode.review.rejectAllTooltip', 'Reject all pending file changes');
++			rejectAllBtn.addEventListener('click', () => this.runCommand('covexcode.review.rejectAll', resStr));
++			bulkActions.appendChild(rejectAllBtn);
++
++			const acceptAllBtn = document.createElement('button');
++			acceptAllBtn.type = 'button';
++			acceptAllBtn.className = 'covexcode-review-btn covexcode-review-btn-accept';
++			acceptAllBtn.textContent = localize('covexcode.review.acceptAll', 'Accept All');
++			acceptAllBtn.title = localize('covexcode.review.acceptAllTooltip', 'Accept all pending file changes');
++			acceptAllBtn.addEventListener('click', () => this.runCommand('covexcode.review.acceptAll', resStr));
++			bulkActions.appendChild(acceptAllBtn);
++
++			header.appendChild(bulkActions);
++			this.domNode.appendChild(header);
++			if (hadToggleFocus) {
++				toggleBtn.focus();
++			}
++
++			if (!this.collapsed) {
++				const list = document.createElement('div');
++				list.className = 'covexcode-review-list';
++				list.setAttribute('role', 'list');
++				list.addEventListener('keydown', e => this.handleListKeyDown(e));
++
++				for (const entry of undoable) {
++					list.appendChild(this.createUndoableRow(entry, resStr));
++				}
++				this.domNode.appendChild(list);
++			}
++		}
++
++		if (blocked.length > 0) {
++			const group = document.createElement('div');
++			group.className = 'covexcode-review-blocked-group';
++			group.setAttribute('role', 'list');
++
++			const groupTitle = document.createElement('div');
++			groupTitle.className = 'covexcode-review-blocked-title';
++			groupTitle.textContent = localize('covexcode.review.cantUndo', "Can't undo");
++			group.appendChild(groupTitle);
++
++			for (const entry of blocked) {
++				group.appendChild(this.createBlockedRow(entry, resStr));
++			}
++			this.domNode.appendChild(group);
++		}
++
++		this._onDidChangeHeight.fire();
++	}
++
++	private createUndoableRow(entry: IReviewBarEntry, resStr: string | undefined): HTMLElement {
++		const row = document.createElement('div');
++		row.className = 'covexcode-review-row';
++		row.setAttribute('role', 'listitem');
++
++		const labelText = kindLabel(entry.kind);
++		const fullPath = entry.fsPath || entry.displayPath;
++
++		const mainBtn = document.createElement('button');
++		mainBtn.type = 'button';
++		mainBtn.className = 'covexcode-review-row-main';
++		mainBtn.title = fullPath;
++		mainBtn.setAttribute('aria-label', localize('covexcode.review.openDiffAria', '{0}: {1}. Open diff.', labelText, entry.displayPath));
++
++		const badge = document.createElement('span');
++		badge.className = `covexcode-review-badge covexcode-review-badge-${entry.kind}`;
++		badge.textContent = labelText;
++		mainBtn.appendChild(badge);
++
++		const pathEl = document.createElement('span');
++		pathEl.className = 'covexcode-review-path';
++		pathEl.textContent = middleTruncatePath(entry.displayPath);
++		mainBtn.appendChild(pathEl);
++
++		mainBtn.addEventListener('click', () => {
++			this.runCommand('covexcode.review.openDiff', entry.path, resStr);
++		});
++		this.rowMainButtons.push(mainBtn);
++		row.appendChild(mainBtn);
++
++		const actions = document.createElement('div');
++		actions.className = 'covexcode-review-row-actions';
++
++		const rejectBtn = document.createElement('button');
++		rejectBtn.type = 'button';
++		rejectBtn.className = 'covexcode-review-icon-btn covexcode-review-icon-reject';
++		const rejectTitle = localize('covexcode.review.rejectFile', 'Reject {0}', entry.displayPath);
++		rejectBtn.title = rejectTitle;
++		rejectBtn.setAttribute('aria-label', rejectTitle);
++		rejectBtn.appendChild(this.createIconSpan(Codicon.discard));
++		rejectBtn.addEventListener('click', e => {
++			e.stopPropagation();
++			this.runCommand('covexcode.review.reject', entry.path, resStr);
++		});
++		actions.appendChild(rejectBtn);
++
++		const acceptBtn = document.createElement('button');
++		acceptBtn.type = 'button';
++		acceptBtn.className = 'covexcode-review-icon-btn covexcode-review-icon-accept';
++		const acceptTitle = localize('covexcode.review.acceptFile', 'Accept {0}', entry.displayPath);
++		acceptBtn.title = acceptTitle;
++		acceptBtn.setAttribute('aria-label', acceptTitle);
++		acceptBtn.appendChild(this.createIconSpan(Codicon.check));
++		acceptBtn.addEventListener('click', e => {
++			e.stopPropagation();
++			this.runCommand('covexcode.review.accept', entry.path, resStr);
++		});
++		actions.appendChild(acceptBtn);
++
++		row.appendChild(actions);
++		return row;
++	}
++
++	private createBlockedRow(entry: IReviewBarEntry, resStr: string | undefined): HTMLElement {
++		const row = document.createElement('div');
++		row.className = 'covexcode-review-row covexcode-review-row-blocked';
++		row.setAttribute('role', 'listitem');
++
++		const info = document.createElement('div');
++		info.className = 'covexcode-review-row-main covexcode-review-blocked-main';
++		const detailText = entry.reason || entry.displayPath;
++		info.title = detailText;
++
++		const badge = document.createElement('span');
++		badge.className = 'covexcode-review-badge covexcode-review-badge-shell';
++		badge.textContent = kindLabel('shell');
++		info.appendChild(badge);
++
++		const textEl = document.createElement('span');
++		textEl.className = 'covexcode-review-path';
++		textEl.textContent = detailText;
++		info.appendChild(textEl);
++
++		row.appendChild(info);
++
++		const dismissBtn = document.createElement('button');
++		dismissBtn.type = 'button';
++		dismissBtn.className = 'covexcode-review-icon-btn';
++		const dismissTitle = localize('covexcode.review.dismissNotice', 'Dismiss notice');
++		dismissBtn.title = dismissTitle;
++		dismissBtn.setAttribute('aria-label', dismissTitle);
++		dismissBtn.appendChild(this.createIconSpan(Codicon.close));
++		dismissBtn.addEventListener('click', () => {
++			this.runCommand('covexcode.review.dismissBlocked', entry.path, resStr);
++		});
++		row.appendChild(dismissBtn);
++
++		return row;
++	}
++}
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts b/src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts
+index 2bfb996..35a93fb 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatWidget.ts
+@@ -76,6 +76,7 @@ import { ChatAttachmentModel } from '../attachments/chatAttachmentModel.js';
+ import { IChatAttachmentResolveService } from '../attachments/chatAttachmentResolveService.js';
+ import { ChatDynamicVariableModel } from '../attachments/chatDynamicVariables.js';
+ import { ChatSuggestNextWidget } from './chatContentParts/chatSuggestNextWidget.js';
++import { ChatReviewChangesBar } from './chatReviewChangesBar.js';
+ import { ChatInputPart, IChatInputPartOptions, IChatInputStyles } from './input/chatInputPart.js';
+ import { IChatListItemTemplate } from './chatListRenderer.js';
+ import { ChatListWidget } from './chatListWidget.js';
+@@ -282,6 +283,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 	private _gettingStartedTipPartRef: ChatTipContentPart | undefined;
+ 
+ 	private readonly chatSuggestNextWidget: ChatSuggestNextWidget;
++	private readonly reviewChangesBar: ChatReviewChangesBar;
+ 
+ 	private bodyDimension: dom.Dimension | undefined;
+ 	private visibleChangeCount = 0;
+@@ -538,6 +540,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 		}));
+ 
+ 		this.chatSuggestNextWidget = this._register(this.instantiationService.createInstance(ChatSuggestNextWidget));
++		this.reviewChangesBar = this._register(this.instantiationService.createInstance(ChatReviewChangesBar));
++		this._register(this.onDidChangeViewModel(e => {
++			this.reviewChangesBar.setSessionResource(e.currentSessionResource);
++		}));
+ 
+ 		// Clear the autopilot goal banner whenever the active request finishes.
+ 		this._register(autorun(r => {
+@@ -715,7 +721,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 	}
+ 
+ 	get contentHeight(): number {
+-		return this.input.height.get() + this.listWidget.contentHeight + this.chatSuggestNextWidget.height;
++		return this.input.height.get() + this.listWidget.contentHeight + this.chatSuggestNextWidget.height + this.reviewChangesBar.height;
+ 	}
+ 
+ 	get scrollTop(): number {
+@@ -747,6 +753,11 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 				this.layout(this.bodyDimension.height, this.bodyDimension.width);
+ 			}
+ 		}));
++		this._register(this.reviewChangesBar.onDidChangeHeight(() => {
++			if (this.bodyDimension) {
++				this.layout(this.bodyDimension.height, this.bodyDimension.width);
++			}
++		}));
+ 		this._register(this.chatSuggestNextWidget.onDidSelectPrompt(({ handoff, agentId, withAutopilot }) => {
+ 			this.handleNextPromptSelection(handoff, agentId, withAutopilot);
+ 		}));
+@@ -757,6 +768,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 		} else {
+ 			this.listContainer = dom.append(this.container, $(`.interactive-list`));
+ 			dom.append(this.container, this.chatSuggestNextWidget.domNode);
++			if (!isInlineChat(this)) {
++				dom.append(this.container, this.reviewChangesBar.domNode);
++				this.reviewChangesBar.setSessionResource(this.viewModel?.sessionResource);
++			}
+ 			this.createInput(this.container, { renderFollowups, renderStyle, renderInputToolbarBelowInput });
+ 		}
+ 
+@@ -2863,7 +2878,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 			this.inlineInputPart?.layout(width);
+ 		}
+ 
+-		const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height;
++		const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height + this.reviewChangesBar.height;
+ 		const inputMaxHeight = this._dynamicMessageLayoutData || this.location !== ChatAgentLocation.Chat
+ 			? undefined
+ 			: this.inputPartMaxHeightOverride !== undefined
+@@ -2887,7 +2902,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 		}
+ 
+ 		const { height, width } = this.bodyDimension;
+-		const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height;
++		const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height + this.reviewChangesBar.height;
+ 
+ 		const inputHeight = this.inputPart.height.get();
+ 		const lastElementVisible = this.listWidget.isScrolledToBottom;
+@@ -2938,7 +2953,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 				const width = this.bodyDimension?.width ?? this.container.offsetWidth;
+ 				this.input.layout(width);
+ 				const inputPartHeight = this.input.height.get();
+-				const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height;
++				const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height + this.reviewChangesBar.height;
+ 				const newHeight = Math.min(renderHeight + diff, possibleMaxHeight - inputPartHeight - chatSuggestNextWidgetHeight);
+ 				this.layout(newHeight + inputPartHeight + chatSuggestNextWidgetHeight, width);
+ 			});
+@@ -2983,7 +2998,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
+ 		const width = this.bodyDimension?.width ?? this.container.offsetWidth;
+ 		this.input.layout(width);
+ 		const inputHeight = this.input.height.get();
+-		const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height;
++		const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height + this.reviewChangesBar.height;
+ 
+ 		const totalMessages = this.viewModel.getItems();
+ 		// grab the last N messages
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+index 54b6cd6..b04ab78 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+@@ -4935,3 +4935,201 @@ a[href*="permission.review"] {
+ .chat-confirm-undo-card .confirm-undo-confirm:active {
+ 	background: #075985;
+ }
++
++/* covexcode: docked post-turn Review Bar above chat input */
++.interactive-session > .covexcode-review-bar {
++	margin: 0 12px 6px 12px;
++	border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
++	border-radius: 6px;
++	background-color: var(--vscode-editorWidget-background);
++	color: var(--vscode-foreground);
++	font-size: 12px;
++	overflow: hidden;
++	flex-shrink: 0;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-header {
++	display: flex;
++	align-items: center;
++	justify-content: space-between;
++	gap: 4px;
++	padding: 5px 8px;
++	background-color: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-toggle {
++	display: inline-flex;
++	align-items: center;
++	gap: 3px;
++	min-width: 0;
++	overflow: hidden;
++	background: transparent;
++	border: none;
++	color: var(--vscode-foreground);
++	font: inherit;
++	font-weight: 600;
++	padding: 2px;
++	border-radius: 4px;
++	cursor: pointer;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-count {
++	overflow: hidden;
++	text-overflow: ellipsis;
++	white-space: nowrap;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-toggle:hover,
++.interactive-session > .covexcode-review-bar .covexcode-review-toggle:focus-visible {
++	background-color: var(--vscode-list-hoverBackground);
++	outline: 1px solid var(--vscode-focusBorder);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-bulk-actions {
++	display: inline-flex;
++	align-items: center;
++	gap: 4px;
++	flex-shrink: 0;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-btn {
++	border: 1px solid var(--vscode-button-border, transparent);
++	border-radius: 4px;
++	padding: 2px 6px;
++	font-size: 11px;
++	font-weight: 500;
++	white-space: nowrap;
++	flex-shrink: 0;
++	cursor: pointer;
++	line-height: 18px;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-btn:focus-visible,
++.interactive-session > .covexcode-review-bar .covexcode-review-row-main:focus-visible,
++.interactive-session > .covexcode-review-bar .covexcode-review-icon-btn:focus-visible {
++	outline: 1px solid var(--vscode-focusBorder);
++	outline-offset: -1px;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-btn-reject {
++	background-color: var(--vscode-button-secondaryBackground);
++	color: var(--vscode-button-secondaryForeground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:hover {
++	background-color: var(--vscode-button-secondaryHoverBackground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-btn-accept {
++	background-color: var(--vscode-button-background);
++	color: var(--vscode-button-foreground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:hover {
++	background-color: var(--vscode-button-hoverBackground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-list {
++	max-height: 180px;
++	overflow-y: auto;
++	border-top: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-row {
++	display: flex;
++	align-items: center;
++	justify-content: space-between;
++	gap: 6px;
++	padding: 2px 6px;
++	min-height: 26px;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-row:hover {
++	background-color: var(--vscode-list-hoverBackground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-row-main {
++	display: flex;
++	align-items: center;
++	gap: 6px;
++	flex: 1 1 auto;
++	min-width: 0;
++	background: transparent;
++	border: none;
++	color: var(--vscode-foreground);
++	font: inherit;
++	text-align: left;
++	padding: 2px 4px;
++	border-radius: 4px;
++	cursor: pointer;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-blocked-main {
++	cursor: default;
++	color: var(--vscode-descriptionForeground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-path {
++	overflow: hidden;
++	text-overflow: ellipsis;
++	white-space: nowrap;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-badge {
++	flex-shrink: 0;
++	font-size: 10px;
++	font-weight: 600;
++	padding: 1px 5px;
++	border-radius: 3px;
++	background-color: var(--vscode-badge-background);
++	color: var(--vscode-badge-foreground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-badge-added {
++	color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-badge-foreground));
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-badge-modified {
++	color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-badge-foreground));
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-badge-deleted {
++	color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-badge-foreground));
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-row-actions {
++	display: inline-flex;
++	align-items: center;
++	gap: 2px;
++	flex-shrink: 0;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-icon-btn {
++	display: inline-flex;
++	align-items: center;
++	justify-content: center;
++	width: 22px;
++	height: 22px;
++	padding: 0;
++	background: transparent;
++	border: none;
++	border-radius: 4px;
++	color: var(--vscode-icon-foreground);
++	cursor: pointer;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-icon-btn:hover {
++	background-color: var(--vscode-toolbar-hoverBackground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-blocked-group {
++	border-top: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
++	padding-top: 2px;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-blocked-title {
++	padding: 3px 10px 1px;
++	font-size: 11px;
++	font-weight: 600;
++	color: var(--vscode-descriptionForeground);
++}

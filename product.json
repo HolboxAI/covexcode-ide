@@ -461,6 +461,13 @@
       "resolvers",
       "contribRemoteHelp",
       "contribViewsRemote"
+    ],
+    "covexcode.covexcode-agent": [
+      "chatParticipantAdditions",
+      "defaultChatParticipant",
+      "browser",
+      "chatReferenceBinaryData",
+      "chatParticipantPrivate"
     ]
   },
   "extensionKind": {
