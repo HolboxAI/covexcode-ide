@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts b/src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts
-index 7d38984..af396e1 100644
+index 7d389844..af396e19 100644
 --- a/src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts
 +++ b/src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts
 @@ -188,6 +188,7 @@ export function registerChatCopyActions() {
@@ -11,7 +11,7 @@ index 7d38984..af396e1 100644
  				category: CHAT_CATEGORY,
  				icon: Codicon.copy,
 diff --git a/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingActions.ts b/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingActions.ts
-index 9a15ccd..5f27f02 100644
+index 9a15ccd6..5f27f02e 100644
 --- a/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingActions.ts
 +++ b/src/vs/workbench/contrib/chat/browser/chatEditing/chatEditingActions.ts
 @@ -7,7 +7,7 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
@@ -275,7 +275,7 @@ index 9a15ccd..5f27f02 100644
  			]
  		});
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts b/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
-index 1b414d2..0f1acbc 100644
+index 1b414d28..ac5d9ea0 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
 +++ b/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts
 @@ -10,10 +10,12 @@ import { IActionViewItemOptions } from '../../../../../base/browser/ui/actionbar
@@ -375,7 +375,7 @@ index 1b414d2..0f1acbc 100644
  
  		connectionObserver.onDidDisconnect = () => {
  			template.renderedPartsMounted = false;
-@@ -835,6 +858,27 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
+@@ -835,6 +858,28 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
  		templateData.avatarContainer.classList.toggle('hidden', hideChatUserIdentity);
  
  		this.hoverHidden(templateData.requestHover);
@@ -390,11 +390,12 @@ index 1b414d2..0f1acbc 100644
 +				templateData.elementDisposables.add(dom.addDisposableListener(templateData.rowContainer, dom.EventType.MOUSE_ENTER, () => {
 +					updateTime();
 +				}));
-+				templateData.elementDisposables.add(this.hoverService.setupManagedHover(
-+					getDefaultHoverDelegate('element'),
++				templateData.elementDisposables.add(this.hoverService.setupDelayedHover(
 +					templateData.requestTimestamp,
-+					() => formatAntigravityDate(element.timestamp),
-+					{ position: { hoverPosition: HoverPosition.BELOW } }
++					() => ({
++						content: formatAntigravityDate(element.timestamp),
++						position: { hoverPosition: HoverPosition.BELOW },
++					})
 +				));
 +			}
 +		} else {
@@ -404,7 +405,7 @@ index 1b414d2..0f1acbc 100644
  		if (isResponseVM(element)) {
  			this.renderDetail(element, templateData);
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-index e94af70..54b6cd6 100644
+index e94af705..54b6cd6d 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 @@ -4630,3 +4630,308 @@ a[href*="permission.review"] {
