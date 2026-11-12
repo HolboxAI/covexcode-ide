@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as nodeFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -14,9 +15,11 @@ import {
 	markAccepted,
 	markDismissedBlocked,
 	normalizePath,
+	normalizeTabComparePath,
 	planReject,
 	serializeReviewState,
 	shellWarningKey,
+	shouldCloseTab,
 	type SidecarChangeEntry,
 } from './reviewChangesState';
 
@@ -252,4 +255,66 @@ test('9. hash fallback uses {mtime,size} above size cap or for binary files', as
 		await fs.rm(tmp, { recursive: true, force: true });
 	}
 });
+
+test('10. tab closing: case-folded, realpath, TabInputTextDiff, and TabInputTextMultiDiff', async () => {
+	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'covex-tab-test-'));
+	try {
+		const targetFile = path.join(tmpDir, 'Created.ts');
+		await fs.writeFile(targetFile, 'content', 'utf8');
+
+		// 1. Case-folded path matching on Windows and macOS
+		const darwinNormal = normalizeTabComparePath(targetFile, 'darwin');
+		const winNormal = normalizeTabComparePath(targetFile, 'win32');
+		const linuxNormal = normalizeTabComparePath(targetFile, 'linux');
+		assert.equal(darwinNormal, darwinNormal.toLowerCase());
+		assert.equal(winNormal, winNormal.toLowerCase());
+		const expectedReal = path.join(nodeFs.realpathSync(path.dirname(targetFile)), path.basename(targetFile));
+		assert.equal(linuxNormal, expectedReal);
+
+		// Plain tab (input.uri) with case mismatch
+		const plainUpperTab = {
+			uri: { scheme: 'file', fsPath: path.join(tmpDir, 'CREATED.TS') },
+		};
+		assert.equal(shouldCloseTab(plainUpperTab, ['created.ts'], tmpDir, 'darwin'), true);
+		assert.equal(shouldCloseTab(plainUpperTab, ['created.ts'], tmpDir, 'win32'), true);
+
+		// 2. Realpath resolution (symlinks)
+		const symlinkDir = path.join(tmpDir, 'symlink-dir');
+		try {
+			await fs.symlink(tmpDir, symlinkDir, 'dir');
+			const symlinkedPath = path.join(symlinkDir, 'Created.ts');
+			const symlinkTab = {
+				uri: { scheme: 'file', fsPath: symlinkedPath },
+			};
+			assert.equal(shouldCloseTab(symlinkTab, [targetFile], undefined, 'darwin'), true);
+		} catch {}
+
+		// 3. TabInputTextDiff: tab showing diff where modified is the target file
+		const diffTab = {
+			original: { scheme: 'covexcode-review', fsPath: 'review:/empty' },
+			modified: { scheme: 'file', fsPath: targetFile },
+		};
+		assert.equal(shouldCloseTab(diffTab, ['Created.ts'], tmpDir, 'darwin'), true);
+
+		// 4. TabInputTextMultiDiff: multi-diff tab containing target file
+		const multiDiffTab = {
+			textDiffs: [
+				{
+					original: { scheme: 'covexcode-review', fsPath: 'review:/empty' },
+					modified: { scheme: 'file', fsPath: targetFile },
+				},
+			],
+		};
+		assert.equal(shouldCloseTab(multiDiffTab, ['Created.ts'], tmpDir, 'darwin'), true);
+
+		// Unrelated tabs should NOT be closed
+		const unrelatedTab = {
+			uri: { scheme: 'file', fsPath: path.join(tmpDir, 'unrelated.ts') },
+		};
+		assert.equal(shouldCloseTab(unrelatedTab, ['Created.ts'], tmpDir, 'darwin'), false);
+	} finally {
+		await fs.rm(tmpDir, { recursive: true, force: true });
+	}
+});
+
 

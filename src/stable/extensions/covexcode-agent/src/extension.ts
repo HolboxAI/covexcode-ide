@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import {
 	DEFAULT_HASH_SIZE_CAP_BYTES,
 	hashFileOnDisk,
+	shouldCloseTab,
 	type AcceptedSnapshot,
 } from './reviewChangesState';
 import {
@@ -3522,26 +3523,11 @@ function createReviewDiffContentProvider(): vscode.TextDocumentContentProvider &
 	};
 }
 
-function normalizeTabComparePath(p: string): string {
-	const resolved = path.resolve(p);
-	try {
-		const dir = fs.realpathSync(path.dirname(resolved));
-		const real = path.join(dir, path.basename(resolved));
-		return process.platform === 'win32' || process.platform === 'darwin' ? real.toLowerCase() : real;
-	} catch {
-		return process.platform === 'win32' || process.platform === 'darwin' ? resolved.toLowerCase() : resolved;
-	}
-}
-
 async function deletePathsAndCloseTabs(rawPaths: readonly string[], wsFolder: vscode.Uri | undefined): Promise<void> {
-	const normalizedTargets: string[] = [];
 	for (const p of rawPaths) {
 		const trimmed = p.trim();
 		const wsPath = wsFolder?.fsPath;
 		const absPath = path.isAbsolute(trimmed) ? trimmed : (wsPath ? path.join(wsPath, trimmed) : undefined);
-		if (absPath) {
-			normalizedTargets.push(normalizeTabComparePath(absPath));
-		}
 		try {
 			const fileUri = path.isAbsolute(trimmed)
 				? vscode.Uri.file(trimmed)
@@ -3557,34 +3543,9 @@ async function deletePathsAndCloseTabs(rawPaths: readonly string[], wsFolder: vs
 		} catch {}
 	}
 	try {
-		const matchesDeletedTarget = (uri: vscode.Uri | undefined): boolean => {
-			if (!uri || uri.scheme !== 'file') {
-				return false;
-			}
-			const normUri = normalizeTabComparePath(uri.fsPath);
-			return normalizedTargets.some(target => target === normUri)
-				|| rawPaths.some(p => {
-					const suffix = p.trim();
-					return process.platform === 'win32' || process.platform === 'darwin'
-						? normUri.endsWith(suffix.toLowerCase())
-						: normUri.endsWith(suffix);
-				});
-		};
 		for (const tabGroup of vscode.window.tabGroups.all) {
 			for (const tab of tabGroup.tabs) {
-				const input = tab.input as {
-					uri?: vscode.Uri;
-					modified?: vscode.Uri;
-					original?: vscode.Uri;
-					textDiffs?: ReadonlyArray<{ modified?: vscode.Uri; original?: vscode.Uri }>;
-				} | undefined;
-				if (!input) {
-					continue;
-				}
-				const matchesMultiDiff = Array.isArray(input.textDiffs)
-					&& input.textDiffs.length > 0
-					&& input.textDiffs.every(td => matchesDeletedTarget(td.modified));
-				if (matchesDeletedTarget(input.uri) || matchesDeletedTarget(input.modified) || matchesMultiDiff) {
+				if (shouldCloseTab(tab.input as any, rawPaths, wsFolder?.fsPath)) {
 					await vscode.window.tabGroups.close(tab);
 				}
 			}

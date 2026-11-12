@@ -7,6 +7,7 @@
  */
 
 import * as crypto from 'node:crypto';
+import * as nodeFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -548,4 +549,68 @@ export function deserializeReviewState(raw: string | undefined | null, fallbackS
 		return createEmptyReviewState(fallbackSessionId);
 	}
 }
+
+export interface TabInputLike {
+	uri?: { scheme: string; fsPath: string };
+	modified?: { scheme: string; fsPath: string };
+	original?: { scheme: string; fsPath: string };
+	textDiffs?: ReadonlyArray<{ modified?: { scheme: string; fsPath: string }; original?: { scheme: string; fsPath: string } }>;
+}
+
+export function normalizeTabComparePath(p: string, platform: NodeJS.Platform = process.platform): string {
+	const resolved = path.resolve(p);
+	try {
+		const dir = nodeFs.realpathSync(path.dirname(resolved));
+		const real = path.join(dir, path.basename(resolved));
+		return platform === 'win32' || platform === 'darwin' ? real.toLowerCase() : real;
+	} catch {
+		return platform === 'win32' || platform === 'darwin' ? resolved.toLowerCase() : resolved;
+	}
+}
+
+export function shouldCloseTab(
+	input: TabInputLike | undefined,
+	rawPaths: readonly string[],
+	wsPath: string | undefined,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	if (!input) {
+		return false;
+	}
+	const normalizedTargets: string[] = [];
+	for (const p of rawPaths) {
+		const trimmed = p.trim();
+		const absPath = path.isAbsolute(trimmed) ? trimmed : (wsPath ? path.join(wsPath, trimmed) : undefined);
+		if (absPath) {
+			normalizedTargets.push(normalizeTabComparePath(absPath, platform));
+		}
+	}
+
+	const matchesTarget = (uri: { scheme: string; fsPath: string } | undefined): boolean => {
+		if (!uri || uri.scheme !== 'file') {
+			return false;
+		}
+		const normUri = normalizeTabComparePath(uri.fsPath, platform);
+		if (normalizedTargets.some(target => target === normUri)) {
+			return true;
+		}
+		return rawPaths.some(p => {
+			const suffix = p.trim();
+			return platform === 'win32' || platform === 'darwin'
+				? normUri.endsWith(suffix.toLowerCase())
+				: normUri.endsWith(suffix);
+		});
+	};
+
+	if (matchesTarget(input.uri) || matchesTarget(input.modified)) {
+		return true;
+	}
+
+	if (Array.isArray(input.textDiffs) && input.textDiffs.length > 0) {
+		return input.textDiffs.every(td => matchesTarget(td.modified));
+	}
+
+	return false;
+}
+
 
