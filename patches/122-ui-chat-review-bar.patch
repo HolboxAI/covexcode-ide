@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..976b430
 --- /dev/null
 +++ b/src/vs/workbench/contrib/chat/browser/widget/chatReviewChangesBar.ts
-@@ -0,0 +1,408 @@
+@@ -0,0 +1,410 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Copyright (c) HolboxAI. Licensed under the MIT License.
 + *--------------------------------------------------------------------------------------------*/
@@ -226,11 +226,13 @@ index 0000000..976b430
 +
 +		if (undoable.length === 0 && blocked.length === 0) {
 +			this.domNode.style.display = 'none';
++			this.domNode.classList.remove('visible');
 +			this._onDidChangeHeight.fire();
 +			return;
 +		}
 +
 +		this.domNode.style.display = '';
++		this.domNode.classList.add('visible');
 +
 +		if (undoable.length > 0) {
 +			const header = document.createElement('div');
@@ -515,15 +517,15 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/v
 index 54b6cd6..b04ab78 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4935,3 +4935,201 @@ a[href*="permission.review"] {
+@@ -4935,3 +4935,280 @@ a[href*="permission.review"] {
  .chat-confirm-undo-card .confirm-undo-confirm:active {
  	background: #075985;
  }
 +
 +/* covexcode: docked post-turn Review Bar above chat input */
 +.interactive-session > .covexcode-review-bar {
-+	margin: 0 12px 6px 12px;
-+	border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
++	margin: 0 12px 2px 12px;
++	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
 +	border-radius: 6px;
 +	background-color: var(--vscode-editorWidget-background);
 +	color: var(--vscode-foreground);
@@ -532,29 +534,38 @@ index 54b6cd6..b04ab78 100644
 +	flex-shrink: 0;
 +}
 +
++.interactive-session > .covexcode-review-bar:not([style*="display: none"]) + .interactive-input-part,
++.interactive-session > .covexcode-review-bar.visible + .interactive-input-part {
++	padding-top: 0;
++}
++
 +.interactive-session > .covexcode-review-bar .covexcode-review-header {
 +	display: flex;
 +	align-items: center;
 +	justify-content: space-between;
-+	gap: 4px;
-+	padding: 5px 8px;
++	gap: 6px;
++	padding: 3px 8px;
++	min-height: 28px;
++	box-sizing: border-box;
 +	background-color: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-toggle {
 +	display: inline-flex;
 +	align-items: center;
-+	gap: 3px;
++	gap: 4px;
 +	min-width: 0;
 +	overflow: hidden;
 +	background: transparent;
 +	border: none;
 +	color: var(--vscode-foreground);
 +	font: inherit;
-+	font-weight: 600;
-+	padding: 2px;
++	font-size: 11.5px;
++	font-weight: 500;
++	padding: 2px 6px;
 +	border-radius: 4px;
 +	cursor: pointer;
++	transition: background-color 0.12s ease;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-count {
@@ -563,54 +574,112 @@ index 54b6cd6..b04ab78 100644
 +	white-space: nowrap;
 +}
 +
-+.interactive-session > .covexcode-review-bar .covexcode-review-toggle:hover,
++.interactive-session > .covexcode-review-bar .covexcode-review-toggle:hover {
++	background-color: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
++}
++
 +.interactive-session > .covexcode-review-bar .covexcode-review-toggle:focus-visible {
-+	background-color: var(--vscode-list-hoverBackground);
 +	outline: 1px solid var(--vscode-focusBorder);
++	outline-offset: 1px;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-bulk-actions {
 +	display: inline-flex;
 +	align-items: center;
-+	gap: 4px;
++	gap: 5px;
 +	flex-shrink: 0;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn {
-+	border: 1px solid var(--vscode-button-border, transparent);
-+	border-radius: 4px;
-+	padding: 2px 6px;
++	display: inline-flex;
++	align-items: center;
++	justify-content: center;
++	box-sizing: border-box;
++	height: 22px;
++	line-height: 20px;
++	padding: 0 8px;
 +	font-size: 11px;
 +	font-weight: 500;
 +	white-space: nowrap;
 +	flex-shrink: 0;
 +	cursor: pointer;
-+	line-height: 18px;
++	border-radius: 4px;
++	transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn:focus-visible,
 +.interactive-session > .covexcode-review-bar .covexcode-review-row-main:focus-visible,
 +.interactive-session > .covexcode-review-bar .covexcode-review-icon-btn:focus-visible {
 +	outline: 1px solid var(--vscode-focusBorder);
-+	outline-offset: -1px;
++	outline-offset: 1px;
 +}
 +
++/* Reject All - sleek secondary pill with subtle danger-tint hover */
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-reject {
-+	background-color: var(--vscode-button-secondaryBackground);
-+	color: var(--vscode-button-secondaryForeground);
++	background-color: rgba(255, 255, 255, 0.06);
++	color: var(--vscode-foreground);
++	border: 1px solid rgba(255, 255, 255, 0.1);
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:hover {
-+	background-color: var(--vscode-button-secondaryHoverBackground);
++	background-color: rgba(239, 68, 68, 0.14);
++	color: #fca5a5;
++	border-color: rgba(239, 68, 68, 0.35);
++	box-shadow: 0 1px 4px rgba(239, 68, 68, 0.15);
 +}
 +
++.interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:active {
++	background-color: rgba(239, 68, 68, 0.22);
++}
++
++/* Accept All - refined Antigravity / Cursor blue */
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-accept {
-+	background-color: var(--vscode-button-background);
-+	color: var(--vscode-button-foreground);
++	background-color: #0284c7;
++	color: #ffffff;
++	border: 1px solid rgba(255, 255, 255, 0.15);
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:hover {
-+	background-color: var(--vscode-button-hoverBackground);
++	background-color: #0369a1;
++	border-color: rgba(255, 255, 255, 0.3);
++	box-shadow: 0 1px 6px rgba(2, 132, 199, 0.35);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:active {
++	background-color: #075985;
++}
++
++/* Light theme overrides */
++.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-reject {
++	background-color: rgba(0, 0, 0, 0.05);
++	color: var(--vscode-foreground);
++	border: 1px solid rgba(0, 0, 0, 0.12);
++}
++
++.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:hover {
++	background-color: rgba(220, 38, 38, 0.1);
++	color: #dc2626;
++	border-color: rgba(220, 38, 38, 0.3);
++	box-shadow: 0 1px 4px rgba(220, 38, 38, 0.15);
++}
++
++.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:active {
++	background-color: rgba(220, 38, 38, 0.18);
++}
++
++.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-accept {
++	background-color: #0284c7;
++	color: #ffffff;
++	border: 1px solid rgba(0, 0, 0, 0.1);
++}
++
++.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:hover {
++	background-color: #0369a1;
++	box-shadow: 0 1px 6px rgba(2, 132, 199, 0.25);
++}
++
++.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:active {
++	background-color: #075985;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-list {
@@ -624,8 +693,9 @@ index 54b6cd6..b04ab78 100644
 +	align-items: center;
 +	justify-content: space-between;
 +	gap: 6px;
-+	padding: 2px 6px;
-+	min-height: 26px;
++	padding: 2px 8px;
++	min-height: 24px;
++	transition: background-color 0.1s ease;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-row:hover {
@@ -684,7 +754,7 @@ index 54b6cd6..b04ab78 100644
 +.interactive-session > .covexcode-review-bar .covexcode-review-row-actions {
 +	display: inline-flex;
 +	align-items: center;
-+	gap: 2px;
++	gap: 3px;
 +	flex-shrink: 0;
 +}
 +
@@ -692,18 +762,29 @@ index 54b6cd6..b04ab78 100644
 +	display: inline-flex;
 +	align-items: center;
 +	justify-content: center;
-+	width: 22px;
-+	height: 22px;
++	width: 20px;
++	height: 20px;
 +	padding: 0;
 +	background: transparent;
 +	border: none;
 +	border-radius: 4px;
 +	color: var(--vscode-icon-foreground);
 +	cursor: pointer;
++	transition: background-color 0.12s ease, color 0.12s ease;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-icon-btn:hover {
 +	background-color: var(--vscode-toolbar-hoverBackground);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-icon-reject:hover {
++	background-color: rgba(239, 68, 68, 0.15);
++	color: #f87171;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-icon-accept:hover {
++	background-color: rgba(2, 132, 199, 0.15);
++	color: #38bdf8;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-blocked-group {
