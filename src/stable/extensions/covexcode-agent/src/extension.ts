@@ -55,6 +55,13 @@ import {
 	PERMISSION_COMMAND,
 	REVIEW_COMMAND,
 } from './chatPermission';
+import {
+	parseAlwaysCommandArgs,
+	PERMISSION_ALWAYS_COMMAND,
+	ruleForChoice,
+	type PromptChoice,
+} from './permissionOptions';
+import { isDestructiveAlwaysAllow, permissionPromptLinks } from './permissionPrompt';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
@@ -429,6 +436,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	// `activeTurnId` is only known once the ACP turn completes, so the feedback
 	// window reads it lazily at submit time rather than at reject time.
 	let activeTurnId = '';
+	let turnScopeCounter = 0;
 	const feedbackStorage: FeedbackStorage = {
 		get: <T>(key: string): T | undefined => context.globalState.get<T>(key),
 		update: (key, value) => context.globalState.update(key, value),
@@ -714,6 +722,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	function discardSession(): void {
 		permissionGate.cancelAll();
+		const cwd = sessionCwd;
+		if (cwd) {
+			clearSessionGrants(cwd);
+		}
 		pendingReviews.clear();
 		client?.dispose();
 		client = undefined;
@@ -949,8 +961,37 @@ export function activate(context: vscode.ExtensionContext): void {
 				return;
 			}
 			if (permissionGate.respond(parsed.id, parsed.choice)) {
-				rememberPermissionChoice(parsed.id, parsed.choice);
+				if (parsed.choice === 'allow' || parsed.choice === 'reject') {
+					rememberPermissionChoice(parsed.id, parsed.choice);
+				}
 			}
+		}),
+		vscode.commands.registerCommand(PERMISSION_ALWAYS_COMMAND, async (...args: unknown[]) => {
+			const parsed = parseAlwaysCommandArgs(args);
+			if (!parsed) {
+				return;
+			}
+			const context = pendingPermissionContext.get(parsed.id);
+			if (!context) {
+				return;
+			}
+			if (parsed.choice === 'allow-always') {
+				const action = context.request.toolCall.title ?? 'run this action';
+				const kind = context.request.toolCall.kind ?? '';
+				if (isDestructiveAlwaysAllow(kind, action)) {
+					pendingPermissionContext.delete(parsed.id);
+					permissionGate.respond(parsed.id, 'allow');
+					return;
+				}
+				const confirmed = await confirmAlwaysAllow(kind, action);
+				if (!confirmed) {
+					pendingPermissionContext.delete(parsed.id);
+					permissionGate.respond(parsed.id, 'allow');
+					return;
+				}
+			}
+			rememberPermissionChoice(parsed.id, parsed.choice);
+			permissionGate.respond(parsed.id, parsed.choice === 'reject-always' ? 'reject' : 'allow');
 		}),
 		vscode.commands.registerCommand(REVIEW_COMMAND, async (...args: unknown[]) => {
 			const id = parseReviewCommandArgs(args);
@@ -992,6 +1033,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const requestHandler: vscode.ChatRequestHandler = async (request, chatContext, stream, token) => {
 		activeTurnId = '';
+		const turnScopeId = String(++turnScopeCounter);
 		if (!vscode.workspace.isTrusted) {
 			stream.markdown(restrictedModeMarkdown());
 			return;
@@ -1131,7 +1173,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor).then(respond);
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, turnScopeId).then(respond);
 			} else {
 				respond({ outcome: 'cancelled' });
 			}
@@ -1267,6 +1309,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				discardSession();
 			}
 		} finally {
+			clearTurnGrants(workspace.cwd, turnScopeId);
 			activeClient.off('update', onUpdate);
 			activeClient.off('permissionRequest', onPermissionRequest);
 			activeClient.off('browserCheckRequest', onBrowserCheckRequest);
@@ -2688,38 +2731,73 @@ function loadPermissionStore(cwd: string): PermissionStore {
 	}
 }
 
-/** Details a pending prompt needs so a later "always" choice can be stored. */
-const pendingPermissionContext = new Map<string, { cwd: string; action: string }>();
+/** Details a pending prompt needs so a later scoped choice can be stored. */
+interface PendingPermissionContext {
+	request: RequestPermissionRequest;
+	toolCallId: string;
+	affectedFiles: string[];
+	cwd: string;
+	turnId: string;
+}
 
-/**
- * Records an "Always allow" / "Deny always" choice against the project.
- *
- * Rules match the action exactly and never as a substring, so granting one
- * command cannot silently authorise a different command that merely starts
- * the same way.
- */
-function rememberPermissionChoice(id: string, choice: string): void {
+const pendingPermissionContext = new Map<string, PendingPermissionContext>();
+
+function writePermissionStore(cwd: string, store: PermissionStore): void {
+	const file = permissionStoreFile(cwd);
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, serializePermissionStore(store.toFile()), 'utf8');
+}
+
+function clearTurnGrants(cwd: string, turnId: string): void {
+	try {
+		const store = loadPermissionStore(cwd);
+		if (store.clearTurnGrants(turnId) > 0) {
+			writePermissionStore(cwd, store);
+		}
+	} catch {
+		// A permission file we cannot read or write must never break the turn.
+	}
+}
+
+function clearSessionGrants(cwd: string): void {
+	try {
+		const store = loadPermissionStore(cwd);
+		if (store.clearSessionGrants() > 0) {
+			writePermissionStore(cwd, store);
+		}
+	} catch {
+		// Same as clearTurnGrants: never let store maintenance break the turn.
+	}
+}
+
+async function confirmAlwaysAllow(kind: string, action: string): Promise<boolean> {
+	const resourceType = kind.length > 0 ? kind : 'action';
+	const answer = await vscode.window.showWarningMessage(
+		`This will allow ${resourceType}: ${action} every time, across all sessions. Are you sure?`,
+		{ modal: true },
+		'Always Allow',
+		'Cancel',
+	);
+	return answer === 'Always Allow';
+}
+
+function rememberPermissionChoice(id: string, choice: PromptChoice): void {
 	const context = pendingPermissionContext.get(id);
 	pendingPermissionContext.delete(id);
-	if (!context || (choice !== 'allow-always' && choice !== 'deny-always')) {
+	if (!context) {
+		return;
+	}
+	const action = context.request.toolCall.title ?? 'run this action';
+	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId);
+	if (!rule) {
 		return;
 	}
 	try {
 		const store = loadPermissionStore(context.cwd);
-		const added = store.addRule({
-			kind: '',
-			match: 'exact',
-			pattern: context.action,
-			decision: choice === 'allow-always' ? 'allow' : 'deny',
-			createdAt: new Date().toISOString(),
-			source: 'user',
-		});
-		if (!added) {
+		if (!store.addRule(rule)) {
 			return;
 		}
-		const file = permissionStoreFile(context.cwd);
-		fs.mkdirSync(path.dirname(file), { recursive: true });
-		fs.writeFileSync(file, serializePermissionStore(store.toFile()), 'utf8');
+		writePermissionStore(context.cwd, store);
 	} catch {
 		// A permission file we cannot write must never break the tool call.
 	}
@@ -2732,6 +2810,7 @@ async function askPermission(
 	permissionGate: PermissionGate,
 	cwd: string,
 	onReject: (request: RequestPermissionRequest, toolCallId: string, files: string[]) => void,
+	turnId: string,
 ): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
@@ -2784,8 +2863,9 @@ async function askPermission(
 	if (diff?.type === 'plan') {
 		stream.markdown(planDecisionMarkdown(diff, allowLabel, rejectLabel, id));
 	} else {
-		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks));
+		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks, pending.kind ?? ''));
 	}
+	pendingPermissionContext.set(id, { request, toolCallId, affectedFiles, cwd, turnId });
 	const answer = await wait;
 	pendingReviews.delete(id);
 	// The user answered (Allow/Reject/Review). Remove the prompt from chat:
@@ -2821,15 +2901,21 @@ function permissionDecisionMarkdown(
 	allowLabel: string,
 	rejectLabel: string,
 	id: string,
-	hunks?: DiffHunk[],
+	hunks: DiffHunk[] | undefined,
+	kind: string,
 ): vscode.MarkdownString {
 	const line = new vscode.MarkdownString(undefined, true);
-	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND, REVIEW_COMMAND] };
+	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND, REVIEW_COMMAND, PERMISSION_ALWAYS_COMMAND] };
 	line.appendMarkdown('$(warning) **covexcode needs permission**\n\ncovexcode wants to ');
 	line.appendText(action);
 	line.appendMarkdown('.\n\n');
-	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
-	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	const links = permissionPromptLinks({ id, allowLabel, rejectLabel, kind, action });
+	links.forEach((link, index) => {
+		if (index > 0) {
+			line.appendMarkdown('&nbsp;&nbsp;');
+		}
+		line.appendMarkdown(`[${escapeMarkdownLinkLabel(link.label)}](${link.uri})`);
+	});
 	line.appendMarkdown('\n\n');
 	if (hunks) {
 		line.appendMarkdown(renderHunksMarkdown(hunks));
