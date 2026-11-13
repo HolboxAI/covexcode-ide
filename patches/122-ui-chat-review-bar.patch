@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..976b430
 --- /dev/null
 +++ b/src/vs/workbench/contrib/chat/browser/widget/chatReviewChangesBar.ts
-@@ -0,0 +1,410 @@
+@@ -0,0 +1,430 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Copyright (c) HolboxAI. Licensed under the MIT License.
 + *--------------------------------------------------------------------------------------------*/
@@ -50,21 +50,17 @@ index 0000000..976b430
 +	});
 +}
 +
-+function middleTruncatePath(filePath: string, maxChars = 48): string {
-+	if (filePath.length <= maxChars) {
-+		return filePath;
++function parseDisplayPath(displayPath: string): { filename: string; dirname: string } {
++	const slash = Math.max(displayPath.lastIndexOf('/'), displayPath.lastIndexOf('\\'));
++	if (slash === -1) {
++		return { filename: displayPath, dirname: '' };
 +	}
-+	const slash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
-+	if (slash > 0) {
-+		const fileName = filePath.slice(slash);
-+		const prefixLen = Math.max(8, maxChars - fileName.length - 3);
-+		if (prefixLen + 3 + fileName.length <= maxChars) {
-+			return `${filePath.slice(0, prefixLen)}...${fileName}`;
-+		}
++	const filename = displayPath.slice(slash + 1);
++	let dirname = displayPath.slice(0, slash);
++	if (dirname.length > 36) {
++		dirname = '...' + dirname.slice(dirname.length - 33);
 +	}
-+	const head = Math.ceil((maxChars - 3) / 2);
-+	const tail = Math.floor((maxChars - 3) / 2);
-+	return `${filePath.slice(0, head)}...${filePath.slice(filePath.length - tail)}`;
++	return { filename, dirname };
 +}
 +
 +function kindLabel(kind: ReviewEntryKind): string {
@@ -235,6 +231,34 @@ index 0000000..976b430
 +		this.domNode.classList.add('visible');
 +
 +		if (undoable.length > 0) {
++			if (!this.collapsed) {
++				const list = document.createElement('div');
++				list.className = 'covexcode-review-list';
++				list.setAttribute('role', 'list');
++				list.addEventListener('keydown', e => this.handleListKeyDown(e));
++
++				for (const entry of undoable) {
++					list.appendChild(this.createUndoableRow(entry, resStr));
++				}
++				this.domNode.appendChild(list);
++			}
++
++			if (blocked.length > 0) {
++				const group = document.createElement('div');
++				group.className = 'covexcode-review-blocked-group';
++				group.setAttribute('role', 'list');
++
++				const groupTitle = document.createElement('div');
++				groupTitle.className = 'covexcode-review-blocked-title';
++				groupTitle.textContent = localize('covexcode.review.cantUndo', "Can't undo");
++				group.appendChild(groupTitle);
++
++				for (const entry of blocked) {
++					group.appendChild(this.createBlockedRow(entry, resStr));
++				}
++				this.domNode.appendChild(group);
++			}
++
 +			const header = document.createElement('div');
 +			header.className = 'covexcode-review-header';
 +
@@ -242,14 +266,17 @@ index 0000000..976b430
 +			toggleBtn.type = 'button';
 +			toggleBtn.className = 'covexcode-review-toggle';
 +			toggleBtn.setAttribute('aria-expanded', String(!this.collapsed));
-+			toggleBtn.appendChild(this.createIconSpan(this.collapsed ? Codicon.chevronRight : Codicon.chevronDown));
++
++			toggleBtn.appendChild(this.createIconSpan(Codicon.file));
 +
 +			const countLabel = document.createElement('span');
 +			countLabel.className = 'covexcode-review-count';
 +			countLabel.textContent = undoable.length === 1
-+				? localize('covexcode.review.oneFileChanged', '1 file changed')
-+				: localize('covexcode.review.nFilesChanged', '{0} files changed', undoable.length);
++				? localize('covexcode.review.oneFileChanged', '1 File With Changes')
++				: localize('covexcode.review.nFilesChanged', '{0} Files With Changes', undoable.length);
 +			toggleBtn.appendChild(countLabel);
++
++			toggleBtn.appendChild(this.createIconSpan(this.collapsed ? Codicon.chevronDown : Codicon.chevronUp));
 +
 +			toggleBtn.addEventListener('click', () => {
 +				this.collapsed = !this.collapsed;
@@ -263,7 +290,7 @@ index 0000000..976b430
 +			const rejectAllBtn = document.createElement('button');
 +			rejectAllBtn.type = 'button';
 +			rejectAllBtn.className = 'covexcode-review-btn covexcode-review-btn-reject';
-+			rejectAllBtn.textContent = localize('covexcode.review.rejectAll', 'Reject All');
++			rejectAllBtn.textContent = localize('covexcode.review.rejectAll', 'Reject all');
 +			rejectAllBtn.title = localize('covexcode.review.rejectAllTooltip', 'Reject all pending file changes');
 +			rejectAllBtn.addEventListener('click', () => this.runCommand('covexcode.review.rejectAll', resStr));
 +			bulkActions.appendChild(rejectAllBtn);
@@ -271,7 +298,7 @@ index 0000000..976b430
 +			const acceptAllBtn = document.createElement('button');
 +			acceptAllBtn.type = 'button';
 +			acceptAllBtn.className = 'covexcode-review-btn covexcode-review-btn-accept';
-+			acceptAllBtn.textContent = localize('covexcode.review.acceptAll', 'Accept All');
++			acceptAllBtn.textContent = localize('covexcode.review.acceptAll', 'Accept all');
 +			acceptAllBtn.title = localize('covexcode.review.acceptAllTooltip', 'Accept all pending file changes');
 +			acceptAllBtn.addEventListener('click', () => this.runCommand('covexcode.review.acceptAll', resStr));
 +			bulkActions.appendChild(acceptAllBtn);
@@ -281,21 +308,7 @@ index 0000000..976b430
 +			if (hadToggleFocus) {
 +				toggleBtn.focus();
 +			}
-+
-+			if (!this.collapsed) {
-+				const list = document.createElement('div');
-+				list.className = 'covexcode-review-list';
-+				list.setAttribute('role', 'list');
-+				list.addEventListener('keydown', e => this.handleListKeyDown(e));
-+
-+				for (const entry of undoable) {
-+					list.appendChild(this.createUndoableRow(entry, resStr));
-+				}
-+				this.domNode.appendChild(list);
-+			}
-+		}
-+
-+		if (blocked.length > 0) {
++		} else if (blocked.length > 0) {
 +			const group = document.createElement('div');
 +			group.className = 'covexcode-review-blocked-group';
 +			group.setAttribute('role', 'list');
@@ -328,15 +341,22 @@ index 0000000..976b430
 +		mainBtn.title = fullPath;
 +		mainBtn.setAttribute('aria-label', localize('covexcode.review.openDiffAria', '{0}: {1}. Open diff.', labelText, entry.displayPath));
 +
-+		const badge = document.createElement('span');
-+		badge.className = `covexcode-review-badge covexcode-review-badge-${entry.kind}`;
-+		badge.textContent = labelText;
-+		mainBtn.appendChild(badge);
++		const statusIcon = this.createIconSpan(Codicon.record);
++		statusIcon.className += ` covexcode-review-status-icon covexcode-review-status-${entry.kind}`;
++		mainBtn.appendChild(statusIcon);
 +
-+		const pathEl = document.createElement('span');
-+		pathEl.className = 'covexcode-review-path';
-+		pathEl.textContent = middleTruncatePath(entry.displayPath);
-+		mainBtn.appendChild(pathEl);
++		const parsed = parseDisplayPath(entry.displayPath);
++		const filenameEl = document.createElement('span');
++		filenameEl.className = 'covexcode-review-filename';
++		filenameEl.textContent = parsed.filename;
++		mainBtn.appendChild(filenameEl);
++
++		if (parsed.dirname) {
++			const dirEl = document.createElement('span');
++			dirEl.className = 'covexcode-review-dirname';
++			dirEl.textContent = parsed.dirname;
++			mainBtn.appendChild(dirEl);
++		}
 +
 +		mainBtn.addEventListener('click', () => {
 +			this.runCommand('covexcode.review.openDiff', entry.path, resStr);
@@ -517,21 +537,22 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/v
 index 54b6cd6..b04ab78 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4935,3 +4935,280 @@ a[href*="permission.review"] {
+@@ -4935,3 +4935,310 @@ a[href*="permission.review"] {
  .chat-confirm-undo-card .confirm-undo-confirm:active {
  	background: #075985;
  }
 +
-+/* covexcode: docked post-turn Review Bar above chat input */
++/* covexcode: docked post-turn Review Bar above chat input (Antigravity-style drop-up) */
 +.interactive-session > .covexcode-review-bar {
 +	margin: 0 12px 2px 12px;
 +	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
 +	border-radius: 6px;
-+	background-color: var(--vscode-editorWidget-background);
++	background-color: var(--vscode-editorWidget-background, #181818);
 +	color: var(--vscode-foreground);
 +	font-size: 12px;
 +	overflow: hidden;
 +	flex-shrink: 0;
++	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
 +}
 +
 +.interactive-session > .covexcode-review-bar:not([style*="display: none"]) + .interactive-input-part,
@@ -539,39 +560,35 @@ index 54b6cd6..b04ab78 100644
 +	padding-top: 0;
 +}
 +
++/* Header bar: docked at bottom of the review widget, flush above chat input */
 +.interactive-session > .covexcode-review-bar .covexcode-review-header {
 +	display: flex;
 +	align-items: center;
 +	justify-content: space-between;
 +	gap: 6px;
-+	padding: 3px 8px;
-+	min-height: 28px;
++	padding: 4px 10px;
++	min-height: 30px;
 +	box-sizing: border-box;
-+	background-color: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
++	background-color: var(--vscode-editorWidget-background, #181818);
 +}
 +
++/* Toggle button with file icon, count, and chevron */
 +.interactive-session > .covexcode-review-bar .covexcode-review-toggle {
 +	display: inline-flex;
 +	align-items: center;
-+	gap: 4px;
++	gap: 6px;
 +	min-width: 0;
 +	overflow: hidden;
 +	background: transparent;
 +	border: none;
 +	color: var(--vscode-foreground);
 +	font: inherit;
-+	font-size: 11.5px;
++	font-size: 12px;
 +	font-weight: 500;
-+	padding: 2px 6px;
++	padding: 2px 4px;
 +	border-radius: 4px;
 +	cursor: pointer;
 +	transition: background-color 0.12s ease;
-+}
-+
-+.interactive-session > .covexcode-review-bar .covexcode-review-count {
-+	overflow: hidden;
-+	text-overflow: ellipsis;
-+	white-space: nowrap;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-toggle:hover {
@@ -583,10 +600,30 @@ index 54b6cd6..b04ab78 100644
 +	outline-offset: 1px;
 +}
 +
++.interactive-session > .covexcode-review-bar .covexcode-review-toggle .codicon-file {
++	font-size: 13px;
++	color: var(--vscode-icon-foreground);
++	opacity: 0.85;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-count {
++	overflow: hidden;
++	text-overflow: ellipsis;
++	white-space: nowrap;
++	font-weight: 500;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-toggle .codicon-chevron-up,
++.interactive-session > .covexcode-review-bar .covexcode-review-toggle .codicon-chevron-down {
++	font-size: 11px;
++	color: var(--vscode-icon-foreground);
++	opacity: 0.75;
++}
++
 +.interactive-session > .covexcode-review-bar .covexcode-review-bulk-actions {
 +	display: inline-flex;
 +	align-items: center;
-+	gap: 5px;
++	gap: 8px;
 +	flex-shrink: 0;
 +}
 +
@@ -597,9 +634,7 @@ index 54b6cd6..b04ab78 100644
 +	box-sizing: border-box;
 +	height: 22px;
 +	line-height: 20px;
-+	padding: 0 8px;
 +	font-size: 11px;
-+	font-weight: 500;
 +	white-space: nowrap;
 +	flex-shrink: 0;
 +	cursor: pointer;
@@ -614,53 +649,55 @@ index 54b6cd6..b04ab78 100644
 +	outline-offset: 1px;
 +}
 +
-+/* Reject All - sleek secondary pill with subtle danger-tint hover */
++/* Reject all - subtle text button */
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-reject {
-+	background-color: rgba(255, 255, 255, 0.06);
++	background-color: transparent;
 +	color: var(--vscode-foreground);
-+	border: 1px solid rgba(255, 255, 255, 0.1);
++	border: 1px solid transparent;
++	padding: 0 8px;
++	font-weight: 400;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:hover {
-+	background-color: rgba(239, 68, 68, 0.14);
++	background-color: rgba(239, 68, 68, 0.12);
 +	color: #fca5a5;
-+	border-color: rgba(239, 68, 68, 0.35);
-+	box-shadow: 0 1px 4px rgba(239, 68, 68, 0.15);
++	border-color: rgba(239, 68, 68, 0.25);
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:active {
-+	background-color: rgba(239, 68, 68, 0.22);
++	background-color: rgba(239, 68, 68, 0.20);
 +}
 +
-+/* Accept All - refined Antigravity / Cursor blue */
++/* Accept all - solid Antigravity blue button */
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-accept {
-+	background-color: #0284c7;
++	background-color: #0078d4;
 +	color: #ffffff;
-+	border: 1px solid rgba(255, 255, 255, 0.15);
++	border: 1px solid rgba(255, 255, 255, 0.12);
++	padding: 0 10px;
++	font-weight: 500;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:hover {
-+	background-color: #0369a1;
-+	border-color: rgba(255, 255, 255, 0.3);
-+	box-shadow: 0 1px 6px rgba(2, 132, 199, 0.35);
++	background-color: #0066b8;
++	border-color: rgba(255, 255, 255, 0.25);
++	box-shadow: 0 1px 6px rgba(0, 120, 212, 0.35);
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:active {
-+	background-color: #075985;
++	background-color: #005a9e;
 +}
 +
 +/* Light theme overrides */
 +.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-reject {
-+	background-color: rgba(0, 0, 0, 0.05);
++	background-color: transparent;
 +	color: var(--vscode-foreground);
-+	border: 1px solid rgba(0, 0, 0, 0.12);
++	border: 1px solid transparent;
 +}
 +
 +.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:hover {
 +	background-color: rgba(220, 38, 38, 0.1);
 +	color: #dc2626;
-+	border-color: rgba(220, 38, 38, 0.3);
-+	box-shadow: 0 1px 4px rgba(220, 38, 38, 0.15);
++	border-color: rgba(220, 38, 38, 0.25);
 +}
 +
 +.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-reject:active {
@@ -668,24 +705,25 @@ index 54b6cd6..b04ab78 100644
 +}
 +
 +.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-accept {
-+	background-color: #0284c7;
++	background-color: #0078d4;
 +	color: #ffffff;
 +	border: 1px solid rgba(0, 0, 0, 0.1);
 +}
 +
 +.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:hover {
-+	background-color: #0369a1;
-+	box-shadow: 0 1px 6px rgba(2, 132, 199, 0.25);
++	background-color: #0066b8;
++	box-shadow: 0 1px 6px rgba(0, 120, 212, 0.25);
 +}
 +
 +.vs .interactive-session > .covexcode-review-bar .covexcode-review-btn-accept:active {
-+	background-color: #075985;
++	background-color: #005a9e;
 +}
 +
++/* Drop-up list (rendered ABOVE the header bar) */
 +.interactive-session > .covexcode-review-bar .covexcode-review-list {
-+	max-height: 180px;
++	max-height: 200px;
 +	overflow-y: auto;
-+	border-top: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
++	border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-row {
@@ -693,8 +731,8 @@ index 54b6cd6..b04ab78 100644
 +	align-items: center;
 +	justify-content: space-between;
 +	gap: 6px;
-+	padding: 2px 8px;
-+	min-height: 24px;
++	padding: 3px 10px;
++	min-height: 26px;
 +	transition: background-color 0.1s ease;
 +}
 +
@@ -705,7 +743,7 @@ index 54b6cd6..b04ab78 100644
 +.interactive-session > .covexcode-review-bar .covexcode-review-row-main {
 +	display: flex;
 +	align-items: center;
-+	gap: 6px;
++	gap: 8px;
 +	flex: 1 1 auto;
 +	min-width: 0;
 +	background: transparent;
@@ -718,37 +756,49 @@ index 54b6cd6..b04ab78 100644
 +	cursor: pointer;
 +}
 +
-+.interactive-session > .covexcode-review-bar .covexcode-review-blocked-main {
-+	cursor: default;
-+	color: var(--vscode-descriptionForeground);
++/* Status icon (circle record icon) */
++.interactive-session > .covexcode-review-bar .covexcode-review-status-icon {
++	font-size: 11px;
++	flex-shrink: 0;
 +}
 +
-+.interactive-session > .covexcode-review-bar .covexcode-review-path {
++.interactive-session > .covexcode-review-bar .covexcode-review-status-modified {
++	color: var(--vscode-gitDecoration-modifiedResourceForeground, #f59e0b);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-status-added {
++	color: var(--vscode-gitDecoration-addedResourceForeground, #22c55e);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-status-deleted {
++	color: var(--vscode-gitDecoration-deletedResourceForeground, #ef4444);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-status-shell {
++	color: var(--vscode-descriptionForeground, #999999);
++}
++
++/* Filename in primary foreground */
++.interactive-session > .covexcode-review-bar .covexcode-review-filename {
++	font-weight: 500;
++	color: var(--vscode-foreground);
++	white-space: nowrap;
++	flex-shrink: 0;
++	font-size: 12px;
++}
++
++/* Truncated dirname in muted gray */
++.interactive-session > .covexcode-review-bar .covexcode-review-dirname {
++	color: var(--vscode-descriptionForeground);
++	font-size: 11px;
 +	overflow: hidden;
 +	text-overflow: ellipsis;
 +	white-space: nowrap;
 +}
 +
-+.interactive-session > .covexcode-review-bar .covexcode-review-badge {
-+	flex-shrink: 0;
-+	font-size: 10px;
-+	font-weight: 600;
-+	padding: 1px 5px;
-+	border-radius: 3px;
-+	background-color: var(--vscode-badge-background);
-+	color: var(--vscode-badge-foreground);
-+}
-+
-+.interactive-session > .covexcode-review-bar .covexcode-review-badge-added {
-+	color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-badge-foreground));
-+}
-+
-+.interactive-session > .covexcode-review-bar .covexcode-review-badge-modified {
-+	color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-badge-foreground));
-+}
-+
-+.interactive-session > .covexcode-review-bar .covexcode-review-badge-deleted {
-+	color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-badge-foreground));
++.interactive-session > .covexcode-review-bar .covexcode-review-blocked-main {
++	cursor: default;
++	color: var(--vscode-descriptionForeground);
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-row-actions {
@@ -788,7 +838,7 @@ index 54b6cd6..b04ab78 100644
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-blocked-group {
-+	border-top: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
++	border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
 +	padding-top: 2px;
 +}
 +
