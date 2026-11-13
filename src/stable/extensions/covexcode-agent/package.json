@@ -147,6 +147,41 @@
         "title": "Copy Conversation",
         "category": "covexcode",
         "icon": "$(copy)"
+      },
+      {
+        "command": "covexcode.review.accept",
+        "title": "Review Changes: Accept File",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.review.acceptAll",
+        "title": "Review Changes: Accept All",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.review.reject",
+        "title": "Review Changes: Reject File",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.review.rejectAll",
+        "title": "Review Changes: Reject All",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.review.openDiff",
+        "title": "Review Changes: Open Diff",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.review.dismissBlocked",
+        "title": "Review Changes: Dismiss Un-undoable Notice",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.review.getState",
+        "title": "Review Changes: Get Pending State",
+        "category": "covexcode"
       }
     ],
     "menus": {
