@@ -2,6 +2,7 @@
  *  Copyright (c) HolboxAI. Licensed under the MIT License.
  *--------------------------------------------------------------------------------------------*/
 
+import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import { computeCombinedDiff, InlineDiffHunk } from './inlineDiff';
 import type { ReviewController } from './reviewController';
@@ -16,6 +17,21 @@ export interface InlineDiffSession {
 	acceptedHunkCount: number;
 	rejectedHunkCount: number;
 	document: vscode.TextDocument;
+}
+
+function normalizeUriKey(uri: vscode.Uri | string): string {
+	const uriStr = typeof uri === 'string' ? uri : uri.toString();
+	try {
+		const parsed = typeof uri === 'string' ? vscode.Uri.parse(uri) : uri;
+		if (parsed.scheme === 'file') {
+			let fsPath = parsed.fsPath;
+			try {
+				fsPath = fs.realpathSync(fsPath);
+			} catch {}
+			return vscode.Uri.file(fsPath).toString().toLowerCase();
+		}
+	} catch {}
+	return uriStr.toLowerCase();
 }
 
 export class InlineDiffManager implements vscode.Disposable {
@@ -125,17 +141,34 @@ export class InlineDiffManager implements vscode.Disposable {
 
 		this.disposables.push(
 			vscode.window.onDidChangeActiveTextEditor((editor: vscode.TextEditor | undefined) => {
-				if (editor && this.activeSessions.has(editor.document.uri.toString())) {
-					this.applyDecorations(editor);
+				if (editor) {
+					const session = this.getActiveSession(editor.document.uri);
+					if (session) {
+						this.applyDecorations(editor);
+					}
 				}
-			})
-		);
-
-		this.disposables.push(
-			vscode.workspace.onDidCloseTextDocument((closedDoc: vscode.TextDocument) => {
-				const session = this.activeSessions.get(closedDoc.uri.toString());
+			}),
+			vscode.window.onDidChangeVisibleTextEditors((editors: readonly vscode.TextEditor[]) => {
+				for (const editor of editors) {
+					const session = this.getActiveSession(editor.document.uri);
+					if (session) {
+						this.applyDecorations(editor);
+					}
+				}
+			}),
+			vscode.window.onDidChangeTextEditorSelection((event: vscode.TextEditorSelectionChangeEvent) => {
+				const session = this.getActiveSession(event.textEditor.document.uri);
 				if (session) {
-					this.activeSessions.delete(closedDoc.uri.toString());
+					this.applyDecorations(event.textEditor);
+				}
+			}),
+			vscode.workspace.onDidCloseTextDocument((closedDoc: vscode.TextDocument) => {
+				const normClosed = normalizeUriKey(closedDoc.uri);
+				const hasVisible = vscode.window.visibleTextEditors.some(
+					(e: vscode.TextEditor) => normalizeUriKey(e.document.uri) === normClosed
+				);
+				if (!hasVisible) {
+					this.removeSession(closedDoc.uri);
 				}
 			})
 		);
@@ -145,9 +178,40 @@ export class InlineDiffManager implements vscode.Disposable {
 		this.reviewController = controller;
 	}
 
+	private setSession(session: InlineDiffSession): void {
+		const rawUri = session.uri.toString();
+		const docUri = session.document.uri.toString();
+		const normDoc = normalizeUriKey(session.document.uri);
+		const normRaw = normalizeUriKey(session.uri);
+
+		this.activeSessions.set(rawUri, session);
+		this.activeSessions.set(docUri, session);
+		this.activeSessions.set(normDoc, session);
+		this.activeSessions.set(normRaw, session);
+	}
+
+	private removeSession(uri: vscode.Uri | string): void {
+		const raw = typeof uri === 'string' ? uri : uri.toString();
+		const norm = normalizeUriKey(uri);
+		const session = this.activeSessions.get(raw) || this.activeSessions.get(norm);
+		if (session) {
+			this.activeSessions.delete(session.uri.toString());
+			this.activeSessions.delete(session.document.uri.toString());
+			this.activeSessions.delete(normalizeUriKey(session.document.uri));
+			this.activeSessions.delete(normalizeUriKey(session.uri));
+		}
+		this.activeSessions.delete(raw);
+		this.activeSessions.delete(norm);
+	}
+
 	getActiveSession(uri: vscode.Uri | string): InlineDiffSession | undefined {
-		const key = typeof uri === 'string' ? uri : uri.toString();
-		return this.activeSessions.get(key);
+		const raw = typeof uri === 'string' ? uri : uri.toString();
+		const direct = this.activeSessions.get(raw);
+		if (direct) {
+			return direct;
+		}
+		const norm = normalizeUriKey(uri);
+		return this.activeSessions.get(norm);
 	}
 
 	hasActiveDiffs(): boolean {
@@ -156,7 +220,7 @@ export class InlineDiffManager implements vscode.Disposable {
 
 	async showDiff(fileUri: vscode.Uri, beforeContent: string, afterContent?: string): Promise<void> {
 		const doc = await vscode.workspace.openTextDocument(fileUri);
-		const existing = this.activeSessions.get(fileUri.toString());
+		const existing = this.getActiveSession(doc.uri) || this.getActiveSession(fileUri);
 		if (existing) {
 			const editor = await vscode.window.showTextDocument(doc, { preview: false });
 			this.applyDecorations(editor);
@@ -197,7 +261,7 @@ export class InlineDiffManager implements vscode.Disposable {
 			document: doc,
 		};
 
-		this.activeSessions.set(fileUri.toString(), session);
+		this.setSession(session);
 		this.applyDecorations(editor);
 		this.codeLensEmitter.fire();
 
@@ -208,7 +272,7 @@ export class InlineDiffManager implements vscode.Disposable {
 	}
 
 	provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
-		const session = this.activeSessions.get(document.uri.toString());
+		const session = this.getActiveSession(document.uri);
 		if (!session || session.hunks.length === 0) {
 			return [];
 		}
@@ -318,12 +382,15 @@ export class InlineDiffManager implements vscode.Disposable {
 	}
 
 	async acceptHunk(uriStr: string, hunkIndex: number): Promise<void> {
-		const session = this.activeSessions.get(uriStr);
+		const session = this.getActiveSession(uriStr);
 		if (!session || hunkIndex < 0 || hunkIndex >= session.hunks.length) {
 			return;
 		}
 		const hunk = session.hunks[hunkIndex];
-		const editor = vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document.uri.toString() === uriStr);
+		const normUri = normalizeUriKey(uriStr);
+		const editor = vscode.window.visibleTextEditors.find(
+			(e: vscode.TextEditor) => normalizeUriKey(e.document.uri) === normUri
+		);
 		if (!editor) {
 			return;
 		}
@@ -362,12 +429,15 @@ export class InlineDiffManager implements vscode.Disposable {
 	}
 
 	async rejectHunk(uriStr: string, hunkIndex: number): Promise<void> {
-		const session = this.activeSessions.get(uriStr);
+		const session = this.getActiveSession(uriStr);
 		if (!session || hunkIndex < 0 || hunkIndex >= session.hunks.length) {
 			return;
 		}
 		const hunk = session.hunks[hunkIndex];
-		const editor = vscode.window.visibleTextEditors.find((e: vscode.TextEditor) => e.document.uri.toString() === uriStr);
+		const normUri = normalizeUriKey(uriStr);
+		const editor = vscode.window.visibleTextEditors.find(
+			(e: vscode.TextEditor) => normalizeUriKey(e.document.uri) === normUri
+		);
 		if (!editor) {
 			return;
 		}
@@ -407,8 +477,14 @@ export class InlineDiffManager implements vscode.Disposable {
 	}
 
 	async acceptAll(targetPath?: string): Promise<void> {
-		for (const [, session] of Array.from(this.activeSessions.entries())) {
-			if (!targetPath || session.fsPath === targetPath || session.uri.toString() === targetPath) {
+		const normTarget = targetPath ? normalizeUriKey(targetPath) : undefined;
+		const visited = new Set<InlineDiffSession>();
+		for (const session of Array.from(this.activeSessions.values())) {
+			if (visited.has(session)) {
+				continue;
+			}
+			visited.add(session);
+			if (!normTarget || normalizeUriKey(session.document.uri) === normTarget || normalizeUriKey(session.uri) === normTarget || session.fsPath === targetPath) {
 				const doc = session.document;
 				const fullRange = new vscode.Range(new vscode.Position(0, 0), doc.lineAt(doc.lineCount - 1).range.end);
 				const edit = new vscode.WorkspaceEdit();
@@ -420,8 +496,14 @@ export class InlineDiffManager implements vscode.Disposable {
 	}
 
 	async rejectAll(targetPath?: string): Promise<void> {
-		for (const [, session] of Array.from(this.activeSessions.entries())) {
-			if (!targetPath || session.fsPath === targetPath || session.uri.toString() === targetPath) {
+		const normTarget = targetPath ? normalizeUriKey(targetPath) : undefined;
+		const visited = new Set<InlineDiffSession>();
+		for (const session of Array.from(this.activeSessions.values())) {
+			if (visited.has(session)) {
+				continue;
+			}
+			visited.add(session);
+			if (!normTarget || normalizeUriKey(session.document.uri) === normTarget || normalizeUriKey(session.uri) === normTarget || session.fsPath === targetPath) {
 				const doc = session.document;
 				const fullRange = new vscode.Range(new vscode.Position(0, 0), doc.lineAt(doc.lineCount - 1).range.end);
 				const edit = new vscode.WorkspaceEdit();
@@ -433,8 +515,11 @@ export class InlineDiffManager implements vscode.Disposable {
 	}
 
 	private async finalizeSession(session: InlineDiffSession, wasAccepted: boolean): Promise<void> {
-		this.activeSessions.delete(session.uri.toString());
-		const editors = vscode.window.visibleTextEditors.filter((e: vscode.TextEditor) => e.document.uri.toString() === session.uri.toString());
+		this.removeSession(session.uri);
+		const normDoc = normalizeUriKey(session.document.uri);
+		const editors = vscode.window.visibleTextEditors.filter(
+			(e: vscode.TextEditor) => normalizeUriKey(e.document.uri) === normDoc
+		);
 		for (const ed of editors) {
 			this.clearDecorations(ed);
 		}
