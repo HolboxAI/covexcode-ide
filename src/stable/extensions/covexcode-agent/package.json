@@ -149,6 +149,26 @@
         "icon": "$(copy)"
       },
       {
+        "command": "covexcode.inlineDiff.accept",
+        "title": "Review Changes: Accept Hunk",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.inlineDiff.reject",
+        "title": "Review Changes: Reject Hunk",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.inlineDiff.acceptAll",
+        "title": "Review Changes: Accept All in File",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.inlineDiff.rejectAll",
+        "title": "Review Changes: Reject All in File",
+        "category": "covexcode"
+      },
+      {
         "command": "covexcode.review.accept",
         "title": "Review Changes: Accept File",
         "category": "covexcode"

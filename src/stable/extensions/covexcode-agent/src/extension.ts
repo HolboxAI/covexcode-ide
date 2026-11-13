@@ -18,6 +18,7 @@ import {
 	type PublishedReviewEntry,
 	type PublishedReviewState,
 } from './reviewController';
+import { InlineDiffManager } from './inlineDiffManager';
 import {
 	PERMISSION_STORE_RELATIVE_PATH,
 	PermissionStore,
@@ -407,7 +408,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	let sessionId: string | undefined;
 
 	const reviewDiffProvider = createReviewDiffContentProvider();
+	const inlineDiffManager = new InlineDiffManager();
 	context.subscriptions.push(
+		inlineDiffManager,
 		reviewDiffProvider,
 		vscode.workspace.registerTextDocumentContentProvider('covexcode-review', reviewDiffProvider),
 	);
@@ -498,17 +501,22 @@ export function activate(context: vscode.ExtensionContext): void {
 		gitBaseline: (rootPath, fsPath) => readGitHeadBaseline(rootPath, fsPath),
 		getDiffStat: (fsPath) => computeFileDiffStat(fsPath),
 		openDiffEditor: async ({ beforeContent, afterContent, afterFsPath, title, readOnlySingle }) => {
-			const name = path.basename(afterFsPath ?? title);
-			const beforeUri = reviewDiffProvider.set(`before/${Date.now()}/${name}`, beforeContent);
-			if (readOnlySingle) {
-				const doc = await vscode.workspace.openTextDocument(beforeUri);
-				await vscode.window.showTextDocument(doc, { preview: true });
+			if (readOnlySingle || !afterFsPath) {
+				const name = path.basename(afterFsPath ?? title);
+				const beforeUri = reviewDiffProvider.set(`before/${Date.now()}/${name}`, beforeContent);
+				if (readOnlySingle) {
+					const doc = await vscode.workspace.openTextDocument(beforeUri);
+					await vscode.window.showTextDocument(doc, { preview: true });
+					return;
+				}
+				const afterUri = afterContent !== undefined
+					? reviewDiffProvider.set(`after/${Date.now()}/${name}`, afterContent)
+					: vscode.Uri.file(afterFsPath!);
+				await vscode.commands.executeCommand('vscode.diff', beforeUri, afterUri, title);
 				return;
 			}
-			const afterUri = afterContent !== undefined
-				? reviewDiffProvider.set(`after/${Date.now()}/${name}`, afterContent)
-				: vscode.Uri.file(afterFsPath!);
-			await vscode.commands.executeCommand('vscode.diff', beforeUri, afterUri, title);
+			const fileUri = vscode.Uri.file(afterFsPath);
+			await inlineDiffManager.showDiff(fileUri, beforeContent, afterContent);
 		},
 		openPlainFile: async (fsPath) => {
 			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath));
@@ -518,6 +526,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			void vscode.commands.executeCommand('_covexcode.review.pushState', state).then(undefined, () => undefined);
 		},
 	});
+	inlineDiffManager.setReviewController(reviewController);
 	context.subscriptions.push(reviewController);
 	let ready: Promise<void> | undefined;
 	// Last cwd handed to `session/new`. Compared at the start of each turn
@@ -1585,30 +1594,48 @@ export function activate(context: vscode.ExtensionContext): void {
 	};
 
 	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.inlineDiff.accept', async (uriStr: string, hunkIndex: number) => {
+			await inlineDiffManager.acceptHunk(uriStr, hunkIndex);
+		}),
+		vscode.commands.registerCommand('covexcode.inlineDiff.reject', async (uriStr: string, hunkIndex: number) => {
+			await inlineDiffManager.rejectHunk(uriStr, hunkIndex);
+		}),
+		vscode.commands.registerCommand('covexcode.inlineDiff.acceptAll', async (targetPath?: string) => {
+			await inlineDiffManager.acceptAll(targetPath);
+		}),
+		vscode.commands.registerCommand('covexcode.inlineDiff.rejectAll', async (targetPath?: string) => {
+			await inlineDiffManager.rejectAll(targetPath);
+		}),
 		vscode.commands.registerCommand('covexcode.review.accept', async (targetPath?: string, sessionResource?: string) => {
 			if (targetPath) {
+				await inlineDiffManager.acceptAll(targetPath);
 				return reviewController.accept([targetPath], sessionResource);
 			}
 			const picked = await pickReviewEntryFromPalette(sessionResource, 'undoable', 'Select an agent change to accept');
 			if (!picked) {
 				return undefined;
 			}
+			await inlineDiffManager.acceptAll(picked.path);
 			return reviewController.accept([picked.path], sessionResource);
 		}),
 		vscode.commands.registerCommand('covexcode.review.acceptAll', async (sessionResource?: string) => {
+			await inlineDiffManager.acceptAll();
 			return reviewController.acceptAll(sessionResource);
 		}),
 		vscode.commands.registerCommand('covexcode.review.reject', async (targetPath?: string, sessionResource?: string) => {
 			if (targetPath) {
+				await inlineDiffManager.rejectAll(targetPath);
 				return reviewController.reject([targetPath], sessionResource);
 			}
 			const picked = await pickReviewEntryFromPalette(sessionResource, 'undoable', 'Select an agent change to reject');
 			if (!picked) {
 				return undefined;
 			}
+			await inlineDiffManager.rejectAll(picked.path);
 			return reviewController.reject([picked.path], sessionResource);
 		}),
 		vscode.commands.registerCommand('covexcode.review.rejectAll', async (sessionResource?: string) => {
+			await inlineDiffManager.rejectAll();
 			return reviewController.rejectAll(sessionResource);
 		}),
 		vscode.commands.registerCommand('covexcode.review.openDiff', async (targetPath?: string, sessionResource?: string) => {
@@ -3570,8 +3597,15 @@ async function readGitHeadBaseline(rootPath: string, fsPath: string): Promise<Gi
 	if (!top.ok) {
 		return { available: false };
 	}
-	const repoRoot = top.stdout.trim();
-	const relToRepo = path.relative(repoRoot, fsPath).replace(/\\/g, '/');
+	let repoRoot = top.stdout.trim();
+	let resolvedFsPath = fsPath;
+	try {
+		resolvedFsPath = fs.realpathSync(fsPath);
+	} catch {}
+	try {
+		repoRoot = fs.realpathSync(repoRoot);
+	} catch {}
+	const relToRepo = path.relative(repoRoot, resolvedFsPath).replace(/\\/g, '/');
 	if (!relToRepo || relToRepo.startsWith('..') || path.isAbsolute(relToRepo)) {
 		return { available: false };
 	}
@@ -3593,8 +3627,18 @@ async function readGitHeadBaseline(rootPath: string, fsPath: string): Promise<Gi
 
 async function computeFileDiffStat(fsPath: string): Promise<{ insertions: number; deletions: number } | undefined> {
 	try {
-		const roots = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
-		let root = roots.find(r => fsPath.startsWith(r + path.sep) || fsPath === r);
+		let resolvedFsPath = fsPath;
+		try {
+			resolvedFsPath = fs.realpathSync(fsPath);
+		} catch {}
+		const roots = (vscode.workspace.workspaceFolders ?? []).map(f => {
+			try {
+				return fs.realpathSync(f.uri.fsPath);
+			} catch {
+				return f.uri.fsPath;
+			}
+		});
+		let root = roots.find(r => resolvedFsPath.startsWith(r + path.sep) || resolvedFsPath === r);
 		if (!root && roots.length > 0) {
 			root = roots[0];
 		}
@@ -3610,7 +3654,7 @@ async function computeFileDiffStat(fsPath: string): Promise<{ insertions: number
 					});
 				});
 
-			const rel = path.relative(root, fsPath).replace(/\\/g, '/');
+			const rel = path.relative(root, resolvedFsPath).replace(/\\/g, '/');
 			const diffRes = await execGit(['diff', '--numstat', 'HEAD', '--', rel]);
 			if (diffRes.ok && diffRes.stdout.trim()) {
 				const parts = diffRes.stdout.trim().split(/\s+/);

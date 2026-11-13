@@ -368,7 +368,7 @@ export class ReviewController {
 		// If caller explicitly passed unknown / outside-root raw paths, reject them safely here.
 		if (targetPaths && targetPaths.length > 0) {
 			for (const raw of targetPaths) {
-				const inPending = selected.some(s => s.path === raw);
+				const inPending = selected.some(s => s.path === raw || s.fsPath === raw);
 				if (!inPending) {
 					const norm = normalizePath(raw, roots, this.platform());
 					if (!norm) {
@@ -688,7 +688,7 @@ export class ReviewController {
 			return [...undoable];
 		}
 		const wanted = new Set(targetPaths);
-		return undoable.filter(entry => wanted.has(entry.path));
+		return undoable.filter(entry => wanted.has(entry.path) || (entry.fsPath && wanted.has(entry.fsPath)));
 	}
 
 	private reportSkipped(skipped: readonly string[]): void {
