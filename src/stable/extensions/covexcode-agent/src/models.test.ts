@@ -110,3 +110,19 @@ test('missingApiKeyMarkdown contains model name and actionable links', () => {
 	assert.ok(md.includes('command:covexcode.setApiKey'));
 	assert.ok(md.includes('DeepSeek Pro'));
 });
+
+test('models report vision capabilities accurately', () => {
+	assert.strictEqual(resolveModelDescriptor('deepseek-v4-pro').capabilities.imageInput, false);
+	assert.strictEqual(resolveModelDescriptor('deepseek-v4-flash').capabilities.imageInput, true);
+	assert.strictEqual(resolveModelDescriptor('gpt-4o').capabilities.imageInput, true);
+	assert.strictEqual(resolveModelDescriptor('o3-mini').capabilities.imageInput, false);
+	assert.strictEqual(resolveModelDescriptor('deepseek-reasoner').capabilities.imageInput, false);
+	assert.strictEqual(resolveModelDescriptor('deepseek-chat').capabilities.imageInput, false);
+});
+
+test('resolveEffectiveModelName routes auto to deepseek-v4-flash when images are present', () => {
+	assert.strictEqual(resolveEffectiveModelName('auto', undefined, true), 'deepseek-v4-flash');
+	assert.strictEqual(resolveEffectiveModelName(undefined, undefined, true), 'deepseek-v4-flash');
+	assert.strictEqual(resolveEffectiveModelName('covexcode', undefined, true), 'deepseek-v4-flash');
+	assert.strictEqual(resolveEffectiveModelName('gpt-4o', undefined, true), 'gpt-4o');
+});

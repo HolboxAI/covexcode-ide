@@ -58,6 +58,8 @@ import {
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
+import { ImageCache } from './imageCache';
+import { formatChatHistoryForModel } from './chatHistoryReplay';
 import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
 import {
 	missingRecommendedExtensions,
@@ -411,6 +413,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	// of the end-of-turn usage footer, reset alongside the session in
 	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
 	const sessionUsage = createSessionUsage();
+	const imageCache = new ImageCache(5);
+	let pendingHistoryReplay = false;
 	const permissionGate = new PermissionGate();
 	const promptedTrustFolders = new Set<string>();
 	// Persists for the life of the extension host, not just one turn -- a
@@ -720,6 +724,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		agentImagesSupported = false;
 		sessionUsage.reset();
 		updateUsageIndicator();
+		pendingHistoryReplay = true;
 	}
 
 	// The directory is baked into the child's environment at spawn, so a
@@ -1044,6 +1049,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			// previous HeadlessSession -- every "new chat" was the same
 			// conversation on the daemon side.
 			discardSession();
+			pendingHistoryReplay = false;
 		}
 		restoredCheckpoint = false;
 		const workspace = currentWorkspace();
@@ -1052,14 +1058,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		// framework line). Memoized per cwd by frameworkFor() above, so this is
 		// one package.json read per workspace, not per turn.
 		const workspaceWithFramework = { ...workspace, framework: await frameworkFor(workspace.cwd) };
+		const hasImageAttachment = request.references.some(r => r.value instanceof vscode.ChatReferenceBinaryData);
 		const requestedModelId = request.model?.id;
 		const effectiveModel = resolveEffectiveModelName(
 			requestedModelId,
 			vscode.workspace.getConfiguration('covexcode').get<string>('model'),
+			hasImageAttachment,
 		);
 
 		// If user selected a BYOK model, verify that credentials exist
-		const modelDesc = resolveModelDescriptor(requestedModelId);
+		const modelDesc = resolveModelDescriptor(requestedModelId ?? effectiveModel);
 		if (modelDesc.isBYOK) {
 			const providerKey = await context.secrets.get(secretKeyForProvider(modelDesc.provider));
 			const envKey = modelDesc.envVar ? process.env[modelDesc.envVar] : undefined;
@@ -1149,9 +1157,50 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		};
 
+		const effectiveModelSupportsImages = agentImagesSupported && (modelDesc.capabilities.imageInput ?? true);
+		if (hasImageAttachment && !effectiveModelSupportsImages) {
+			stream.markdown(
+				`⚠️ **${modelDesc.name}** does not support image analysis.\n\n` +
+				`To analyze images or screenshots, please switch to a vision-capable model:\n` +
+				`- **Auto** *(Recommended — automatically routes images to vision)*\n` +
+				`- **DeepSeek Flash** *(Included with Covexcode)*\n` +
+				`- **GPT-4o** or **GPT-4o mini** *(OpenAI BYOK)*\n\n` +
+				`You can switch anytime using the model picker at the bottom of the chat or by typing \`/model\`.\n`
+			);
+			return;
+		}
+
+		// History replay across session resets/model switches/cold start
+		let historyContextText: string | undefined;
+		let historyRetainedImages: PromptContentBlock[] = [];
+		const needsHistoryReplay = (pendingHistoryReplay || !client) && chatContext.history.length > 0 && !isInline;
+		if (needsHistoryReplay) {
+			const targetModelSpec = {
+				maxInputTokens: modelDesc.maxInputTokens || 128_000,
+				maxOutputTokens: modelDesc.maxOutputTokens || 4096,
+				capabilities: { imageInput: effectiveModelSupportsImages },
+			};
+			const formatted = formatChatHistoryForModel(
+				chatContext.history,
+				targetModelSpec,
+				imageCache,
+				request.prompt.length,
+			);
+			historyContextText = formatted.contextText;
+			historyRetainedImages = [...formatted.retainedImages];
+		}
+
 		const content = isInline && inlineEditorData
 			? inlineEditPrompt(request, inlineEditorData, workspaceWithFramework)
-			: await attachReferencesToPrompt(request, workspaceWithFramework, agentImagesSupported);
+			: await attachReferencesToPrompt(
+				request,
+				workspaceWithFramework,
+				effectiveModelSupportsImages,
+				chatContext.history.length,
+				imageCache,
+				historyContextText,
+				historyRetainedImages,
+			);
 		// Registered *after* the `await` above so a throw while reading an
 		// attachment (e.g. a binary reference whose bytes can't be loaded)
 		// can't leak these: they were previously added before any `try`, so
@@ -1178,7 +1227,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			// panel turn sends `normal` explicitly so a prior `plan`/`edit` turn
 			// can't leave the shared session in a stale mode (`mode` is per-turn,
 			// but covexcode keeps the last value when the field is omitted).
-			const turnResult = await activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			const promptPromise = activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			pendingHistoryReplay = false;
+			const turnResult = await promptPromise;
 			activeTurnId = String(turnResult.turn);
 			// A turn stopped by the tool-step limit or the output cap used to
 			// look like the agent simply stopped after its last step. Say which
@@ -1444,6 +1495,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('covexcode.importFromVSCode', () => runImportFromVSCode(context)),
+		vscode.commands.registerCommand('covexcode.chat.copyAll', async () => {
+			try {
+				await vscode.commands.executeCommand('workbench.action.chat.copyAll');
+				void vscode.window.showInformationMessage('✓ Conversation copied to clipboard');
+			} catch (error) {
+				void vscode.window.showErrorMessage('Unable to copy conversation: ' + String(error));
+			}
+		}),
 	);
 
 	// One-shot, on first launch: if a VS Code-family install is present with
@@ -1699,10 +1758,19 @@ function inlineEditPrompt(
  * anything `referenceContextSection` can't resolve is skipped rather than
  * injected as a "[unrecognized]" marker.
  */
-async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: WorkspaceContext, supportsImages: boolean): Promise<PromptContentBlock[]> {
+async function attachReferencesToPrompt(
+	request: vscode.ChatRequest,
+	workspace: WorkspaceContext,
+	supportsImages: boolean,
+	historyLength = 0,
+	imageCache?: ImageCache,
+	historyContextText?: string,
+	historyRetainedImages: readonly PromptContentBlock[] = [],
+): Promise<PromptContentBlock[]> {
 	const sections: string[] = [];
 	const images: PromptContentBlock[] = [];
 	let omittedImage = false;
+	let imageIndex = 0;
 	// Reads a workspace file's text for a `Uri`/`Location` reference. Only
 	// `file:` references reach this -- `referenceContextSection` filters on
 	// scheme before calling -- and an unreadable path (directory, deleted
@@ -1727,11 +1795,28 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 				}
 				continue;
 			}
+			const mime = reference.value.mimeType;
+			if (mime && !mime.startsWith('image/')) {
+				continue;
+			}
 			const bytes = await reference.value.data();
+			if (bytes.byteLength > 8 * 1024 * 1024) {
+				sections.push('An attached image was omitted because it exceeds the 8 MB size limit.');
+				continue;
+			}
+			const base64Data = Buffer.from(bytes).toString('base64');
+			if (imageCache) {
+				const turnKey = (request as { id?: string }).id || `turn-${Math.floor(historyLength / 2) + 1}`;
+				imageCache.set(turnKey, imageIndex++, {
+					data: base64Data,
+					mimeType: mime || 'image/png',
+					name: reference.name,
+				});
+			}
 			images.push({
 				type: 'image',
-				data: Buffer.from(bytes).toString('base64'),
-				mimeType: reference.value.mimeType,
+				data: base64Data,
+				mimeType: mime || 'image/png',
 			});
 			continue;
 		}
@@ -1753,9 +1838,12 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 			+ (surface ? `\nCurrently focused: ${surface}` : ''));
 	}
 
-	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
+	const promptText = historyContextText
+		? `${historyContextText}\n\n${request.prompt}`
+		: request.prompt;
+	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${promptText}` : promptText;
 	const text = prependWorkspacePrefix(userText, workspacePromptPrefix(workspace));
-	return [{ type: 'text', text }, ...images];
+	return [{ type: 'text', text }, ...historyRetainedImages, ...images];
 }
 
 function restrictedModeMarkdown(): vscode.MarkdownString {
@@ -2202,8 +2290,15 @@ function providerCommandMarkdown(outcome: ProviderFlowOutcome, bundled = false):
 
 function modelCommandMarkdown(outcome: ModelFlowOutcome, bundled = false): string {
 	switch (outcome.kind) {
-		case 'ok':
-			return `Model updated to **${outcome.summary}**. Send a normal chat message to use it.`;
+		case 'ok': {
+			const modelName = outcome.summary.split('/').pop()?.trim();
+			const desc = resolveModelDescriptor(modelName);
+			let note = '';
+			if (!desc.capabilities.imageInput) {
+				note = `\n\n💡 *Note: **${desc.name}** is a text-only model. For image or screenshot analysis, use **Auto**, **DeepSeek Flash**, or **GPT-4o**.*`;
+			}
+			return `Model updated to **${outcome.summary}**.${note} Send a normal chat message to use it.`;
+		}
 		case 'cancelled':
 			return 'Model change cancelled -- existing model is unchanged.';
 		case 'no-binary':
