@@ -20,7 +20,7 @@
 import type { PermissionDecision, PermissionQuery, PermissionRule } from './permissionStore';
 
 /** Every choice a user can make at a permission prompt. */
-export type PromptChoice = 'allow' | 'allow-always' | 'reject' | 'reject-always';
+export type PromptChoice = 'allow' | 'allow-turn' | 'allow-session' | 'allow-always' | 'reject' | 'reject-always';
 
 export interface PromptOption {
 	choice: PromptChoice;
@@ -35,6 +35,8 @@ export interface PromptOption {
 
 export const PERMISSION_OPTIONS: readonly PromptOption[] = [
 	{ choice: 'allow', label: 'Allow once', icon: 'check', remember: false },
+	{ choice: 'allow-turn', label: 'Allow for this turn', icon: 'history', remember: true, decision: 'allow' },
+	{ choice: 'allow-session', label: 'Allow for this session', icon: 'sync', remember: true, decision: 'allow' },
 	{ choice: 'allow-always', label: 'Allow always', icon: 'check-all', remember: true, decision: 'allow' },
 	{ choice: 'reject', label: 'Deny once', icon: 'x', remember: false },
 	{ choice: 'reject-always', label: 'Deny always', icon: 'circle-slash', remember: true, decision: 'deny' },
@@ -56,19 +58,29 @@ export function ruleForChoice(
 	choice: PromptChoice,
 	query: PermissionQuery,
 	createdAt: string,
+	turnId?: string,
 ): PermissionRule | undefined {
-	const option = permissionOptionFor(choice);
-	if (option === undefined || !option.remember || option.decision === undefined) {
-		return undefined;
-	}
-	return {
+	const base = {
 		kind: query.kind,
-		match: 'exact',
+		match: 'exact' as const,
 		pattern: query.action,
-		decision: option.decision,
 		createdAt,
-		source: 'user',
+		source: 'user' as const,
 	};
+	switch (choice) {
+		case 'allow':
+		case 'reject':
+			// "Once" choices must not outlive the prompt.
+			return undefined;
+		case 'allow-turn':
+			return { ...base, decision: 'allow', scope: 'turn', turnId };
+		case 'allow-session':
+			return { ...base, decision: 'allow', scope: 'session' };
+		case 'allow-always':
+			return { ...base, decision: 'allow', scope: 'always' };
+		case 'reject-always':
+			return { ...base, decision: 'deny', scope: 'always' };
+	}
 }
 
 /**
@@ -82,7 +94,29 @@ export function ruleForChoice(
 export const PERMISSION_ALWAYS_COMMAND = 'covexcode.permission.respondAlways';
 
 /** Command link for an "always" choice, mirroring `permissionCommandUri`'s format. */
-export function alwaysCommandUri(id: string, decision: PermissionDecision): string {
-	const encoded = encodeURIComponent(JSON.stringify([id, decision]));
+export function alwaysCommandUri(id: string, choice: PromptChoice): string {
+	const encoded = encodeURIComponent(JSON.stringify([id, choice]));
 	return `command:${PERMISSION_ALWAYS_COMMAND}?${encoded}`;
+}
+
+/**
+ * Parses `covexcode.permission.respondAlways` arguments -- the gate id and a
+ * scoped choice (turn / session / always). "Once" and reject stay on the
+ * two-valued `covexcode.permission.respond` command.
+ */
+export function parseAlwaysCommandArgs(args: unknown[]): { id: string; choice: PromptChoice } | undefined {
+	const id = args[0];
+	const choice = args[1];
+	if (typeof id !== 'string') {
+		return undefined;
+	}
+	if (
+		choice !== 'allow-turn' &&
+		choice !== 'allow-session' &&
+		choice !== 'allow-always' &&
+		choice !== 'reject-always'
+	) {
+		return undefined;
+	}
+	return { id, choice };
 }
