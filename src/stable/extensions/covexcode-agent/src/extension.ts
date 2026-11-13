@@ -496,6 +496,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			void vscode.window.showWarningMessage(message);
 		},
 		gitBaseline: (rootPath, fsPath) => readGitHeadBaseline(rootPath, fsPath),
+		getDiffStat: (fsPath) => computeFileDiffStat(fsPath),
 		openDiffEditor: async ({ beforeContent, afterContent, afterFsPath, title, readOnlySingle }) => {
 			const name = path.basename(afterFsPath ?? title);
 			const beforeUri = reviewDiffProvider.set(`before/${Date.now()}/${name}`, beforeContent);
@@ -3588,6 +3589,46 @@ async function readGitHeadBaseline(rootPath: string, fsPath: string): Promise<Gi
 		beforeContent: headContent.stdout,
 		existedBefore: true,
 	};
+}
+
+async function computeFileDiffStat(fsPath: string): Promise<{ insertions: number; deletions: number } | undefined> {
+	try {
+		const roots = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
+		let root = roots.find(r => fsPath.startsWith(r + path.sep) || fsPath === r);
+		if (!root && roots.length > 0) {
+			root = roots[0];
+		}
+		if (root) {
+			const execGit = (args: string[]): Promise<{ ok: boolean; stdout: string }> =>
+				new Promise(resolve => {
+					cp.execFile('git', args, { cwd: root, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+						if (err) {
+							resolve({ ok: false, stdout: '' });
+							return;
+						}
+						resolve({ ok: true, stdout });
+					});
+				});
+
+			const rel = path.relative(root, fsPath).replace(/\\/g, '/');
+			const diffRes = await execGit(['diff', '--numstat', 'HEAD', '--', rel]);
+			if (diffRes.ok && diffRes.stdout.trim()) {
+				const parts = diffRes.stdout.trim().split(/\s+/);
+				const ins = parseInt(parts[0], 10);
+				const del = parseInt(parts[1], 10);
+				if (!isNaN(ins) && !isNaN(del)) {
+					return { insertions: ins, deletions: del };
+				}
+			}
+		}
+
+		if (fs.existsSync(fsPath)) {
+			const content = fs.readFileSync(fsPath, 'utf8');
+			const lineCount = content ? content.split(/\r?\n/).length : 0;
+			return { insertions: lineCount, deletions: 0 };
+		}
+	} catch {}
+	return undefined;
 }
 
 export function deactivate(): void {

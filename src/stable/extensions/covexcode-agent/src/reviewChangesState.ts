@@ -51,6 +51,8 @@ export interface ReviewEntry {
 	touches: number;
 	undoable: boolean;
 	reason?: string;
+	insertions?: number;
+	deletions?: number;
 }
 
 export interface AcceptedSnapshot {

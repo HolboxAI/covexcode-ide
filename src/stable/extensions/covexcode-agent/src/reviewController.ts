@@ -76,6 +76,8 @@ export interface PublishedReviewEntry {
 	touches: number;
 	undoable: boolean;
 	reason?: string;
+	insertions?: number;
+	deletions?: number;
 }
 
 export interface PublishedReviewState {
@@ -108,6 +110,7 @@ export interface ReviewHost {
 	confirmBulkReject(displayPaths: readonly string[]): Promise<boolean>;
 	notifyInfo(message: string): void;
 	notifyWarning(message: string): void;
+	getDiffStat?(fsPath: string): Promise<{ insertions: number; deletions: number } | undefined>;
 	gitBaseline(rootPath: string, fsPath: string): Promise<GitBaselineResult>;
 	openDiffEditor(options: {
 		beforeContent: string;
@@ -744,6 +747,8 @@ export class ReviewController {
 			touches: entry.touches,
 			undoable: entry.undoable,
 			...(entry.reason !== undefined ? { reason: entry.reason } : {}),
+			...(entry.insertions !== undefined ? { insertions: entry.insertions } : {}),
+			...(entry.deletions !== undefined ? { deletions: entry.deletions } : {}),
 		});
 		return {
 			sessionResource,
@@ -785,6 +790,21 @@ export class ReviewController {
 			state,
 			bundle.metaByKey,
 		);
+
+		if (this.host.getDiffStat) {
+			for (const entry of pending.undoable) {
+				if (entry.fsPath) {
+					try {
+						const stat = await this.host.getDiffStat(entry.fsPath);
+						if (stat) {
+							entry.insertions = stat.insertions;
+							entry.deletions = stat.deletions;
+						}
+					} catch {}
+				}
+			}
+		}
+
 		return { pending, bundle };
 	}
 

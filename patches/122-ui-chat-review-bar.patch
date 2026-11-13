@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..976b430
 --- /dev/null
 +++ b/src/vs/workbench/contrib/chat/browser/widget/chatReviewChangesBar.ts
-@@ -0,0 +1,430 @@
+@@ -0,0 +1,415 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Copyright (c) HolboxAI. Licensed under the MIT License.
 + *--------------------------------------------------------------------------------------------*/
@@ -26,6 +26,8 @@ index 0000000..976b430
 +	readonly touches: number;
 +	readonly undoable: boolean;
 +	readonly reason?: string;
++	readonly insertions?: number;
++	readonly deletions?: number;
 +}
 +
 +export interface IReviewBarState {
@@ -345,6 +347,19 @@ index 0000000..976b430
 +		statusIcon.className += ` covexcode-review-status-icon covexcode-review-status-${entry.kind}`;
 +		mainBtn.appendChild(statusIcon);
 +
++		const ins = entry.insertions ?? (entry.kind === 'deleted' ? 0 : (entry.touches || 1));
++		const del = entry.deletions ?? (entry.kind === 'deleted' ? (entry.touches || 1) : 0);
++
++		const statInsEl = document.createElement('span');
++		statInsEl.className = 'covexcode-review-stat covexcode-review-stat-added';
++		statInsEl.textContent = `+${ins}`;
++		mainBtn.appendChild(statInsEl);
++
++		const statDelEl = document.createElement('span');
++		statDelEl.className = 'covexcode-review-stat covexcode-review-stat-deleted';
++		statDelEl.textContent = `-${del}`;
++		mainBtn.appendChild(statDelEl);
++
 +		const parsed = parseDisplayPath(entry.displayPath);
 +		const filenameEl = document.createElement('span');
 +		filenameEl.className = 'covexcode-review-filename';
@@ -364,36 +379,6 @@ index 0000000..976b430
 +		this.rowMainButtons.push(mainBtn);
 +		row.appendChild(mainBtn);
 +
-+		const actions = document.createElement('div');
-+		actions.className = 'covexcode-review-row-actions';
-+
-+		const rejectBtn = document.createElement('button');
-+		rejectBtn.type = 'button';
-+		rejectBtn.className = 'covexcode-review-icon-btn covexcode-review-icon-reject';
-+		const rejectTitle = localize('covexcode.review.rejectFile', 'Reject {0}', entry.displayPath);
-+		rejectBtn.title = rejectTitle;
-+		rejectBtn.setAttribute('aria-label', rejectTitle);
-+		rejectBtn.appendChild(this.createIconSpan(Codicon.discard));
-+		rejectBtn.addEventListener('click', e => {
-+			e.stopPropagation();
-+			this.runCommand('covexcode.review.reject', entry.path, resStr);
-+		});
-+		actions.appendChild(rejectBtn);
-+
-+		const acceptBtn = document.createElement('button');
-+		acceptBtn.type = 'button';
-+		acceptBtn.className = 'covexcode-review-icon-btn covexcode-review-icon-accept';
-+		const acceptTitle = localize('covexcode.review.acceptFile', 'Accept {0}', entry.displayPath);
-+		acceptBtn.title = acceptTitle;
-+		acceptBtn.setAttribute('aria-label', acceptTitle);
-+		acceptBtn.appendChild(this.createIconSpan(Codicon.check));
-+		acceptBtn.addEventListener('click', e => {
-+			e.stopPropagation();
-+			this.runCommand('covexcode.review.accept', entry.path, resStr);
-+		});
-+		actions.appendChild(acceptBtn);
-+
-+		row.appendChild(actions);
 +		return row;
 +	}
 +
@@ -534,14 +519,10 @@ index 2bfb996..35a93fb 100644
  		const totalMessages = this.viewModel.getItems();
  		// grab the last N messages
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-index 54b6cd6..b04ab78 100644
+index 101a8f8..843d043 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4935,3 +4935,310 @@ a[href*="permission.review"] {
- .chat-confirm-undo-card .confirm-undo-confirm:active {
- 	background: #075985;
- }
-+
+@@ -4938,0 +4939,323 @@
 +/* covexcode: docked post-turn Review Bar above chat input (Antigravity-style drop-up) */
 +.interactive-session > .covexcode-review-bar {
 +	margin: 0 12px 2px 12px;
@@ -776,6 +757,23 @@ index 54b6cd6..b04ab78 100644
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-status-shell {
 +	color: var(--vscode-descriptionForeground, #999999);
++}
++
++/* Diff stats: +N in green, -M in red */
++.interactive-session > .covexcode-review-bar .covexcode-review-stat {
++	font-size: 11px;
++	font-weight: 500;
++	font-family: var(--vscode-editor-font-family, monospace);
++	flex-shrink: 0;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-stat-added {
++	color: var(--vscode-gitDecoration-addedResourceForeground, #22c55e);
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-stat-deleted {
++	color: var(--vscode-gitDecoration-deletedResourceForeground, #ef4444);
++	margin-right: 2px;
 +}
 +
 +/* Filename in primary foreground */
