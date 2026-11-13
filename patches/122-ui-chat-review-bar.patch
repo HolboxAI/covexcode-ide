@@ -343,8 +343,8 @@ index 0000000..976b430
 +		mainBtn.title = fullPath;
 +		mainBtn.setAttribute('aria-label', localize('covexcode.review.openDiffAria', '{0}: {1}. Open diff.', labelText, entry.displayPath));
 +
-+		const statusIcon = this.createIconSpan(Codicon.record);
-+		statusIcon.className += ` covexcode-review-status-icon covexcode-review-status-${entry.kind}`;
++		const statusIcon = document.createElement('span');
++		statusIcon.className = `covexcode-review-status-icon covexcode-review-status-${entry.kind}`;
 +		mainBtn.appendChild(statusIcon);
 +
 +		const ins = entry.insertions ?? (entry.kind === 'deleted' ? 0 : (entry.touches || 1));
@@ -522,7 +522,7 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/v
 index 101a8f8..843d043 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4938,0 +4939,323 @@
+@@ -4938,0 +4939,342 @@
 +/* covexcode: docked post-turn Review Bar above chat input (Antigravity-style drop-up) */
 +.interactive-session > .covexcode-review-bar {
 +	margin: 0 12px 2px 12px;
@@ -737,22 +737,39 @@ index 101a8f8..843d043 100644
 +	cursor: pointer;
 +}
 +
-+/* Status icon (circle record icon) */
++/* Status icon: squircle outline with centered dot, matching Antigravity */
 +.interactive-session > .covexcode-review-bar .covexcode-review-status-icon {
-+	font-size: 11px;
++	width: 14px;
++	height: 14px;
++	border: 1.5px solid currentColor;
++	border-radius: 4px;
++	display: inline-flex;
++	align-items: center;
++	justify-content: center;
++	box-sizing: border-box;
 +	flex-shrink: 0;
++	margin-right: 6px;
++}
++
++.interactive-session > .covexcode-review-bar .covexcode-review-status-icon::after {
++	content: '';
++	width: 4px;
++	height: 4px;
++	border-radius: 50%;
++	background-color: currentColor;
++	display: block;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-status-modified {
-+	color: var(--vscode-gitDecoration-modifiedResourceForeground, #f59e0b);
++	color: var(--vscode-gitDecoration-modifiedResourceForeground, #e9975f);
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-status-added {
-+	color: var(--vscode-gitDecoration-addedResourceForeground, #22c55e);
++	color: var(--vscode-gitDecoration-addedResourceForeground, #639850);
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-status-deleted {
-+	color: var(--vscode-gitDecoration-deletedResourceForeground, #ef4444);
++	color: var(--vscode-gitDecoration-deletedResourceForeground, #de5555);
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-status-shell {
@@ -763,17 +780,19 @@ index 101a8f8..843d043 100644
 +.interactive-session > .covexcode-review-bar .covexcode-review-stat {
 +	font-size: 11px;
 +	font-weight: 500;
-+	font-family: var(--vscode-editor-font-family, monospace);
++	font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
 +	flex-shrink: 0;
++	line-height: 1;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-stat-added {
-+	color: var(--vscode-gitDecoration-addedResourceForeground, #22c55e);
++	color: #5bb974 !important;
++	margin-right: 6px;
 +}
 +
 +.interactive-session > .covexcode-review-bar .covexcode-review-stat-deleted {
-+	color: var(--vscode-gitDecoration-deletedResourceForeground, #ef4444);
-+	margin-right: 2px;
++	color: #ef4444 !important;
++	margin-right: 8px;
 +}
 +
 +/* Filename in primary foreground */
