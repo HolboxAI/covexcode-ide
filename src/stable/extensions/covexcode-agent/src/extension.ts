@@ -62,6 +62,7 @@ import {
 	type PromptChoice,
 } from './permissionOptions';
 import { isDestructiveAlwaysAllow, permissionPromptLinks } from './permissionPrompt';
+import { evaluatePermission, type ResourceToCheck } from './permissionEngine';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
@@ -1173,7 +1174,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, turnScopeId).then(respond);
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, turnScopeId, activeSessionId).then(respond);
 			} else {
 				respond({ outcome: 'cancelled' });
 			}
@@ -2738,6 +2739,7 @@ interface PendingPermissionContext {
 	affectedFiles: string[];
 	cwd: string;
 	turnId: string;
+	sessionId: string;
 }
 
 const pendingPermissionContext = new Map<string, PendingPermissionContext>();
@@ -2788,7 +2790,7 @@ function rememberPermissionChoice(id: string, choice: PromptChoice): void {
 		return;
 	}
 	const action = context.request.toolCall.title ?? 'run this action';
-	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId);
+	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId, context.sessionId);
 	if (!rule) {
 		return;
 	}
@@ -2803,6 +2805,20 @@ function rememberPermissionChoice(id: string, choice: PromptChoice): void {
 	}
 }
 
+/**
+ * Maps an ACP `session/request_permission` payload onto the engine's
+ * `ResourceToCheck`. The actual wire shape (see `acpClient.ts`) carries the
+ * target in `toolCall.title` and the operation kind in `toolCall.kind`, so
+ * that is the single source of truth here -- kind is not re-inferred from
+ * path-vs-command heuristics. Absent kind falls back to `other`.
+ */
+function extractResource(request: RequestPermissionRequest): ResourceToCheck {
+	const toolCall = request.toolCall;
+	const target = toolCall.title ?? '';
+	const kind = toolCall.kind ?? '';
+	return { kind: kind.length > 0 ? kind : 'other', target };
+}
+
 async function askPermission(
 	request: RequestPermissionRequest,
 	diffContentProvider: DiffContentProvider,
@@ -2811,6 +2827,7 @@ async function askPermission(
 	cwd: string,
 	onReject: (request: RequestPermissionRequest, toolCallId: string, files: string[]) => void,
 	turnId: string,
+	sessionId: string,
 ): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
@@ -2825,15 +2842,26 @@ async function askPermission(
 		await showDiff(diff, diffContentProvider, cwd);
 	}
 
-	// Incremental permissions: if the user already granted (or refused) this
-	// exact action, answer from the stored rule instead of prompting again.
-	const remembered = loadPermissionStore(cwd).decide({ kind: '', action });
-	if (remembered === 'allow' && allow) {
-		return { outcome: 'selected', optionId: allow.optionId };
-	}
-	if (remembered === 'deny' && reject) {
+	// Phase 3: evaluate the saved rules before deciding whether to prompt.
+	// `extractResource` maps the actual ACP request shape onto the engine's
+	// `ResourceToCheck`; `sessionId`/`turnId` scope the turn/session grants.
+	const resource = extractResource(request);
+	const decision = evaluatePermission(resource, loadPermissionStore(cwd).list(), { turnId, sessionId });
+
+	if (decision === 'deny' && reject) {
+		// Automatic reject: same outcome as the user clicking Reject, so the
+		// reject-feedback window still fires through `onReject` below.
+		onReject(request, request.toolCall.toolCallId ?? 'denied', affectedFiles);
+		vscode.window.setStatusBarMessage(`Permission denied by rule: ${resource.target}`, 3000);
 		return { outcome: 'selected', optionId: reject.optionId };
 	}
+
+	if (decision === 'allow' && allow) {
+		vscode.window.setStatusBarMessage(`Allowed by saved rule: ${resource.target}`, 3000);
+		return { outcome: 'selected', optionId: allow.optionId };
+	}
+
+	// decision === 'ask': fall through to the five-link prompt unchanged.
 
 	const { id, wait } = permissionGate.create();
 	if (diff?.type === 'diff' && hunks) {
@@ -2865,7 +2893,7 @@ async function askPermission(
 	} else {
 		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks, pending.kind ?? ''));
 	}
-	pendingPermissionContext.set(id, { request, toolCallId, affectedFiles, cwd, turnId });
+	pendingPermissionContext.set(id, { request, toolCallId, affectedFiles, cwd, turnId, sessionId });
 	const answer = await wait;
 	pendingReviews.delete(id);
 	// The user answered (Allow/Reject/Review). Remove the prompt from chat:

@@ -67,6 +67,8 @@ export interface PermissionRule {
 	scope?: PermissionScope;
 	/** The agent turn the grant belongs to, present only when `scope` is `turn`. */
 	turnId?: string;
+	/** The ACP session the grant belongs to, present only when `scope` is `session`. */
+	sessionId?: string;
 }
 
 export interface PermissionStoreFile {
@@ -137,6 +139,9 @@ function parseRule(value: unknown): PermissionRule | undefined {
 	}
 	if (typeof value.turnId === 'string') {
 		rule.turnId = value.turnId;
+	}
+	if (typeof value.sessionId === 'string') {
+		rule.sessionId = value.sessionId;
 	}
 	return rule;
 }

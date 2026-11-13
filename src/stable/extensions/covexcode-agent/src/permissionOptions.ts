@@ -59,6 +59,7 @@ export function ruleForChoice(
 	query: PermissionQuery,
 	createdAt: string,
 	turnId?: string,
+	sessionId?: string,
 ): PermissionRule | undefined {
 	const base = {
 		kind: query.kind,
@@ -75,7 +76,7 @@ export function ruleForChoice(
 		case 'allow-turn':
 			return { ...base, decision: 'allow', scope: 'turn', turnId };
 		case 'allow-session':
-			return { ...base, decision: 'allow', scope: 'session' };
+			return { ...base, decision: 'allow', scope: 'session', sessionId };
 		case 'allow-always':
 			return { ...base, decision: 'allow', scope: 'always' };
 		case 'reject-always':
