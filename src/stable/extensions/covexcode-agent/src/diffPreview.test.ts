@@ -5,15 +5,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+	ChangeBaselines,
 	computeFileDiffSummary,
 	countHunkChanges,
 	countLineDiff,
+	decideJournalDiff,
 	isBinaryText,
+	isByteIdentical,
 	isPlausibleBeforeImage,
+	selectIndicatorChange,
 	selectTurnChanges,
 	snapshotTouches,
 	splitDiffLines,
 	toolTitlePath,
+	TurnChanges,
 	TurnFileObserver,
 } from './diffPreview';
 import type { DiffHunk, DiffHunkLine, DiffLineChange } from './acpClient';
@@ -236,8 +241,28 @@ test('isPlausibleBeforeImage() accepts a deleted file, which cannot be re-verifi
 	assert.equal(isPlausibleBeforeImage('anything\n', ''), true);
 });
 
-test('isPlausibleBeforeImage() rejects an empty before-image for an existing file', () => {
-	assert.equal(isPlausibleBeforeImage('', 'a\nb\n'), false);
+test('isByteIdentical() is true only when both sides are present and equal', () => {
+	assert.equal(isByteIdentical('a\n', 'a\n'), true);
+	assert.equal(isByteIdentical('a\n', 'a'), false);
+	assert.equal(isByteIdentical(undefined, ''), false);
+	assert.equal(isByteIdentical(undefined, 'x\n'), false);
+});
+
+test('an empty new file has no textual diff and must be excluded', () => {
+	const summary = computeFileDiffSummary({ oldText: undefined, newText: '' });
+	assert.equal(summary.status, 'added');
+	assert.equal(summary.hasTextualDiff, false);
+	assert.equal(summary.isBinary, false);
+});
+
+test('an empty deleted file has no textual diff and must be excluded', () => {
+	const summary = computeFileDiffSummary({ oldText: '', newText: '' });
+	assert.equal(summary.hasTextualDiff, false);
+	assert.equal(summary.isBinary, false);
+});
+
+test('isPlausibleBeforeImage() accepts a before-image byte-identical to the after', () => {
+	assert.equal(isPlausibleBeforeImage('same\n', 'same\n'), true);
 });
 
 test('toolTitlePath() recognises the grep shape the agent actually uses', () => {
@@ -262,4 +287,244 @@ test('toolTitlePath() splits grep on the LAST " in " so a pattern may contain on
 
 test('toolTitlePath() ignores a grep with no file target', () => {
 	assert.equal(toolTitlePath('grep Footer'), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// decideJournalDiff: the gate that keeps an unchanged file out of the summary.
+// The regression it exists for was observed in a real two-turn session against
+// the bundled agent: turn 1 created index.html + styles.css, turn 2 changed one
+// line of styles.css, and styles.css was reported as "+3 -0" because the
+// journal's `delete` action ("did not exist before the SESSION") was read as
+// "did not exist before this touch".
+// ---------------------------------------------------------------------------
+
+test('decideJournalDiff() skips a file written back with identical bytes', () => {
+	const css = 'h1 {\n  color: #333333;\n}\n';
+	assert.deepEqual(decideJournalDiff(css, css, true), { kind: 'skip' });
+});
+
+test('decideJournalDiff() diffs a file created in an EARLIER turn against its real pre-image', () => {
+	const before = 'h1 {\n  color: #333333;\n}\n';
+	const after = 'h1 {\n  color: #cc0000;\n}\n';
+	assert.deepEqual(decideJournalDiff(before, after, true), { kind: 'diff', oldText: before });
+});
+
+test('decideJournalDiff() reports a brand-new file as all-added when there is no pre-image', () => {
+	assert.deepEqual(decideJournalDiff(undefined, '<h1>Hello</h1>\n', true), { kind: 'allAdded' });
+});
+
+test('decideJournalDiff() drops a file that was created and left empty', () => {
+	assert.deepEqual(decideJournalDiff(undefined, '', true), { kind: 'skip' });
+});
+
+test('decideJournalDiff() keeps an all-removed diff for an existing file emptied in place', () => {
+	// Not `delete` action: the file existed before the session, so emptying it is
+	// a real change and must not be swallowed by the created-and-empty rule.
+	assert.deepEqual(decideJournalDiff('a\nb\n', '', false), { kind: 'diff', oldText: 'a\nb\n' });
+});
+
+test('decideJournalDiff() falls back to a filename row only when there is no before-image', () => {
+	assert.deepEqual(decideJournalDiff(undefined, 'a\nb\n', false), { kind: 'listOnly' });
+});
+
+test('decideJournalDiff() still gives real counts for a whole-file rewrite', () => {
+	// A rewrite is a diff like any other: refusing it would report a file the
+	// user definitely changed as a bare filename with no line counts.
+	assert.deepEqual(decideJournalDiff('a\n', 'x\ny\nz\n', true), { kind: 'diff', oldText: 'a\n' });
+});
+
+test('decideJournalDiff() counts a one-line change in a short file', () => {
+	// The regression the similarity threshold caused: 2 of 3 lines in common is
+	// 67%, so a 90%-identical rule degraded every small edit to a bare filename.
+	const before = 'h1 {\n  color: #333333;\n}\n';
+	const after = 'h1 {\n  color: #cc0000;\n}\n';
+	const decision = decideJournalDiff(before, after, true);
+	assert.equal(decision.kind, 'diff');
+	const summary = computeFileDiffSummary({ oldText: before, newText: after });
+	assert.equal(summary.added, 1);
+	assert.equal(summary.removed, 1);
+});
+
+// ---------------------------------------------------------- inline indicator
+//
+// The indicator shows exactly ONE file: the most recently modified one. These
+// tests drive the whole QA sequence from the feature request -- HTML appears,
+// CSS replaces it, JavaScript replaces that, HTML comes back with updated
+// counts, an unmodified file never appears -- against the pure state model.
+
+function newChanges(): TurnChanges {
+	return new TurnChanges(new ChangeBaselines());
+}
+
+test('selectIndicatorChange() shows nothing before any modification', () => {
+	assert.deepEqual(selectIndicatorChange(newChanges()), { kind: 'none' });
+});
+
+test('selectIndicatorChange() replaces the row when a different file is modified', () => {
+	const changes = newChanges();
+	changes.record({ path: 'index.html', newText: 'a\nb\n', created: true });
+	const first = selectIndicatorChange(changes);
+	assert.equal(first.kind, 'diff');
+	assert.equal(first.kind === 'diff' && first.path, 'index.html');
+
+	changes.record({ path: 'style.css', newText: 'body { color: red; }\n', created: true });
+	const second = selectIndicatorChange(changes);
+	assert.equal(second.kind, 'diff');
+	assert.equal(second.kind === 'diff' && second.path, 'style.css');
+
+	changes.record({ path: 'script.js', newText: 'console.log(1);\n', created: true });
+	const third = selectIndicatorChange(changes);
+	assert.equal(third.kind === 'diff' && third.path, 'script.js');
+});
+
+test('selectIndicatorChange() brings an earlier file back to the front when it is modified again', () => {
+	const changes = newChanges();
+	changes.record({ path: 'index.html', newText: 'a\n', created: true });
+	changes.record({ path: 'style.css', newText: 'b\n', created: true });
+	changes.record({ path: 'index.html', newText: 'a\nb\n', created: true });
+	const change = selectIndicatorChange(changes);
+	assert.equal(change.kind === 'diff' && change.path, 'index.html');
+	// And it repeats the counts for the whole task, not only the last write.
+	assert.equal(change.kind === 'diff' && change.summary.added, 2);
+});
+
+test('TurnChanges keeps one entry per path, however many times it is modified', () => {
+	const changes = newChanges();
+	changes.record({ path: 'index.html', newText: 'one\n', created: true });
+	changes.record({ path: 'index.html', newText: 'one\ntwo\n' });
+	changes.record({ path: 'index.html', newText: 'one\ntwo\nthree\n' });
+	assert.equal(changes.size, 1);
+	assert.equal(changes.byRecency().length, 1);
+	const only = selectIndicatorChange(changes);
+	assert.equal(only.kind === 'diff' && only.path, 'index.html');
+});
+
+test('selectIndicatorChange() measures counts from the task-start content', () => {
+	const changes = newChanges();
+	const original = 'a\nb\nc\n';
+	// First edit: b -> B.
+	changes.record({ path: 'index.html', oldText: original, newText: 'a\nB\nc\n' });
+	let change = selectIndicatorChange(changes);
+	assert.equal(change.kind === 'diff' && change.summary.added, 1);
+	assert.equal(change.kind === 'diff' && change.summary.removed, 1);
+
+	// Second edit to the same file: append d. Still one row, and the counts now
+	// describe the whole task (b->B plus the new line), not just the last edit.
+	changes.record({ path: 'index.html', oldText: 'a\nB\nc\n', newText: 'a\nB\nc\nd\n' });
+	assert.equal(changes.size, 1);
+	change = selectIndicatorChange(changes);
+	assert.equal(change.kind === 'diff' && change.oldText, original);
+	assert.equal(change.kind === 'diff' && change.summary.added, 2);
+	assert.equal(change.kind === 'diff' && change.summary.removed, 1);
+});
+
+test('selectIndicatorChange() ignores a file that was only inspected', () => {
+	const changes = newChanges();
+	changes.captureBaseline('notes.md', 'unchanged\n');
+	// Nothing is recorded for it -- an inspection is not a modification.
+	assert.deepEqual(selectIndicatorChange(changes), { kind: 'none' });
+});
+
+test('selectIndicatorChange() falls back to an earlier real change when the latest write was a no-op', () => {
+	const changes = newChanges();
+	changes.record({ path: 'index.html', oldText: 'a\n', newText: 'a\nb\n' });
+	// The agent re-writes the bytes it found: a touch, not a modification.
+	changes.record({ path: 'index.html', oldText: 'a\nb\n', newText: 'a\nb\n' });
+	const change = selectIndicatorChange(changes);
+	assert.equal(change.kind === 'diff' && change.path, 'index.html');
+	assert.equal(change.kind === 'diff' && change.summary.added, 1);
+
+	// A same-bytes write to a file the task created is equally silent.
+	const created = newChanges();
+	created.record({ path: 'index.html', newText: 'a\n', created: true });
+	created.record({ path: 'index.html', newText: 'a\n' });
+	assert.equal(selectIndicatorChange(created).kind === 'diff', true);
+});
+
+test('selectIndicatorChange() shows nothing when the only change reverted itself', () => {
+	const changes = newChanges();
+	changes.record({ path: 'index.html', oldText: 'a\nb\n', newText: 'a\nB\n' });
+	changes.record({ path: 'index.html', oldText: 'a\nB\n', newText: 'a\nb\n' });
+	assert.deepEqual(selectIndicatorChange(changes), { kind: 'none' });
+});
+
+test('selectIndicatorChange() keeps the filename-only fallback when no before-image exists', () => {
+	const changes = newChanges();
+	changes.record({ path: 'mystery.bin.js', newText: 'x\n', listOnly: true });
+	assert.deepEqual(selectIndicatorChange(changes), { kind: 'listOnly', path: 'mystery.bin.js' });
+});
+
+test('selectIndicatorChange() reports a binary change by name instead of counting lines', () => {
+	const changes = newChanges();
+	changes.record({ path: 'logo.png', oldText: 'PNG\0old\n', newText: 'PNG\0new\n' });
+	assert.deepEqual(selectIndicatorChange(changes), { kind: 'binary', path: 'logo.png' });
+});
+
+test('selectIndicatorChange() drops a record the journal proves did not change', () => {
+	const changes = newChanges();
+	changes.record({ path: 'index.html', newText: 'a\n', created: true });
+	changes.record({ path: 'style.css', newText: 'b\n', created: true });
+	changes.remove('style.css');
+	const change = selectIndicatorChange(changes);
+	assert.equal(change.kind === 'diff' && change.path, 'index.html');
+});
+
+test('a branch-new file counts every line as added, from an empty baseline', () => {
+	const changes = newChanges();
+	changes.record({ path: 'index.html', newText: 'a\nb\nc\n', created: true });
+	const change = selectIndicatorChange(changes);
+	assert.equal(change.kind === 'diff' && change.oldText, '');
+	assert.equal(change.kind === 'diff' && change.summary.added, 3);
+	assert.equal(change.kind === 'diff' && change.summary.removed, 0);
+});
+
+test('a deletion counts every task-added line as removed', () => {
+	const changes = newChanges();
+	changes.record({ path: 'index.html', oldText: 'a\nb\n', newText: '', hunks: undefined });
+	const change = selectIndicatorChange(changes);
+	assert.equal(change.kind === 'diff' && change.summary.removed, 2);
+	assert.equal(change.kind === 'diff' && change.summary.added, 0);
+});
+
+test('ChangeBaselines keeps the first capture, and a created file starts empty', () => {
+	const baselines = new ChangeBaselines();
+	assert.equal(baselines.textFor('a.js'), undefined);
+	baselines.capture('a.js', 'first\n');
+	baselines.capture('a.js', 'second\n');
+	assert.equal(baselines.textFor('a.js'), 'first\n');
+	baselines.capture('b.js', '');
+	assert.equal(baselines.textFor('b.js'), '');
+	baselines.clear();
+	assert.equal(baselines.textFor('a.js'), undefined);
+});
+
+test('TurnChanges re-stamps a file as latest without duplicating it', () => {
+	const changes = newChanges();
+	changes.record({ path: 'a.js', newText: '1\n', created: true });
+	changes.record({ path: 'b.js', newText: '1\n', created: true });
+	assert.equal(changes.byRecency()[0].path, 'b.js');
+	changes.record({ path: 'a.js', newText: '1\n2\n' });
+	const recency = changes.byRecency();
+	assert.equal(recency.length, 2);
+	assert.equal(recency[0].path, 'a.js');
+	assert.equal(recency[1].path, 'b.js');
+});
+
+test('TurnChanges reports hunk counts only while they match the baseline pair', () => {
+	const changes = newChanges();
+	changes.record({
+		path: 'a.ts',
+		oldText: 'a\nb\n',
+		newText: 'a\nB\n',
+		hunks: [mkHunk(1, 1, [['context', 'a'], ['removed', 'b'], ['added', 'B']])],
+	});
+	const first = selectIndicatorChange(changes);
+	assert.equal(first.kind === 'diff' && first.summary.added, 1);
+
+	// A later edit means the wire hunks describe only that edit, so they must not
+	// be reused for a row that now covers the whole task.
+	changes.record({ path: 'a.ts', oldText: 'a\nB\n', newText: 'a\nB\nc\n' });
+	const latest = changes.byRecency()[0];
+	assert.equal(latest.hunks, undefined);
+	assert.equal(latest.oldText, 'a\nb\n');
 });

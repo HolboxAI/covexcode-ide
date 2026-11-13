@@ -1,0 +1,51 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+@@ -2757,8 +2757,11 @@
+ 	flex-direction: column;
+ 	flex-wrap: wrap;
+ 	align-items: center;
+-	border-radius: var(--vscode-cornerRadius-small);
++	border-radius: var(--vscode-cornerRadius-medium);
+ 	border: 1px solid var(--vscode-chat-requestBorder);
++	background-color: var(--vscode-editorWidget-background, transparent);
++	margin: 2px 0 8px;
++	overflow: hidden;
+ 
+ 	.chat-view-changes-icon {
+ 		padding: 3px;
+@@ -2767,18 +2770,20 @@
+ 	}
+ 
+ 	.chat-view-changes-icon:hover {
+-		border-radius: 5px;
++		border-radius: var(--vscode-cornerRadius-small);
+ 		background-color: var(--vscode-toolbar-hoverBackground);
+ 	}
+ 
+ 	.insertions-and-deletions {
+ 		display: flex;
+-		margin-right: 5px;
++		margin-right: 8px;
+ 		font-size: 12px;
++		align-items: center;
++		gap: 2px;
+ 	}
+ 
+ 	.checkpoint-file-changes-summary-header {
+-		padding: 3px 3px 3px 3px;
++		padding: 6px 8px;
+ 		width: 100%;
+ 		display: flex;
+ 		box-sizing: border-box;
+@@ -2808,8 +2813,9 @@
+ 	.chat-summary-list {
+ 		width: 100%;
+ 		max-width: 100%;
+-		padding: 0px;
++		padding: 2px 4px 6px;
+ 		margin-bottom: 0px;
++		border-top: 1px solid var(--vscode-chat-requestBorder);
+ 		border-bottom: 0px;
+ 		border-left: 0px;
+ 		border-right: 0px;

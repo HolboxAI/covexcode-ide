@@ -1,0 +1,47 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/chatMultiDiffContentPart.ts b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/chatMultiDiffContentPart.ts
+--- a/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/chatMultiDiffContentPart.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentParts/chatMultiDiffContentPart.ts
+@@ -71,12 +71,22 @@
+ 			? this.content.multiDiffData.map(d => d)
+ 			: constObservable(this.content.multiDiffData);
+ 
+-		const headerDomNode = $('.checkpoint-file-changes-summary-header');
+-		this.domNode = $('.checkpoint-file-changes-summary', undefined, headerDomNode);
+-		this.domNode.tabIndex = 0;
+-		this.isCollapsed = content?.collapsed ?? false;
++		// A part that carries a single changed file needs no header: the one row
++		// already names the file and draws its own +N/-N counts, so "Changed 1
++		// file" stacked above it is pure chrome. The header -- collapse control,
++		// "Open Changes", contributed buttons -- is only rendered when there is
++		// more than one file to collapse or act on.
++		const singleFile = this.diffData.get().resources.length === 1;
++		this.domNode = singleFile
++			? $('.checkpoint-file-changes-summary.single-file-changes')
++			: $('.checkpoint-file-changes-summary');
++		this.domNode.tabIndex = singleFile ? -1 : 0;
++		this.isCollapsed = singleFile ? false : (content?.collapsed ?? false);
+ 
+-		this._register(this.renderHeader(headerDomNode));
++		if (!singleFile) {
++			const headerDomNode = this.domNode.appendChild($('.checkpoint-file-changes-summary-header'));
++			this._register(this.renderHeader(headerDomNode));
++		}
+ 		this._register(this.renderFilesList(this.domNode));
+ 	}
+ 
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+@@ -2821,6 +2821,12 @@
+ 		border-right: 0px;
+ 		box-sizing: border-box;
+ 		border-radius: 0px;
++	}
++
++	/* The single-file variant renders no header, so there is no divider above
++	 * the one row and it sits directly inside the container's own border. */
++	&.single-file-changes .chat-summary-list {
++		border-top: none;
+ 	}
+ 
+ 	.chat-summary-list .monaco-icon-label {

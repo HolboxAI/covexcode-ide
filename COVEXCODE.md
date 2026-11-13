@@ -169,6 +169,40 @@ live, no reload. `ChatEditingEditorOverlay`'s Accept/Reject chips are **not**
 available to this extension: they come from a chat editing session, and
 covexcode implements no `IChatEditingSession`.
 
+## The chat response stream is append-only — parts cannot be replaced
+
+Anything that wants a "live, updating" piece of chat UI has to work with this:
+
+- `stream.push` only ever **appends**. A part already pushed cannot be replaced
+  or removed, so "replace the previous entry" is not expressible mid-turn.
+- The renderer index-aligns the response's content array against the parts it
+  already built and asks `hasSameContent` per index; a newly pushed part lands at
+  a new index and is always rendered as an extra part. Only `ChatToolInvocationPart`
+  updates in place, and only because its `toolCallId` + `enablePartialUpdate` are
+  matched by the renderer.
+- Consequence for the file-change indicator: it is rendered once, at the end of a
+  panel turn, and "replacement" means *one* entry in the part plus a fresh
+  single-entry part per response. A turn that edits three files reports the third.
+- `ChatResponseMultiDiffPart` is the only content type that renders a file row
+  with real green/red `+N/-N` counts and opens the diff editor on click in both
+  themes. A markdown row cannot carry those colours; don't try.
+
+## `vscode/out` is not compiled in this checkout
+
+`vscode/out/vs` contains only `tsconfig.tsbuildinfo` — the workbench has never
+been compiled here. The app bundles under `VSCode-darwin-arm64/` and
+`Covexcode QA.app` were built elsewhere, which means:
+
+- A core change (`src/vs/**`) can be written and shipped as a `patches/NNN-*.patch`
+  for the release build, but **cannot be built or verified in this checkout**.
+- What *is* verifiable end to end is the extension: esbuild → `dist/extension.js`
+  → copy into `Covexcode QA.app/Contents/Resources/app/extensions/covexcode-agent/dist/`
+  → launch the QA app. Prefer an extension-only answer when a request can be
+  satisfied that way, and say so when a core patch is only proposed, not proven.
+- The built app's workbench CSS (`.../out/vs/workbench/workbench.desktop.main.css`)
+  does contain the `patches/NNN-ui-*.patch` rules, so a CSS-only patch is
+  verifiable by grepping that file — the JS bundle is not.
+
 ## Pushing to a closed response stream
 
 A cancelled turn closes the response stream while the agent keeps emitting
@@ -179,3 +213,43 @@ rendering, including the end-of-turn diff summary.
 
 Provider credentials come from `COVEXCODE_API_KEY` / `COVEXCODE_MODEL` /
 `COVEXCODE_ENDPOINT` in the environment; a live turn costs real tokens.
+
+## Journal `action: 'delete'` does NOT mean "created this turn"
+
+It means "the file did not exist before the **session**", and it stays that way
+for the rest of the session. Reading it as "every line is new" made any later
+turn that merely wrote such a file again report `+<all lines> -0` — and report
+the file at all even when the write put back byte-identical content. Verified
+with `test/run-extension-multi-turn.mjs`: turn 1 created `index.html` +
+`styles.css`, turn 2 changed one line of the CSS, and turn 2 reported
+`styles.css +3 -0`. Both branches now go through `decideJournalDiff` in
+`diffPreview.ts`, which compares against the previous content first.
+
+## `isPlausibleBeforeImage` must not gate a whole-file before-image
+
+Its 90%-similarity rule exists to reject a *partial read* used as a before
+image. Both real sources are whole files read from disk (`TurnFileObserver`
+reads the file itself; `lastKnown` is the extension's own read), so applying the
+ratio to them rejects the ordinary case instead: one changed line in a three-line
+file is 67% similar and degraded to a no-counts dropdown row. Keep the ratio for
+what it was written for; do not put it in front of a whole-file pre-image.
+
+## `node --test` will happily pass against STALE compiled tests
+
+`bin/tsc` only forwards to `lib/tsc.js`, and a wrong relative path to it fails
+with `MODULE_NOT_FOUND` while leaving the previous `out-test/*.js` in place — so
+the suite reports all-green for code that was never compiled. Compile with the
+absolute entry point, then check the output actually contains the new symbols:
+
+```sh
+ELECTRON_RUN_AS_NODE=1 "./Covexcode QA.app/Contents/MacOS/Covexcode" \
+  "$PWD/vscode/node_modules/typescript/lib/tsc.js" -p tsconfig.test.json
+ELECTRON_RUN_AS_NODE=1 "./Covexcode QA.app/Contents/MacOS/Covexcode" \
+  --test 'out-test/*.test.js'    # a bare `out-test/` directory reports a bogus failure
+```
+
+`tsconfig.test.json` also emits `TS5107` (deprecated `moduleResolution=node10`)
+— that is a warning-shaped error, it still writes the output. And the "80
+errors" figure for `-p tsconfig.json --noEmit` is version-dependent: with the
+TypeScript in `vscode/node_modules` the same run reports 38, all pre-existing
+(`Cannot find module 'vscode'`, `Thenable`, `RollbackPickItem.label`).

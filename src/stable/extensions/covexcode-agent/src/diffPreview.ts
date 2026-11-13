@@ -154,6 +154,85 @@ export function isPlausibleBeforeImage(beforeText: string, afterText: string): b
 
 const BEFORE_IMAGE_MIN_COMMON_RATIO = 0.9;
 
+/**
+ * True when both sides of a change are present and byte-for-byte identical.
+ *
+ * This is the strictest form of the change-driven gate: a file whose original
+ * and final text are equal has not changed, no matter how much activity the
+ * agent performed against it (reads, inspections, a write that landed on the
+ * same bytes). It must be checked before any line-level diff, because a line
+ * diff reports "no added/removed lines" for a trailing-newline-only change too,
+ * while raw equality catches every no-op including a binary file written back
+ * unchanged.
+ */
+export function isByteIdentical(oldText: string | undefined, newText: string): boolean {
+	return oldText !== undefined && oldText === newText;
+}
+
+/**
+ * How one journaled touch should be rendered, given the best before-image
+ * available for it.
+ *
+ * `skip` means the file did not actually change and must not get a row at all --
+ * the distinction the summary lives or dies on. `allAdded` is the honest
+ * rendering of a file that did not exist before this touch, `diff` carries a
+ * real pre-image, and `listOnly` is the fallback for a change that is known to
+ * have happened but whose before-state cannot be reconstructed.
+ */
+export type JournalDiffDecision =
+	| { kind: 'skip' }
+	| { kind: 'diff'; oldText: string }
+	| { kind: 'allAdded' }
+	| { kind: 'listOnly' };
+
+/**
+ * Decides how a journal-only entry (a file covexcode changed without sending
+ * before/after text) should be rendered.
+ *
+ * The case this exists for, verified end to end: a file created earlier in the
+ * session is journaled with `action: 'delete'` -- "did not exist before the
+ * session" -- for the rest of the session's life, and that action used to be
+ * read as "every line is new". Any later turn that merely wrote such a file
+ * again therefore reported it as `+<all lines> -0` even when the content came
+ * back byte-for-byte identical, so an untouched file reappeared in the
+ * changed-files dropdown on every turn that touched it. `candidate` is what
+ * distinguishes the two situations: absent means this touch really did create
+ * the file, present means the file already had content that its new text must
+ * be compared against before anything is reported.
+ *
+ * `createdInSession` is `action === 'delete'`. An empty file is skipped only
+ * there: "created, then left empty" has nothing to show, while "existing file
+ * emptied" is a real change and keeps its all-removed diff.
+ *
+ * No similarity threshold is applied to `candidate` any more, and that is
+ * deliberate. `isPlausibleBeforeImage` exists to reject a *partial read* used as
+ * a before-image, but neither source that feeds this function is a partial read:
+ * `TurnFileObserver` reads the file from disk at inspection time and
+ * `lastKnown` is this module's own read of the whole file. Applying the ratio to
+ * whole files rejects the ordinary case instead -- one changed line in a
+ * three-line file is 67% similar, so every small edit degraded to a no-counts
+ * row -- while admitting nothing a fragment could not get past anyway.
+ */
+export function decideJournalDiff(
+	candidate: string | undefined,
+	newText: string,
+	createdInSession: boolean,
+): JournalDiffDecision {
+	if (candidate !== undefined && candidate === newText) {
+		return { kind: 'skip' };
+	}
+	if (createdInSession && newText === '') {
+		return { kind: 'skip' };
+	}
+	if (candidate !== undefined) {
+		return { kind: 'diff', oldText: candidate };
+	}
+	// A file that did not exist before the session with no before-image at all:
+	// every line really is new. Anything else has a change the client cannot
+	// reconstruct, so it is listed by name rather than given invented counts.
+	return createdInSession ? { kind: 'allAdded' } : { kind: 'listOnly' };
+}
+
 /** Tool actions that write to the file, so their arrival means it is too late to read the before-image. */
 export const MUTATING_TOOL_ACTIONS: ReadonlySet<string> = new Set([
 	'edit', 'write', 'create', 'delete', 'apply_patch', 'str_replace',
@@ -250,6 +329,241 @@ export class TurnFileObserver {
 	beforeFor(path: string): string | undefined {
 		return this.reads.get(path);
 	}
+}
+
+/**
+ * The content each file held *before the current task first modified it*.
+ *
+ * The inline indicator's `+N/-N` is always `baseline -> latest content`, so a
+ * file edited three times in one task keeps reporting the task's whole effect on
+ * it instead of only the last edit. That is why this is session-scoped and
+ * first-capture-wins: the earliest before-image seen for a path is the only one
+ * that answers "what has this task done to this file?".
+ *
+ * A file the agent created during the session has an empty baseline (`''`), so
+ * every line of it counts as added -- the honest answer for a file that did not
+ * exist when the task started. `undefined` means no baseline could be
+ * reconstructed at all (the caller falls back to a filename-only row rather than
+ * inventing counts).
+ */
+export class ChangeBaselines {
+	private readonly texts = new Map<string, string>();
+
+	/** Records `text` as `path`'s task-start content. The first call wins. */
+	capture(path: string, text: string): void {
+		if (!this.texts.has(path)) {
+			this.texts.set(path, text);
+		}
+	}
+
+	/**
+	 * The task-start text for `path`. `''` is a real answer (the file did not
+	 * exist); `undefined` means nothing was ever captured for it.
+	 */
+	textFor(path: string): string | undefined {
+		return this.texts.get(path);
+	}
+
+	clear(): void {
+		this.texts.clear();
+	}
+}
+
+/** One file the agent genuinely changed, as the inline indicator tracks it. */
+export interface TrackedChange {
+	/** The path as the agent reported it (display path). */
+	path: string;
+	/** Task-start text: `''` for a file this task created, `undefined` when unknown. */
+	oldText?: string;
+	/** Latest content. */
+	newText: string;
+	/** covexcode's own hunk split, when it covers this same before/after pair. */
+	hunks?: DiffHunk[];
+	/** A confirmed change whose before-image could not be reconstructed. */
+	listOnly?: boolean;
+	/** Monotonic stamp -- the highest value is the most recent modification. */
+	order: number;
+}
+
+/**
+ * The state behind the inline, single-file change indicator.
+ *
+ * The indicator shows exactly ONE file: the most recent genuine modification.
+ * This holds that state and nothing like a list of it -- a second file's
+ * modification REPLACES the first, and returning to an earlier file replaces the
+ * current one again. Re-recording a path updates its single entry in place and
+ * re-stamps it as latest, so no duplicate row can ever exist for one file.
+ *
+ * `order` is what makes "most recent" decidable without trusting the order the
+ * caller happens to enumerate in: every record gets a strictly increasing stamp
+ * at the moment the modification is detected, and `byRecency` walks them
+ * newest-first. Reads, inspections, mentions and plans never get here at all --
+ * only a completed diff, an accepted permission-reviewed edit, or a journaled
+ * touch does.
+ */
+export class TurnChanges {
+	private readonly records = new Map<string, TrackedChange>();
+	private sequence = 0;
+
+	constructor(private readonly baselines: ChangeBaselines) {}
+
+	/**
+	 * Records that `path` now holds `change.newText`, stamped as the latest
+	 * modification.
+	 *
+	 * `oldText` is the before-image observed for *this* modification; it doubles
+	 * as the task-start baseline only the first time a path is recorded (see
+	 * ChangeBaselines.capture). `created` says the file did not exist before this
+	 * write, which is the one case where an absent `oldText` still yields a real
+	 * baseline.
+	 */
+	record(change: {
+		path: string;
+		oldText?: string;
+		newText: string;
+		hunks?: DiffHunk[];
+		listOnly?: boolean;
+		created?: boolean;
+	}): void {
+		if (change.created) {
+			this.baselines.capture(change.path, '');
+		}
+		if (change.oldText !== undefined) {
+			this.baselines.capture(change.path, change.oldText);
+		}
+		this.records.set(change.path, {
+			path: change.path,
+			oldText: change.oldText,
+			newText: change.newText,
+			hunks: change.hunks,
+			listOnly: change.listOnly,
+			order: ++this.sequence,
+		});
+	}
+
+	/** Drops `path` entirely -- the turn's touch put back the bytes it found. */
+	remove(path: string): void {
+		this.records.delete(path);
+	}
+
+	/** Whether `path` already has a record for this turn. */
+	has(path: string): boolean {
+		return this.records.has(path);
+	}
+
+	/** How many files this turn genuinely recorded (never shown as a list). */
+	get size(): number {
+		return this.records.size;
+	}
+
+	/** The task-start text captured for `path`, if any. */
+	baselineFor(path: string): string | undefined {
+		return this.baselines.textFor(path);
+	}
+
+	/** Records `text` as `path`'s task-start content (first capture wins). */
+	captureBaseline(path: string, text: string): void {
+		this.baselines.capture(path, text);
+	}
+
+	/**
+	 * Every recorded change, most recently modified first, with each record's
+	 * before-image resolved to the task-start baseline so the counts describe the
+	 * whole task rather than one edit.
+	 *
+	 * Hunk splits stay attached only while they describe that same pair. A hunk
+	 * split covers one edit; once the baseline is older than that edit's own
+	 * before-image, the counts are recomputed from the text instead of counting
+	 * one edit while the row claims to describe the task.
+	 */
+	byRecency(): TrackedChange[] {
+		const recorded: TrackedChange[] = [];
+		this.records.forEach(record => recorded.push(record));
+		recorded.sort((a, b) => b.order - a.order);
+
+		const resolved: TrackedChange[] = [];
+		for (const record of recorded) {
+			const baseline = this.baselines.textFor(record.path);
+			if (baseline === undefined) {
+				resolved.push(record);
+				continue;
+			}
+			const hunks = (record.oldText ?? '') === baseline ? record.hunks : undefined;
+			resolved.push({
+				path: record.path,
+				oldText: baseline,
+				newText: record.newText,
+				hunks,
+				listOnly: record.listOnly,
+				order: record.order,
+			});
+		}
+		return resolved;
+	}
+}
+
+/**
+ * What the inline indicator should show right now.
+ *
+ * One of these per turn at most -- there is deliberately no variant that
+ * carries several files, because the whole point of the indicator is that a new
+ * modification replaces the previous one.
+ */
+export type IndicatorChange =
+	| { kind: 'none' }
+	| { kind: 'listOnly'; path: string }
+	| { kind: 'binary'; path: string }
+	| { kind: 'diff'; path: string; oldText: string; newText: string; summary: FileDiffSummary };
+
+/**
+ * Picks the single modification the indicator should render, or `none`.
+ *
+ * Walks the turn's records newest-first and returns the first one that is a
+ * genuine change; everything older is dropped, never accumulated. A record that
+ * is a no-op against its task-start content (the same bytes, a reverted edit, a
+ * write that changed nothing) is passed over rather than rendered as `+0 -0`,
+ * so an agent that rewrites the bytes it found does not blank out the real edit
+ * it made just before.
+ *
+ * The three fallbacks keep the counts honest:
+ * - `listOnly` -- a confirmed change whose before-image is unrecoverable. Name
+ *   the file; never invent a diff for it.
+ * - `binary` -- a real change that no line-level diff can describe.
+ * - `none` -- nothing was modified. The indicator must not appear at all.
+ */
+export function selectIndicatorChange(changes: TurnChanges): IndicatorChange {
+	for (const change of changes.byRecency()) {
+		if (change.listOnly) {
+			return { kind: 'listOnly', path: change.path };
+		}
+		// Task-start text and current text identical means the file was not
+		// modified, no matter how much inspecting or same-bytes writing happened.
+		if (isByteIdentical(change.oldText, change.newText)) {
+			continue;
+		}
+		const summary = computeFileDiffSummary({
+			oldText: change.oldText,
+			newText: change.newText,
+			hunks: change.hunks,
+		});
+		if (summary.isBinary) {
+			return { kind: 'binary', path: change.path };
+		}
+		// A textual change with no added/removed lines (an empty new file, an
+		// empty deletion, a trailing-newline-only difference) would render as
+		// noise, so it is not a change the indicator should announce.
+		if (!summary.hasTextualDiff) {
+			continue;
+		}
+		return {
+			kind: 'diff',
+			path: change.path,
+			oldText: change.oldText ?? '',
+			newText: change.newText,
+			summary,
+		};
+	}
+	return { kind: 'none' };
 }
 
 /**
