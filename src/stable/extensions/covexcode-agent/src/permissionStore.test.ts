@@ -3,8 +3,13 @@ import test from 'node:test';
 
 import {
 	PermissionStore,
+	EMPTY_STATE_MESSAGE,
 	describeRule,
+	escapeHtml,
+	filterAlwaysRules,
 	parsePermissionStore,
+	renderRulesHtml,
+	serializeRules,
 	type PermissionRule,
 } from './permissionStore';
 
@@ -161,3 +166,97 @@ test('clearOnceGrants removes single-use grants', () => {
 	assert.equal(store.list().length, 1);
 	assert.equal(store.list()[0].scope, 'always');
 });
+
+test('revoking a rule removes it from the store and the next getRules() call does not return it', () => {
+	const r1 = rule({ id: 'rule-test-1', scope: 'always', pattern: 'npm test' });
+	const r2 = rule({ id: 'rule-test-2', scope: 'always', pattern: 'npm run build' });
+	const store = new PermissionStore([r1, r2]);
+
+	assert.equal(store.getRules().length, 2);
+	const removed = store.removeRule('rule-test-1');
+	assert.ok(removed !== undefined);
+	assert.equal(removed?.id, 'rule-test-1');
+
+	const rulesAfter = store.getRules();
+	assert.equal(rulesAfter.length, 1);
+	assert.equal(rulesAfter[0].id, 'rule-test-2');
+	assert.equal(rulesAfter[0].pattern, 'npm run build');
+
+	// Attempting to remove non-existent rule returns undefined
+	assert.equal(store.removeRule('non-existent-id'), undefined);
+});
+
+test('only "always" scope rules appear in the list (not "once", "turn", "session" rules)', () => {
+	const store = new PermissionStore([
+		rule({ id: 'r-once', scope: 'once', pattern: 'echo once' }),
+		rule({ id: 'r-turn', scope: 'turn', pattern: 'echo turn', turnId: 't-1' }),
+		rule({ id: 'r-session', scope: 'session', pattern: 'echo session' }),
+		rule({ id: 'r-always-1', scope: 'always', pattern: 'npm test' }),
+		rule({ id: 'r-default-always', pattern: 'git status' }), // undefined scope defaults to 'always'
+	]);
+
+	const allRules = store.getRules();
+	assert.equal(allRules.length, 5);
+
+	const alwaysRules = filterAlwaysRules(allRules);
+	assert.equal(alwaysRules.length, 2);
+	assert.equal(alwaysRules[0].id, 'r-always-1');
+	assert.equal(alwaysRules[1].id, 'r-default-always');
+
+	const serialized = serializeRules(allRules);
+	assert.equal(serialized.length, 2);
+	assert.ok(serialized.every(r => r.kind === 'execute'));
+});
+
+test('empty store renders the empty state message', () => {
+	const html = renderRulesHtml([]);
+	assert.ok(html.includes(EMPTY_STATE_MESSAGE));
+	assert.ok(html.includes('No saved permissions. When you choose Always Allow on a tool request, it will appear here.'));
+	assert.ok(!html.includes('<table>'));
+});
+
+test('Windows-style rule targets with backslashes and drive letters are preserved in serialization and rendering', () => {
+	const winPath = 'C:\\Users\\test\\workspace\\build\\dist\\**';
+	const store = new PermissionStore([
+		rule({ id: 'win-rule', kind: 'file_write', pattern: winPath, scope: 'always' }),
+	]);
+
+	const serialized = serializeRules(store.getRules());
+	assert.equal(serialized.length, 1);
+	assert.equal(serialized[0].pattern, winPath);
+
+	const html = renderRulesHtml(serialized);
+	// Check that escaped html preserves the path characters and backslashes
+	assert.ok(html.includes('C:\\Users\\test\\workspace\\build\\dist\\**'));
+	assert.ok(html.includes('data-id="win-rule"'));
+	assert.ok(html.includes('button class="revoke-btn"'));
+});
+
+test('showPermissionManager seam: onRevoke callback removes rule and triggers update', () => {
+	const r1 = rule({ id: 'r1', scope: 'always', pattern: 'npm start' });
+	const store = new PermissionStore([r1]);
+	let saved = false;
+	const context = {
+		getRules: () => store.list(),
+		onRevoke: (ruleId: string) => {
+			const revoked = store.removeRule(ruleId);
+			if (revoked) {
+				saved = true;
+			}
+			return revoked;
+		},
+	};
+
+	assert.equal(context.getRules().length, 1);
+	const revoked = context.onRevoke('r1');
+	assert.ok(revoked !== undefined);
+	assert.equal(revoked?.pattern, 'npm start');
+	assert.equal(saved, true);
+	assert.equal(context.getRules().length, 0);
+});
+
+test('escapeHtml properly sanitizes untrusted inputs', () => {
+	assert.equal(escapeHtml('<script>alert("xss")</script>'), '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+	assert.equal(escapeHtml("a & b 'c'"), 'a &amp; b &#39;c&#39;');
+});
+

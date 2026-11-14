@@ -54,6 +54,7 @@ export type PermissionScope = 'once' | 'turn' | 'session' | 'always';
 export type PermissionMatch = 'exact' | 'prefix';
 
 export interface PermissionRule {
+	id?: string;
 	/** Tool-call kind this rule governs (e.g. `execute`). An empty kind matches any. */
 	kind: string;
 	match: PermissionMatch;
@@ -105,6 +106,14 @@ function parseScope(value: unknown): PermissionScope | undefined {
 		: undefined;
 }
 
+export function ruleId(rule: Pick<PermissionRule, 'kind' | 'pattern' | 'createdAt'> & { id?: string }): string {
+	return rule.id && rule.id.length > 0 ? rule.id : `${rule.kind}:${rule.pattern}:${rule.createdAt}`;
+}
+
+function ruleIdMatch(rule: PermissionRule, targetId: string): boolean {
+	return rule.id === targetId || ruleId(rule) === targetId;
+}
+
 /**
  * Coerce one parsed rule, or `undefined` if it is not usable. Malformed rules
  * are dropped rather than repaired -- a rule we cannot fully understand is a
@@ -133,6 +142,9 @@ function parseRule(value: unknown): PermissionRule | undefined {
 		createdAt,
 		source: 'user',
 	};
+	if (typeof value.id === 'string' && value.id.length > 0) {
+		rule.id = value.id;
+	}
 	const scope = parseScope(value.scope);
 	if (scope !== undefined) {
 		rule.scope = scope;
@@ -237,6 +249,20 @@ export class PermissionStore {
 		return true;
 	}
 
+	/** Returns every rule in the store (alias for list()). */
+	getRules(): readonly PermissionRule[] {
+		return this.list();
+	}
+
+	/** Remove a rule by its unique id or signature. Returns the removed rule. */
+	removeRule(ruleId: string): PermissionRule | undefined {
+		const index = this.rules.findIndex(rule => ruleIdMatch(rule, ruleId));
+		if (index >= 0) {
+			return this.rules.splice(index, 1)[0];
+		}
+		return undefined;
+	}
+
 	/** Remove by index, as listed by `list()`. Returns the removed rule. */
 	removeAt(index: number): PermissionRule | undefined {
 		if (!Number.isInteger(index) || index < 0 || index >= this.rules.length) {
@@ -293,4 +319,73 @@ export function describeRule(rule: PermissionRule): string {
 	const scope = rule.kind.length > 0 ? rule.kind : 'any tool';
 	const how = rule.match === 'prefix' ? 'starts with' : 'is';
 	return `${verb} ${scope} where action ${how} "${rule.pattern}"`;
+}
+
+export interface SerializedRule {
+	id: string;
+	kind: string;
+	pattern: string;
+	createdAt: string;
+}
+
+export const EMPTY_STATE_MESSAGE = 'No saved permissions. When you choose Always Allow on a tool request, it will appear here.';
+
+export function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+export function filterAlwaysRules(rules: readonly PermissionRule[]): readonly PermissionRule[] {
+	return rules.filter(rule => (rule.scope ?? 'always') === 'always');
+}
+
+export function serializeRules(rules: readonly PermissionRule[]): SerializedRule[] {
+	return filterAlwaysRules(rules).map(rule => ({
+		id: ruleId(rule),
+		kind: rule.kind.length > 0 ? rule.kind : 'action',
+		pattern: rule.pattern,
+		createdAt: rule.createdAt,
+	}));
+}
+
+export function renderRulesHtml(rules: readonly SerializedRule[]): string {
+	if (rules.length === 0) {
+		return `<div class="empty-state">${escapeHtml(EMPTY_STATE_MESSAGE)}</div>`;
+	}
+
+	const rows = rules
+		.map(rule => {
+			const formattedDate = escapeHtml(new Date(rule.createdAt).toLocaleDateString());
+			const kindLabel = escapeHtml(rule.kind || 'action');
+			const targetLabel = escapeHtml(rule.pattern);
+			const id = escapeHtml(rule.id);
+
+			return `<tr class="rule-row" data-id="${id}">
+				<td class="col-kind"><span class="badge">${kindLabel}</span></td>
+				<td class="col-target" title="${targetLabel}"><code>${targetLabel}</code></td>
+				<td class="col-date">${formattedDate}</td>
+				<td class="col-action">
+					<button class="revoke-btn" data-id="${id}" aria-label="Revoke permission for ${targetLabel}">Revoke</button>
+				</td>
+			</tr>`;
+		})
+		.join('\n');
+
+	return `<table class="rules-table">
+		<thead>
+			<tr>
+				<th>Resource</th>
+				<th>Target</th>
+				<th>Date Added</th>
+				<th class="col-action">Action</th>
+			</tr>
+		</thead>
+		<tbody>
+			${rows}
+		</tbody>
+	</table>`;
 }

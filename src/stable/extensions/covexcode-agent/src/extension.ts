@@ -63,6 +63,7 @@ import {
 } from './permissionOptions';
 import { isDestructiveAlwaysAllow, permissionPromptLinks } from './permissionPrompt';
 import { evaluatePermission, type ResourceToCheck } from './permissionEngine';
+import { showPermissionManager } from './permissionManagerUi';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
@@ -1598,6 +1599,24 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 
 	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.managePermissions', () => {
+			const cwd = currentWorkspace().cwd;
+			showPermissionManager({
+				getRules: () => loadPermissionStore(cwd).list(),
+				onRevoke: (ruleId: string) => {
+					try {
+						const store = loadPermissionStore(cwd);
+						const revoked = store.removeRule(ruleId);
+						if (revoked) {
+							writePermissionStore(cwd, store);
+						}
+						return revoked;
+					} catch {
+						return undefined;
+					}
+				},
+			});
+		}),
 		vscode.commands.registerCommand('covexcode.importFromVSCode', () => runImportFromVSCode(context)),
 		vscode.commands.registerCommand('covexcode.chat.copyAll', async () => {
 			try {
