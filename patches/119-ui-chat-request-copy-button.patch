@@ -1,0 +1,81 @@
+diff --git a/src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts b/src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts
+index 3bcce67..7d38984 100644
+--- a/src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts
++++ b/src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts
+@@ -138,6 +138,15 @@ export class ChatCopyActionRendering extends Disposable implements IWorkbenchCon
+ 		}));
+ 
+ 		markAsSingleton(disposable);
++
++		const titleDisposable = this._register(actionViewItemService.register(MenuId.ChatMessageTitle, CopyItemActionId, (action, options) => {
++			if (!(action instanceof MenuItemAction)) {
++				return undefined;
++			}
++
++			return instantiationService.createInstance(ChatCopyActionViewItem, action, options);
++		}));
++		markAsSingleton(titleDisposable);
+ 	}
+ }
+ 
+@@ -193,6 +202,12 @@ export function registerChatCopyActions() {
+ 						group: 'navigation',
+ 						order: 1,
+ 						when: ContextKeyExpr.and(ChatContextKeys.isResponse, ChatContextKeys.responseIsFiltered.negate()),
++					},
++					{
++						id: MenuId.ChatMessageTitle,
++						group: 'navigation',
++						order: 1,
++						when: ContextKeyExpr.and(ChatContextKeys.isRequest, ChatContextKeys.currentlyEditing.negate()),
+ 					}
+ 				]
+ 			});
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+index 48d5cd7..abbb8e4 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
++++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
+@@ -217,12 +217,14 @@
+ 	gap: 4px;
+ }
+ 
++.interactive-item-container .header .monaco-toolbar .menu-entry.chat-copy-action .action-label,
+ .interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action .action-label,
+ .interactive-result-code-block .interactive-result-code-block-toolbar .menu-entry.chat-copy-action .action-label {
+ 	position: relative;
+ 	overflow: hidden;
+ }
+ 
++.interactive-item-container .header .monaco-toolbar .menu-entry.chat-copy-action .chat-copy-action-icons,
+ .interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action .chat-copy-action-icons,
+ .interactive-result-code-block .interactive-result-code-block-toolbar .menu-entry.chat-copy-action .chat-copy-action-icons {
+ 	display: grid;
+@@ -231,6 +233,7 @@
+ 	height: 16px;
+ }
+ 
++.interactive-item-container .header .monaco-toolbar .menu-entry.chat-copy-action .chat-copy-action-icon,
+ .interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action .chat-copy-action-icon,
+ .interactive-result-code-block .interactive-result-code-block-toolbar .menu-entry.chat-copy-action .chat-copy-action-icon {
+ 	grid-area: 1 / 1;
+@@ -246,8 +249,10 @@
+ 	will-change: opacity, transform;
+ }
+ 
++.interactive-item-container .header .monaco-toolbar .menu-entry.chat-copy-action:not(.copied) .chat-copy-action-icon-copy,
+ .interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action:not(.copied) .chat-copy-action-icon-copy,
+ .interactive-result-code-block .interactive-result-code-block-toolbar .menu-entry.chat-copy-action:not(.copied) .chat-copy-action-icon-copy,
++.interactive-item-container .header .monaco-toolbar .menu-entry.chat-copy-action.copied .chat-copy-action-icon-copied,
+ .interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action.copied .chat-copy-action-icon-copied,
+ .interactive-result-code-block .interactive-result-code-block-toolbar .menu-entry.chat-copy-action.copied .chat-copy-action-icon-copied {
+ 	opacity: 1;
+@@ -256,7 +261,8 @@
+ 
+ @media (prefers-reduced-motion: reduce) {
+ 	.interactive-result-code-block .interactive-result-code-block-toolbar .menu-entry.chat-copy-action .chat-copy-action-icon,
+-	.interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action .chat-copy-action-icon {
++	.interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action .chat-copy-action-icon,
++	.interactive-item-container .header .monaco-toolbar .menu-entry.chat-copy-action .chat-copy-action-icon {
+ 		transform: none;
+ 		transition: none;
+ 	}

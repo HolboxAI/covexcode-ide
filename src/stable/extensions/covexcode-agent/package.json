@@ -141,8 +141,23 @@
         "command": "covexcode.togglePermissionMode",
         "title": "covexcode: Toggle Permission Mode (Auto / Manual)",
         "category": "covexcode"
+      },
+      {
+        "command": "covexcode.chat.copyAll",
+        "title": "Copy Conversation",
+        "category": "covexcode",
+        "icon": "$(copy)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "covexcode.chat.copyAll",
+          "when": "view == 'workbench.panel.chat.view'",
+          "group": "navigation@1"
+        }
+      ]
+    },
     "authentication": [
       {
         "id": "covexcode",
@@ -224,11 +239,17 @@
           "order": 8,
           "markdownDescription": "How often the session asks before running tools. `auto` (default) asks only about destructive actions; `manual` asks about every write and command. Toggle with the `/mode` chat command or **covexcode: Toggle Permission Mode**."
         },
+        "covexcode.feedback.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable feedback features in Covexcode (reject feedback and /feedback command).",
+          "scope": "application"
+        },
         "covexcode.feedback.endpoint": {
           "type": "string",
-          "default": "",
+          "default": "https://covexcode.com/api/feedback",
           "order": 9,
-          "markdownDescription": "HTTPS endpoint that receives optional reject-feedback as a JSON POST. Leave empty to queue feedback locally until an endpoint is configured. See `feedbackService.ts` in the covexcode-agent extension for the request shape."
+          "markdownDescription": "HTTPS endpoint that receives optional reject-feedback as a JSON POST. Defaults to `https://covexcode.com/api/feedback`; set it to empty or a custom URL to change where feedback goes. See `feedbackService.ts` in the covexcode-agent extension for the request shape."
         }
       }
     }

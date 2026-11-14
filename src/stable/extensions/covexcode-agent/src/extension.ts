@@ -62,9 +62,12 @@ import {
 	type PromptChoice,
 } from './permissionOptions';
 import { isDestructiveAlwaysAllow, permissionPromptLinks } from './permissionPrompt';
+import { evaluatePermission, type ResourceToCheck } from './permissionEngine';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
+import { ImageCache } from './imageCache';
+import { formatChatHistoryForModel } from './chatHistoryReplay';
 import { detectWorkspaceFramework, FRAMEWORK_LABELS, type Framework } from './frameworkDetector';
 import {
 	missingRecommendedExtensions,
@@ -128,7 +131,7 @@ import {
 	resolveModelDescriptor,
 	secretKeyForProvider,
 } from './models';
-import { buildFeedbackPayload, FeedbackService, feedbackOs, postFeedbackJson, shouldSendFeedback, type FeedbackStorage } from './feedbackService';
+import { buildFeedbackPayload, DEFAULT_FEEDBACK_ENDPOINT, FeedbackService, feedbackOs, postFeedbackJson, shouldSendFeedback, type FeedbackStorage } from './feedbackService';
 import { showFeedbackWindow, showRejectFeedback } from './feedbackUi';
 
 const PARTICIPANT_ID = 'covexcode.agent';
@@ -418,6 +421,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	// of the end-of-turn usage footer, reset alongside the session in
 	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
 	const sessionUsage = createSessionUsage();
+	const imageCache = new ImageCache(5);
+	let pendingHistoryReplay = false;
 	const permissionGate = new PermissionGate();
 	const promptedTrustFolders = new Set<string>();
 	// Persists for the life of the extension host, not just one turn -- a
@@ -427,7 +432,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	// of over-eager behavior the auto-open feature needs to avoid. See
 	// renderUpdate's own doc comment on this whole mechanism.
 	const openedDevServerUrls = new Set<string>();
-	// Reject feedback is queued locally until covexcode.feedback.endpoint is set.
+	// Feedback goes to covexcode.com by default; clearing
+	// `covexcode.feedback.endpoint` falls back to a local queue.
 	// `activeTurnId` is only known once the ACP turn completes, so the feedback
 	// window reads it lazily at submit time rather than at reject time.
 	let activeTurnId = '';
@@ -440,7 +446,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		feedbackStorage,
 		{
 			async send(payload) {
-				const endpoint = vscode.workspace.getConfiguration('covexcode').get<string>('feedback.endpoint', '').trim();
+				const endpoint = vscode.workspace.getConfiguration('covexcode').get<string>('feedback.endpoint', DEFAULT_FEEDBACK_ENDPOINT).trim();
 				if (!endpoint) {
 					throw new Error('covexcode.feedback.endpoint is empty');
 				}
@@ -449,11 +455,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		},
 	);
 	const feedbackEnabled = (): boolean => {
+		const covexcodeConfig = vscode.workspace.getConfiguration('covexcode');
+		const feedbackOn = covexcodeConfig.get<boolean>('feedback.enabled', true);
+		if (!feedbackOn) { return false; }
 		const telemetry = vscode.workspace.getConfiguration('telemetry');
-		return shouldSendFeedback(
-			telemetry.get<string>('telemetryLevel', 'off'),
-			telemetry.get<boolean>('feedback.enabled', true),
-		);
+		const level = telemetry.get<string>('telemetryLevel', 'all');
+		return shouldSendFeedback(level, feedbackOn);
 	};
 	const showRejectFeedbackFor = (request: RequestPermissionRequest, toolCallId: string, files: string[]): void => {
 		if (!feedbackEnabled()) {
@@ -731,6 +738,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		agentImagesSupported = false;
 		sessionUsage.reset();
 		updateUsageIndicator();
+		pendingHistoryReplay = true;
 	}
 
 	// The directory is baked into the child's environment at spawn, so a
@@ -1085,6 +1093,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			// previous HeadlessSession -- every "new chat" was the same
 			// conversation on the daemon side.
 			discardSession();
+			pendingHistoryReplay = false;
 		}
 		restoredCheckpoint = false;
 		const workspace = currentWorkspace();
@@ -1093,14 +1102,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		// framework line). Memoized per cwd by frameworkFor() above, so this is
 		// one package.json read per workspace, not per turn.
 		const workspaceWithFramework = { ...workspace, framework: await frameworkFor(workspace.cwd) };
+		const hasImageAttachment = request.references.some(r => r.value instanceof vscode.ChatReferenceBinaryData);
 		const requestedModelId = request.model?.id;
 		const effectiveModel = resolveEffectiveModelName(
 			requestedModelId,
 			vscode.workspace.getConfiguration('covexcode').get<string>('model'),
+			hasImageAttachment,
 		);
 
 		// If user selected a BYOK model, verify that credentials exist
-		const modelDesc = resolveModelDescriptor(requestedModelId);
+		const modelDesc = resolveModelDescriptor(requestedModelId ?? effectiveModel);
 		if (modelDesc.isBYOK) {
 			const providerKey = await context.secrets.get(secretKeyForProvider(modelDesc.provider));
 			const envKey = modelDesc.envVar ? process.env[modelDesc.envVar] : undefined;
@@ -1164,7 +1175,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, turnScopeId).then(respond);
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, turnScopeId, activeSessionId).then(respond);
 			} else {
 				respond({ outcome: 'cancelled' });
 			}
@@ -1190,9 +1201,50 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		};
 
+		const effectiveModelSupportsImages = agentImagesSupported && (modelDesc.capabilities.imageInput ?? true);
+		if (hasImageAttachment && !effectiveModelSupportsImages) {
+			stream.markdown(
+				`⚠️ **${modelDesc.name}** does not support image analysis.\n\n` +
+				`To analyze images or screenshots, please switch to a vision-capable model:\n` +
+				`- **Auto** *(Recommended — automatically routes images to vision)*\n` +
+				`- **DeepSeek Flash** *(Included with Covexcode)*\n` +
+				`- **GPT-4o** or **GPT-4o mini** *(OpenAI BYOK)*\n\n` +
+				`You can switch anytime using the model picker at the bottom of the chat or by typing \`/model\`.\n`
+			);
+			return;
+		}
+
+		// History replay across session resets/model switches/cold start
+		let historyContextText: string | undefined;
+		let historyRetainedImages: PromptContentBlock[] = [];
+		const needsHistoryReplay = (pendingHistoryReplay || !client) && chatContext.history.length > 0 && !isInline;
+		if (needsHistoryReplay) {
+			const targetModelSpec = {
+				maxInputTokens: modelDesc.maxInputTokens || 128_000,
+				maxOutputTokens: modelDesc.maxOutputTokens || 4096,
+				capabilities: { imageInput: effectiveModelSupportsImages },
+			};
+			const formatted = formatChatHistoryForModel(
+				chatContext.history,
+				targetModelSpec,
+				imageCache,
+				request.prompt.length,
+			);
+			historyContextText = formatted.contextText;
+			historyRetainedImages = [...formatted.retainedImages];
+		}
+
 		const content = isInline && inlineEditorData
 			? inlineEditPrompt(request, inlineEditorData, workspaceWithFramework)
-			: await attachReferencesToPrompt(request, workspaceWithFramework, agentImagesSupported);
+			: await attachReferencesToPrompt(
+				request,
+				workspaceWithFramework,
+				effectiveModelSupportsImages,
+				chatContext.history.length,
+				imageCache,
+				historyContextText,
+				historyRetainedImages,
+			);
 		// Registered *after* the `await` above so a throw while reading an
 		// attachment (e.g. a binary reference whose bytes can't be loaded)
 		// can't leak these: they were previously added before any `try`, so
@@ -1219,7 +1271,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			// panel turn sends `normal` explicitly so a prior `plan`/`edit` turn
 			// can't leave the shared session in a stale mode (`mode` is per-turn,
 			// but covexcode keeps the last value when the field is omitted).
-			const turnResult = await activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			const promptPromise = activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
+			pendingHistoryReplay = false;
+			const turnResult = await promptPromise;
 			activeTurnId = String(turnResult.turn);
 			// A turn stopped by the tool-step limit or the output cap used to
 			// look like the agent simply stopped after its last step. Say which
@@ -1335,9 +1389,46 @@ export function activate(context: vscode.ExtensionContext): void {
 		// edit in turn 2 is undone while turn 1's edit survives. covexcode's
 		// journal keeps the per-turn before-state for exactly this; the request
 		// uses `restoreBeforeTurn`, not the first-touch `turn` filter.
-		vscode.commands.registerCommand('covexcode.restoreCheckpoint', async (turn?: number) => {
+		vscode.commands.registerCommand('covexcode.restoreCheckpoint', async (turn?: number, knownChanges?: any[]) => {
+			const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
+			const toDeletePaths = (knownChanges || [])
+				.map(c => typeof c === 'string' ? c : (c.action === 'delete' ? c.path : undefined))
+				.filter((p): p is string => Boolean(p));
+
+			const deleteKnownFilesAndCloseTabs = async () => {
+				for (const p of toDeletePaths) {
+					const trimmed = p.trim();
+					try {
+						const fileUri = path.isAbsolute(trimmed)
+							? vscode.Uri.file(trimmed)
+							: (wsFolder ? vscode.Uri.joinPath(wsFolder, trimmed) : undefined);
+						if (fileUri) {
+							await vscode.workspace.fs.delete(fileUri, { useTrash: false });
+						}
+					} catch {}
+					try {
+						const wsPath = wsFolder?.fsPath;
+						const absPath = path.isAbsolute(trimmed) ? trimmed : (wsPath ? path.join(wsPath, trimmed) : undefined);
+						if (absPath && fs.existsSync(absPath)) {
+							fs.unlinkSync(absPath);
+						}
+					} catch {}
+				}
+				try {
+					for (const tabGroup of vscode.window.tabGroups.all) {
+						for (const tab of tabGroup.tabs) {
+							const uri = (tab.input as any)?.uri as vscode.Uri | undefined;
+							if (uri && toDeletePaths.some(p => uri.fsPath.endsWith(p.trim()))) {
+								await vscode.window.tabGroups.close(tab);
+							}
+						}
+					}
+				} catch {}
+			};
+
 			if (!client || !sessionId) {
-				void vscode.window.showInformationMessage("covexcode: no session yet -- send a message first.");
+				await deleteKnownFilesAndCloseTabs();
+				void vscode.window.showInformationMessage("covexcode: rolled back turn files.");
 				return;
 			}
 			// No turn argument (e.g. invoked from the command palette) means
@@ -1349,6 +1440,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const activeClient = client;
 			const activeSessionId = sessionId;
 			try {
+				await deleteKnownFilesAndCloseTabs();
 				// covexcode's rollback restores the files and truncates the
 				// model's conversation history to the same turn, so the next
 				// prompt continues from the restored checkpoint rather than
@@ -1358,6 +1450,9 @@ export function activate(context: vscode.ExtensionContext): void {
 				// command returns; keep the ACP session alive for the next
 				// prompt even if that leaves its history array empty.
 				restoredCheckpoint = true;
+
+				await deleteKnownFilesAndCloseTabs();
+
 				if (!summary.startsWith("Rolled back nothing")) {
 					void vscode.window.showInformationMessage(`covexcode: [turn ${turn}] ${summary}`);
 					return;
@@ -1373,7 +1468,25 @@ export function activate(context: vscode.ExtensionContext): void {
 					void vscode.window.showWarningMessage(`covexcode: [turn ${turn}] ${summary}`);
 				}
 			} catch (error) {
+				await deleteKnownFilesAndCloseTabs();
 				void vscode.window.showErrorMessage(`covexcode: couldn't restore checkpoint (${describeError(error)})`);
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('covexcode.getTurnChanges', async (turn?: number) => {
+			if (!client || !sessionId) {
+				return [];
+			}
+			try {
+				const { changes } = await client.listChanges(sessionId);
+				if (turn === undefined || turn <= 1) {
+					return changes.filter(c => c.action !== 'blocked');
+				}
+				return changes.filter(c => c.turn >= turn && c.action !== 'blocked');
+			} catch {
+				return [];
 			}
 		}),
 	);
@@ -1486,6 +1599,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('covexcode.importFromVSCode', () => runImportFromVSCode(context)),
+		vscode.commands.registerCommand('covexcode.chat.copyAll', async () => {
+			try {
+				await vscode.commands.executeCommand('workbench.action.chat.copyAll');
+				void vscode.window.showInformationMessage('✓ Conversation copied to clipboard');
+			} catch (error) {
+				void vscode.window.showErrorMessage('Unable to copy conversation: ' + String(error));
+			}
+		}),
 	);
 
 	// One-shot, on first launch: if a VS Code-family install is present with
@@ -1741,10 +1862,19 @@ function inlineEditPrompt(
  * anything `referenceContextSection` can't resolve is skipped rather than
  * injected as a "[unrecognized]" marker.
  */
-async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: WorkspaceContext, supportsImages: boolean): Promise<PromptContentBlock[]> {
+async function attachReferencesToPrompt(
+	request: vscode.ChatRequest,
+	workspace: WorkspaceContext,
+	supportsImages: boolean,
+	historyLength = 0,
+	imageCache?: ImageCache,
+	historyContextText?: string,
+	historyRetainedImages: readonly PromptContentBlock[] = [],
+): Promise<PromptContentBlock[]> {
 	const sections: string[] = [];
 	const images: PromptContentBlock[] = [];
 	let omittedImage = false;
+	let imageIndex = 0;
 	// Reads a workspace file's text for a `Uri`/`Location` reference. Only
 	// `file:` references reach this -- `referenceContextSection` filters on
 	// scheme before calling -- and an unreadable path (directory, deleted
@@ -1769,11 +1899,28 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 				}
 				continue;
 			}
+			const mime = reference.value.mimeType;
+			if (mime && !mime.startsWith('image/')) {
+				continue;
+			}
 			const bytes = await reference.value.data();
+			if (bytes.byteLength > 8 * 1024 * 1024) {
+				sections.push('An attached image was omitted because it exceeds the 8 MB size limit.');
+				continue;
+			}
+			const base64Data = Buffer.from(bytes).toString('base64');
+			if (imageCache) {
+				const turnKey = (request as { id?: string }).id || `turn-${Math.floor(historyLength / 2) + 1}`;
+				imageCache.set(turnKey, imageIndex++, {
+					data: base64Data,
+					mimeType: mime || 'image/png',
+					name: reference.name,
+				});
+			}
 			images.push({
 				type: 'image',
-				data: Buffer.from(bytes).toString('base64'),
-				mimeType: reference.value.mimeType,
+				data: base64Data,
+				mimeType: mime || 'image/png',
 			});
 			continue;
 		}
@@ -1795,9 +1942,12 @@ async function attachReferencesToPrompt(request: vscode.ChatRequest, workspace: 
 			+ (surface ? `\nCurrently focused: ${surface}` : ''));
 	}
 
-	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${request.prompt}` : request.prompt;
+	const promptText = historyContextText
+		? `${historyContextText}\n\n${request.prompt}`
+		: request.prompt;
+	const userText = sections.length > 0 ? `${sections.join('\n\n')}\n\n${promptText}` : promptText;
 	const text = prependWorkspacePrefix(userText, workspacePromptPrefix(workspace));
-	return [{ type: 'text', text }, ...images];
+	return [{ type: 'text', text }, ...historyRetainedImages, ...images];
 }
 
 function restrictedModeMarkdown(): vscode.MarkdownString {
@@ -2244,8 +2394,15 @@ function providerCommandMarkdown(outcome: ProviderFlowOutcome, bundled = false):
 
 function modelCommandMarkdown(outcome: ModelFlowOutcome, bundled = false): string {
 	switch (outcome.kind) {
-		case 'ok':
-			return `Model updated to **${outcome.summary}**. Send a normal chat message to use it.`;
+		case 'ok': {
+			const modelName = outcome.summary.split('/').pop()?.trim();
+			const desc = resolveModelDescriptor(modelName);
+			let note = '';
+			if (!desc.capabilities.imageInput) {
+				note = `\n\n💡 *Note: **${desc.name}** is a text-only model. For image or screenshot analysis, use **Auto**, **DeepSeek Flash**, or **GPT-4o**.*`;
+			}
+			return `Model updated to **${outcome.summary}**.${note} Send a normal chat message to use it.`;
+		}
 		case 'cancelled':
 			return 'Model change cancelled -- existing model is unchanged.';
 		case 'no-binary':
@@ -2583,6 +2740,7 @@ interface PendingPermissionContext {
 	affectedFiles: string[];
 	cwd: string;
 	turnId: string;
+	sessionId: string;
 }
 
 const pendingPermissionContext = new Map<string, PendingPermissionContext>();
@@ -2633,7 +2791,7 @@ function rememberPermissionChoice(id: string, choice: PromptChoice): void {
 		return;
 	}
 	const action = context.request.toolCall.title ?? 'run this action';
-	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId);
+	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId, context.sessionId);
 	if (!rule) {
 		return;
 	}
@@ -2648,6 +2806,20 @@ function rememberPermissionChoice(id: string, choice: PromptChoice): void {
 	}
 }
 
+/**
+ * Maps an ACP `session/request_permission` payload onto the engine's
+ * `ResourceToCheck`. The actual wire shape (see `acpClient.ts`) carries the
+ * target in `toolCall.title` and the operation kind in `toolCall.kind`, so
+ * that is the single source of truth here -- kind is not re-inferred from
+ * path-vs-command heuristics. Absent kind falls back to `other`.
+ */
+function extractResource(request: RequestPermissionRequest): ResourceToCheck {
+	const toolCall = request.toolCall;
+	const target = toolCall.title ?? '';
+	const kind = toolCall.kind ?? '';
+	return { kind: kind.length > 0 ? kind : 'other', target };
+}
+
 async function askPermission(
 	request: RequestPermissionRequest,
 	diffContentProvider: DiffContentProvider,
@@ -2656,6 +2828,7 @@ async function askPermission(
 	cwd: string,
 	onReject: (request: RequestPermissionRequest, toolCallId: string, files: string[]) => void,
 	turnId: string,
+	sessionId: string,
 ): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
@@ -2670,15 +2843,26 @@ async function askPermission(
 		await showDiff(diff, diffContentProvider, cwd);
 	}
 
-	// Incremental permissions: if the user already granted (or refused) this
-	// exact action, answer from the stored rule instead of prompting again.
-	const remembered = loadPermissionStore(cwd).decide({ kind: '', action });
-	if (remembered === 'allow' && allow) {
-		return { outcome: 'selected', optionId: allow.optionId };
-	}
-	if (remembered === 'deny' && reject) {
+	// Phase 3: evaluate the saved rules before deciding whether to prompt.
+	// `extractResource` maps the actual ACP request shape onto the engine's
+	// `ResourceToCheck`; `sessionId`/`turnId` scope the turn/session grants.
+	const resource = extractResource(request);
+	const decision = evaluatePermission(resource, loadPermissionStore(cwd).list(), { turnId, sessionId });
+
+	if (decision === 'deny' && reject) {
+		// Automatic reject: same outcome as the user clicking Reject, so the
+		// reject-feedback window still fires through `onReject` below.
+		onReject(request, request.toolCall.toolCallId ?? 'denied', affectedFiles);
+		vscode.window.setStatusBarMessage(`Permission denied by rule: ${resource.target}`, 3000);
 		return { outcome: 'selected', optionId: reject.optionId };
 	}
+
+	if (decision === 'allow' && allow) {
+		vscode.window.setStatusBarMessage(`Allowed by saved rule: ${resource.target}`, 3000);
+		return { outcome: 'selected', optionId: allow.optionId };
+	}
+
+	// decision === 'ask': fall through to the five-link prompt unchanged.
 
 	const { id, wait } = permissionGate.create();
 	if (diff?.type === 'diff' && hunks) {
@@ -2710,7 +2894,7 @@ async function askPermission(
 	} else {
 		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks, pending.kind ?? ''));
 	}
-	pendingPermissionContext.set(id, { request, toolCallId, affectedFiles, cwd, turnId });
+	pendingPermissionContext.set(id, { request, toolCallId, affectedFiles, cwd, turnId, sessionId });
 	const answer = await wait;
 	pendingReviews.delete(id);
 	// The user answered (Allow/Reject/Review). Remove the prompt from chat:

@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {
 	buildFeedbackPayload,
+	DEFAULT_FEEDBACK_ENDPOINT,
 	FEEDBACK_MAX_LENGTH,
 	FEEDBACK_QUEUE_MAX_ITEMS,
 	feedbackForSubmission,
@@ -80,6 +81,10 @@ function fakeTransport(): FeedbackTransport & { sent: FeedbackPayload[]; fail: b
 	return transport;
 }
 
+test('the default endpoint is the covexcode feedback route', () => {
+	assert.equal(DEFAULT_FEEDBACK_ENDPOINT, 'https://covexcode.com/api/feedback');
+});
+
 test('normalizeFeedback trims and enforces the 10000-char limit', () => {
 	assert.equal(normalizeFeedback('  keep me  '), 'keep me');
 	assert.equal(normalizeFeedback('   '), '');
@@ -129,6 +134,28 @@ test('shouldSendFeedback gates the startup flush on telemetry state', () => {
 	assert.equal(shouldSendFeedback('all', true), true);
 	assert.equal(shouldSendFeedback(undefined, undefined), false);
 	assert.equal(shouldSendFeedback('error', true), true);
+});
+
+test('feedbackEnabled logic resolves combinations of feedback.enabled and telemetryLevel', () => {
+	const resolveFeedbackEnabled = (feedbackSetting?: boolean, telemetrySetting?: string): boolean => {
+		const feedbackOn = feedbackSetting ?? true;
+		if (!feedbackOn) {
+			return false;
+		}
+		const level = telemetrySetting ?? 'all';
+		return shouldSendFeedback(level, feedbackOn);
+	};
+
+	// feedback.enabled=true, telemetryLevel='all' → true
+	assert.equal(resolveFeedbackEnabled(true, 'all'), true);
+	// feedback.enabled=true, telemetryLevel='off' → false (user explicitly disabled telemetry)
+	assert.equal(resolveFeedbackEnabled(true, 'off'), false);
+	// feedback.enabled=false, telemetryLevel='all' → false (user explicitly disabled feedback)
+	assert.equal(resolveFeedbackEnabled(false, 'all'), false);
+	// feedback.enabled=true, telemetryLevel not set (default 'all') → true (the common case that was broken)
+	assert.equal(resolveFeedbackEnabled(true, undefined), true);
+	// feedback.enabled not set (default true), telemetryLevel not set (default 'all') → true (fresh install, both defaults)
+	assert.equal(resolveFeedbackEnabled(undefined, undefined), true);
 });
 
 test('shortcut: Cmd+Enter on macOS, Ctrl+Enter on Windows/Linux, no cross-misfire', () => {
