@@ -455,11 +455,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		},
 	);
 	const feedbackEnabled = (): boolean => {
+		const covexcodeConfig = vscode.workspace.getConfiguration('covexcode');
+		const feedbackOn = covexcodeConfig.get<boolean>('feedback.enabled', true);
+		if (!feedbackOn) { return false; }
 		const telemetry = vscode.workspace.getConfiguration('telemetry');
-		return shouldSendFeedback(
-			telemetry.get<string>('telemetryLevel', 'off'),
-			telemetry.get<boolean>('feedback.enabled', true),
-		);
+		const level = telemetry.get<string>('telemetryLevel', 'all');
+		return shouldSendFeedback(level, feedbackOn);
 	};
 	const showRejectFeedbackFor = (request: RequestPermissionRequest, toolCallId: string, files: string[]): void => {
 		if (!feedbackEnabled()) {
