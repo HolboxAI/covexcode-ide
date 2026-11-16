@@ -10,27 +10,28 @@ import {
 	PERMISSION_ALWAYS_COMMAND,
 	PERMISSION_OPTIONS,
 	alwaysCommandUri,
+	parseAlwaysCommandArgs,
 	permissionOptionFor,
 	ruleForChoice,
 } from './permissionOptions';
 
 const query = { kind: 'execute' as const, action: 'npm test' };
 
-test('offers the four Cursor-style choices, in order', () => {
+test('offers the six permission choices, in order', () => {
 	assert.deepEqual(
 		PERMISSION_OPTIONS.map(o => o.choice),
-		['allow', 'allow-always', 'reject', 'reject-always'],
+		['allow', 'allow-turn', 'allow-session', 'allow-always', 'reject', 'reject-always'],
 	);
 	assert.deepEqual(
 		PERMISSION_OPTIONS.map(o => o.label),
-		['Allow once', 'Allow always', 'Deny once', 'Deny always'],
+		['Allow once', 'Allow for this turn', 'Allow for this session', 'Allow always', 'Deny once', 'Deny always'],
 	);
 });
 
-test('only the "always" choices are marked as remembering', () => {
+test('only the scoped (non-"once") choices are marked as remembering', () => {
 	assert.deepEqual(
 		PERMISSION_OPTIONS.filter(o => o.remember).map(o => o.choice),
-		['allow-always', 'reject-always'],
+		['allow-turn', 'allow-session', 'allow-always', 'reject-always'],
 	);
 });
 
@@ -68,9 +69,35 @@ test('recorded rules always match exactly, never by prefix', () => {
 	}
 });
 
-test('always-command URI carries the id and decision', () => {
-	const uri = alwaysCommandUri('42', 'deny');
+test('always-command URI carries the id and scoped choice', () => {
+	const uri = alwaysCommandUri('42', 'allow-always');
 	assert.ok(uri.startsWith(`command:${PERMISSION_ALWAYS_COMMAND}?`));
 	const payload = JSON.parse(decodeURIComponent(uri.slice(uri.indexOf('?') + 1)));
-	assert.deepEqual(payload, ['42', 'deny']);
+	assert.deepEqual(payload, ['42', 'allow-always']);
+});
+
+test('scoped allow choices record their scope', () => {
+	const turn = ruleForChoice('allow-turn', query, 'now', 'turn-7');
+	assert.ok(turn);
+	assert.equal(turn.scope, 'turn');
+	assert.equal(turn.turnId, 'turn-7');
+	assert.equal(turn.decision, 'allow');
+
+	const session = ruleForChoice('allow-session', query, 'now');
+	assert.ok(session);
+	assert.equal(session.scope, 'session');
+	assert.equal(session.turnId, undefined);
+
+	const always = ruleForChoice('allow-always', query, 'now');
+	assert.ok(always);
+	assert.equal(always.scope, 'always');
+});
+
+test('parseAlwaysCommandArgs accepts scoped choices and rejects once/legacy values', () => {
+	assert.deepEqual(parseAlwaysCommandArgs(['7', 'allow-turn']), { id: '7', choice: 'allow-turn' });
+	assert.deepEqual(parseAlwaysCommandArgs(['7', 'allow-session']), { id: '7', choice: 'allow-session' });
+	assert.deepEqual(parseAlwaysCommandArgs(['7', 'allow-always']), { id: '7', choice: 'allow-always' });
+	assert.equal(parseAlwaysCommandArgs(['7', 'allow']), undefined);
+	assert.equal(parseAlwaysCommandArgs(['7', 'deny']), undefined);
+	assert.equal(parseAlwaysCommandArgs([7, 'allow-always']), undefined);
 });

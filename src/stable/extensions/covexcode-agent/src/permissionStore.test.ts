@@ -120,3 +120,44 @@ test('describeRule reads as a sentence for the revoke picker', () => {
 		'Allow execute where action starts with "npm test"',
 	);
 });
+
+test('scoped rules round-trip through the file, preserving scope and turnId', () => {
+	const store = new PermissionStore([rule({ scope: 'turn', turnId: 'C:\\turn\\7' })]);
+	const restored = PermissionStore.fromFile(JSON.stringify(store.toFile()));
+	const list = restored.list();
+	assert.equal(list.length, 1);
+	assert.equal(list[0].scope, 'turn');
+	assert.equal(list[0].turnId, 'C:\\turn\\7');
+});
+
+test('clearTurnGrants removes only the matching turn grant', () => {
+	const store = new PermissionStore([
+		rule({ scope: 'turn', turnId: 'C:\\turn\\7' }),
+		rule({ scope: 'turn', turnId: 'turn-8', pattern: 'other' }),
+		rule({ scope: 'always' }),
+	]);
+	assert.equal(store.clearTurnGrants('C:\\turn\\7'), 1);
+	assert.equal(store.list().length, 2);
+	assert.ok(store.list().every(r => r.turnId !== 'C:\\turn\\7'));
+});
+
+test('clearSessionGrants removes session grants and leaves always/turn grants', () => {
+	const store = new PermissionStore([
+		rule({ scope: 'session' }),
+		rule({ scope: 'always' }),
+		rule({ scope: 'turn', turnId: 't1' }),
+	]);
+	assert.equal(store.clearSessionGrants(), 1);
+	assert.equal(store.list().length, 2);
+	assert.ok(store.list().every(r => r.scope !== 'session'));
+});
+
+test('clearOnceGrants removes single-use grants', () => {
+	const store = new PermissionStore([
+		rule({ scope: 'once' }),
+		rule({ scope: 'always' }),
+	]);
+	assert.equal(store.clearOnceGrants(), 1);
+	assert.equal(store.list().length, 1);
+	assert.equal(store.list()[0].scope, 'always');
+});

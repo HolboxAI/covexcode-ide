@@ -40,6 +40,14 @@ export const PERMISSION_STORE_RELATIVE_PATH = '.covexcode/permissions.json';
 export type PermissionDecision = 'allow' | 'deny';
 
 /**
+ * How long a grant lives. `always` (the default for rules written before
+ * scopes existed) never expires; the other three are cleared at the matching
+ * lifecycle point (`turn` -> turn end, `session` -> session teardown, `once`
+ * -> immediately, so it never survives the request it was minted for).
+ */
+export type PermissionScope = 'once' | 'turn' | 'session' | 'always';
+
+/**
  * `exact` compares the whole action string; `prefix` compares the start of it.
  * There is no `contains`: a substring rule is too easy to satisfy by accident.
  */
@@ -55,6 +63,10 @@ export interface PermissionRule {
 	createdAt: string;
 	/** `user` means a human clicked "Always allow". Reserved for future automated sources. */
 	source: 'user';
+	/** How long the grant lives. Absent means `always` (backward compatible). */
+	scope?: PermissionScope;
+	/** The agent turn the grant belongs to, present only when `scope` is `turn`. */
+	turnId?: string;
 }
 
 export interface PermissionStoreFile {
@@ -85,6 +97,12 @@ function parseMatch(value: unknown): PermissionMatch {
 	return value === 'prefix' ? 'prefix' : 'exact';
 }
 
+function parseScope(value: unknown): PermissionScope | undefined {
+	return value === 'once' || value === 'turn' || value === 'session' || value === 'always'
+		? value
+		: undefined;
+}
+
 /**
  * Coerce one parsed rule, or `undefined` if it is not usable. Malformed rules
  * are dropped rather than repaired -- a rule we cannot fully understand is a
@@ -105,7 +123,22 @@ function parseRule(value: unknown): PermissionRule | undefined {
 	// `source` is not user-checked: an unrecognised source is treated as `user`.
 	// It is descriptive metadata for auditing, not an access-control input, so
 	// being lenient here cannot widen what the store will approve.
-	return { kind, match: parseMatch(value.match), pattern, decision, createdAt, source: 'user' };
+	const rule: PermissionRule = {
+		kind,
+		match: parseMatch(value.match),
+		pattern,
+		decision,
+		createdAt,
+		source: 'user',
+	};
+	const scope = parseScope(value.scope);
+	if (scope !== undefined) {
+		rule.scope = scope;
+	}
+	if (typeof value.turnId === 'string') {
+		rule.turnId = value.turnId;
+	}
+	return rule;
 }
 
 /**
@@ -209,6 +242,31 @@ export class PermissionStore {
 
 	clear(): void {
 		this.rules = [];
+	}
+
+	/**
+	 * Drop every grant scoped to a single agent turn, keyed by the turn id the
+	 * grant was minted with. Returns the number removed so a caller can skip
+	 * the disk write when nothing changed.
+	 */
+	clearTurnGrants(turnId: string): number {
+		const before = this.rules.length;
+		this.rules = this.rules.filter(rule => !(rule.scope === 'turn' && rule.turnId === turnId));
+		return before - this.rules.length;
+	}
+
+	/** Drop every grant scoped to this session. Returns the number removed. */
+	clearSessionGrants(): number {
+		const before = this.rules.length;
+		this.rules = this.rules.filter(rule => rule.scope !== 'session');
+		return before - this.rules.length;
+	}
+
+	/** Drop every single-use grant. Returns the number removed. */
+	clearOnceGrants(): number {
+		const before = this.rules.length;
+		this.rules = this.rules.filter(rule => rule.scope !== 'once');
+		return before - this.rules.length;
 	}
 
 	list(): readonly PermissionRule[] {
