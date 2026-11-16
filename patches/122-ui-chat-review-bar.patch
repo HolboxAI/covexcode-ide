@@ -887,3 +887,124 @@ index 101a8f8..843d043 100644
 +	font-weight: 600;
 +	color: var(--vscode-descriptionForeground);
 +}
++
++/* ---------------------------------------------------------------------------------------------
++ * Covexcode Cursor-style Permission Action Buttons & Collapsible Diff Card
++ * ------------------------------------------------------------------------------------------ */
++
++.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"],
++.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"] {
++	display: inline-flex !important;
++	align-items: center;
++	justify-content: center;
++	gap: 6px;
++	padding: 4px 14px !important;
++	font-size: 12px;
++	font-weight: 500;
++	border-radius: 5px !important;
++	text-decoration: none !important;
++	cursor: pointer;
++	line-height: 18px;
++	margin-top: 8px;
++	margin-bottom: 6px;
++	background-color: transparent !important;
++	border: 1px solid rgba(255, 255, 255, 0.12) !important;
++	color: var(--vscode-foreground, #cccccc) !important;
++	box-shadow: none !important;
++	transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease !important;
++}
++
++/* Allow Button: transparent by default, smooth subtle glow reveal on hover */
++.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"][data-href*="allow"],
++.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"][href*="allow"],
++.interactive-item-container .value .rendered-markdown a[href*="choice%22%3A%22allow%22"] {
++	background-color: transparent !important;
++	border: 1px solid rgba(255, 255, 255, 0.12) !important;
++	color: var(--vscode-foreground, #cccccc) !important;
++	box-shadow: none !important;
++}
++
++.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"][data-href*="allow"]:hover,
++.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"][href*="allow"]:hover,
++.interactive-item-container .value .rendered-markdown a[href*="choice%22%3A%22allow%22"]:hover {
++	background-color: rgba(14, 99, 156, 0.22) !important;
++	color: #38bdf8 !important;
++	border-color: rgba(56, 189, 248, 0.45) !important;
++	box-shadow: 0 0 8px rgba(56, 189, 248, 0.18) !important;
++}
++
++/* Reject Button: transparent by default, subtle red highlight on hover */
++.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"][data-href*="reject"],
++.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"][href*="reject"],
++.interactive-item-container .value .rendered-markdown a[href*="choice%22%3A%22reject%22"] {
++	background-color: transparent !important;
++	border: 1px solid rgba(255, 255, 255, 0.12) !important;
++	color: var(--vscode-foreground, #cccccc) !important;
++	box-shadow: none !important;
++}
++
++.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"][data-href*="reject"]:hover,
++.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"][href*="reject"]:hover,
++.interactive-item-container .value .rendered-markdown a[href*="choice%22%3A%22reject%22"]:hover {
++	background-color: rgba(239, 68, 68, 0.16) !important;
++	color: #f87171 !important;
++	border-color: rgba(239, 68, 68, 0.4) !important;
++	box-shadow: 0 0 8px rgba(239, 68, 68, 0.15) !important;
++}
++
++/* Details and Summary in Chat Markdown */
++.interactive-item-container .value .rendered-markdown details {
++	margin-top: -4px;
++	margin-bottom: 12px;
++}
++
++.interactive-item-container .value .rendered-markdown summary {
++	display: inline-flex;
++	align-items: center;
++	gap: 5px;
++	cursor: pointer;
++	user-select: none;
++	font-size: 11px;
++	font-weight: 500;
++	color: var(--vscode-textLink-foreground, #38bdf8);
++	background: rgba(255, 255, 255, 0.05);
++	border: 1px solid rgba(255, 255, 255, 0.1);
++	border-radius: 4px;
++	padding: 3px 9px;
++	margin-top: 4px;
++	margin-bottom: 6px;
++	transition: background-color 0.12s ease, border-color 0.12s ease;
++	outline: none;
++}
++
++.interactive-item-container .value .rendered-markdown summary:hover {
++	background: rgba(255, 255, 255, 0.1);
++	border-color: rgba(56, 189, 248, 0.4);
++	color: var(--vscode-textLink-activeForeground, #7dd3fc);
++}
++
++.interactive-item-container .value .rendered-markdown details[open] > summary {
++	margin-bottom: 8px;
++	border-color: rgba(56, 189, 248, 0.3);
++}
++
++/* Cursor-style Streaming Diff Box in Chat */
++.interactive-item-container .value .rendered-markdown .code-scroll-stream,
++.interactive-item-container .value .rendered-markdown details > div[data-code],
++.interactive-item-container .value .rendered-markdown details .interactive-result-code-block {
++	max-height: 280px;
++	overflow-y: auto !important;
++	scroll-behavior: smooth;
++}
++
++.interactive-item-container .value .rendered-markdown details > div[data-code]::-webkit-scrollbar,
++.interactive-item-container .value .rendered-markdown details .interactive-result-code-block::-webkit-scrollbar {
++	width: 6px;
++	height: 6px;
++}
++
++.interactive-item-container .value .rendered-markdown details > div[data-code]::-webkit-scrollbar-thumb,
++.interactive-item-container .value .rendered-markdown details .interactive-result-code-block::-webkit-scrollbar-thumb {
++	background: rgba(255, 255, 255, 0.15);
++	border-radius: 3px;
++}
