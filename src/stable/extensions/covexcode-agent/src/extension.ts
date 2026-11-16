@@ -70,7 +70,7 @@ import {
 	REVIEW_COMMAND,
 } from './chatPermission';
 import { shouldStartFreshSession } from './freshChat';
-import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
+import { applyHunkSelection, renderCollapsibleDiffMarkdown, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
 import { ImageCache } from './imageCache';
 import { formatChatHistoryForModel } from './chatHistoryReplay';
@@ -1248,6 +1248,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		// a fresh Map per requestHandler call, same lifetime as `stream`.
 		const toolCallTitles = new Map<string, string>();
 		const shownBrowserPreviews = new Set<string>();
+		const turnAllowedFiles = new Set<string>();
 		const turnUsage = createTurnUsage();
 		// Inline edit carries the editor buffer and the paths whose diffs were
 		// already emitted, so renderUpdate can convert each `diff` into a
@@ -1271,7 +1272,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				return;
 			}
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor)
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, turnAllowedFiles)
 					.then(respond)
 					.catch(() => respond({ outcome: 'cancelled' }));
 			} else {
@@ -2971,6 +2972,7 @@ async function askPermission(
 	permissionGate: PermissionGate,
 	cwd: string,
 	onReject: (request: RequestPermissionRequest, toolCallId: string, files: string[]) => void,
+	turnAllowedFiles?: Set<string>,
 ): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
@@ -2981,6 +2983,7 @@ async function askPermission(
 	const diff = request.toolCall.content;
 	const hunks = diff?.type === 'diff' && diff.hunks && diff.hunks.length > 0 ? diff.hunks : undefined;
 	const affectedFiles = diff?.type === 'diff' && diff.path ? [diff.path] : [];
+	const filePath = diff?.type === 'diff' ? diff.path : undefined;
 	if (diff?.type === 'diff') {
 		await showDiff(diff, diffContentProvider, cwd);
 	}
@@ -2993,6 +2996,18 @@ async function askPermission(
 	}
 	if (remembered === 'deny' && reject) {
 		return { outcome: 'selected', optionId: reject.optionId };
+	}
+
+	// Turn-level auto-grant: if the user already approved editing a file this turn,
+	// safe inspection/testing commands referencing that file don't prompt redundantly.
+	if (turnAllowedFiles && turnAllowedFiles.size > 0 && allow) {
+		const isSafeCheck = /^(wc|cat|head|tail|grep|git|ls|stat|python3?|node|npm test|pytest|test)\b/i.test(action.trim());
+		const touchesAllowedFile = Array.from(turnAllowedFiles).some(f =>
+			action.includes(f) || action.includes(path.basename(f))
+		);
+		if (isSafeCheck && touchesAllowedFile) {
+			return { outcome: 'selected', optionId: allow.optionId };
+		}
 	}
 
 	const { id, wait } = permissionGate.create();
@@ -3023,7 +3038,7 @@ async function askPermission(
 	if (diff?.type === 'plan') {
 		stream.markdown(planDecisionMarkdown(diff, allowLabel, rejectLabel, id));
 	} else {
-		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks));
+		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks, filePath));
 	}
 	const answer = await wait;
 	pendingReviews.delete(id);
@@ -3044,6 +3059,14 @@ async function askPermission(
 		pushToolInvocation(toolCallId, toolTitle, pending.kind, 'pending', stream);
 	}
 
+	if (answer.choice === 'allow') {
+		if (turnAllowedFiles && affectedFiles.length > 0) {
+			for (const f of affectedFiles) {
+				turnAllowedFiles.add(f);
+			}
+		}
+	}
+
 	if (answer.choice === 'reject') {
 		onReject(request, toolCallId, affectedFiles);
 	}
@@ -3061,19 +3084,21 @@ function permissionDecisionMarkdown(
 	rejectLabel: string,
 	id: string,
 	hunks?: DiffHunk[],
+	filePath?: string,
 ): vscode.MarkdownString {
 	const line = new vscode.MarkdownString(undefined, true);
 	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND, REVIEW_COMMAND] };
-	line.appendMarkdown('$(warning) **covexcode needs permission**\n\ncovexcode wants to ');
-	line.appendText(action);
-	line.appendMarkdown('.\n\n');
-	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
-	line.appendMarkdown(`&nbsp;&nbsp;[$(x) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
-	line.appendMarkdown('\n\n');
-	if (hunks) {
-		line.appendMarkdown(renderHunksMarkdown(hunks));
-		line.appendMarkdown('\n');
+	line.supportHtml = true;
+	line.appendMarkdown('$(warning) **covexcode needs permission**\n\n');
+	if (hunks && hunks.length > 0) {
+		line.appendMarkdown(renderCollapsibleDiffMarkdown(hunks, filePath || action, 4));
+		line.appendMarkdown('\n\n');
+	} else {
+		line.appendMarkdown('covexcode wants to run:\n```bash\n$ ' + action + '\n```\n\n');
 	}
+	line.appendMarkdown(`[$(check) ${escapeMarkdownLinkLabel(allowLabel)}](${permissionCommandUri(id, 'allow')})`);
+	line.appendMarkdown(`&nbsp;&nbsp;&nbsp;&nbsp;[$(close) ${escapeMarkdownLinkLabel(rejectLabel)}](${permissionCommandUri(id, 'reject')})`);
+	line.appendMarkdown('\n\n');
 	return line;
 }
 

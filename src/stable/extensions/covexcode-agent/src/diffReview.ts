@@ -155,3 +155,59 @@ export function renderHunksMarkdown(hunks: DiffHunk[]): string {
 	lines.push('```');
 	return lines.join('\n');
 }
+
+/**
+ * Renders hunks as a Cursor-style collapsible diff card:
+ * - Header with filename and +N / -M addition/deletion badges.
+ * - Initial preview of up to `previewLimit` lines (default 4).
+ * - If more lines exist, a collapsible `<details><summary>▾ Show more (N lines)</summary>...</details>`.
+ */
+export function renderCollapsibleDiffMarkdown(
+	hunks: DiffHunk[],
+	filePath?: string,
+	previewLimit = 4,
+): string {
+	const allLines: string[] = [];
+	let addedCount = 0;
+	let removedCount = 0;
+
+	for (let i = 0; i < hunks.length; i++) {
+		for (const line of hunks[i].lines) {
+			const mark = line.change === 'added' ? '+' : line.change === 'removed' ? '-' : ' ';
+			if (line.change === 'added') {
+				addedCount++;
+			} else if (line.change === 'removed') {
+				removedCount++;
+			}
+			allLines.push(`${mark}${line.text}`);
+		}
+		if (i < hunks.length - 1) {
+			allLines.push('');
+		}
+	}
+
+	const parts: string[] = [];
+
+	if (filePath) {
+		const baseName = filePath.split(/[/\\]/).pop() ?? filePath;
+		const badge = `\`+${addedCount}\` \`-${removedCount}\``;
+		parts.push(`$(file) **${baseName}** &nbsp; ${badge}`);
+	}
+
+	if (allLines.length <= previewLimit) {
+		parts.push('```diff\n' + allLines.join('\n') + '\n```');
+	} else {
+		const previewLines = allLines.slice(0, previewLimit);
+		const remainingLines = allLines.slice(previewLimit);
+		const remainingCount = remainingLines.length;
+
+		parts.push('```diff\n' + previewLines.join('\n') + '\n```');
+		parts.push(
+			`<details>\n<summary>▾ Show more (${remainingCount} lines)</summary>\n\n\`\`\`diff\n` +
+			remainingLines.join('\n') +
+			'\n```\n</details>'
+		);
+	}
+
+	return parts.join('\n\n');
+}

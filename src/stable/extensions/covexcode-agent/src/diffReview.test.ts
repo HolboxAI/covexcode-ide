@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
+import { applyHunkSelection, renderCollapsibleDiffMarkdown, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import type { DiffHunk, DiffHunkLine, DiffLineChange } from './acpClient';
 
 /**
@@ -97,4 +97,29 @@ test('summarizeHunk() tallies the change and previews the first changed line', (
 test('renderHunksMarkdown() renders a unified-diff fenced block', () => {
 	const single = mkHunk(0, 0, [['context', 'a'], ['removed', 'b'], ['added', 'c']]);
 	assert.equal(renderHunksMarkdown([single]), '```diff\n a\n-b\n+c\n```');
+});
+
+test('renderCollapsibleDiffMarkdown() renders short diff without details toggle', () => {
+	const single = mkHunk(0, 0, [['context', 'a'], ['removed', 'b'], ['added', 'c']]);
+	const res = renderCollapsibleDiffMarkdown([single], 'app.js', 4);
+	assert.ok(res.includes('$(file) **app.js** &nbsp; `+1` `-1`'));
+	assert.ok(res.includes('```diff\n a\n-b\n+c\n```'));
+	assert.ok(!res.includes('<details>'));
+});
+
+test('renderCollapsibleDiffMarkdown() renders long diff with details toggle after previewLimit', () => {
+	const lines: [DiffLineChange, string][] = [
+		['removed', 'old1'],
+		['added', 'new1'],
+		['added', 'new2'],
+		['added', 'new3'],
+		['added', 'new4'],
+		['added', 'new5'],
+	];
+	const hunk = mkHunk(0, 0, lines);
+	const res = renderCollapsibleDiffMarkdown([hunk], 'src/main.ts', 4);
+	assert.ok(res.includes('$(file) **main.ts** &nbsp; `+5` `-1`'));
+	assert.ok(res.includes('```diff\n-old1\n+new1\n+new2\n+new3\n```'));
+	assert.ok(res.includes('<details>\n<summary>▾ Show more (2 lines)</summary>'));
+	assert.ok(res.includes('+new4\n+new5'));
 });

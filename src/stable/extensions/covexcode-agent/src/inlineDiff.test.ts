@@ -93,3 +93,4 @@ test('computeCombinedDiff - handles CRLF line endings cleanly', () => {
 	assert.deepEqual(res.hunks[0].deletedLines, ['line 2']);
 	assert.deepEqual(res.hunks[0].addedLines, ['line 2 changed']);
 });
+
