@@ -53,7 +53,7 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRen
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4374,4 +4374,213 @@
+@@ -4374,4 +4374,186 @@
  /* Voice mode: green disconnect button */
  .chat-input-container .chat-input-toolbars .codicon-debug-disconnect {
  	color: var(--vscode-charts-green, #3fb950) !important;
