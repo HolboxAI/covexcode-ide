@@ -120,7 +120,9 @@ test('renderCollapsibleDiffMarkdown() renders long diff with details toggle afte
 	const res = renderCollapsibleDiffMarkdown([hunk], 'src/main.ts', 4);
 	assert.ok(res.includes('$(file) **main.ts** &nbsp; `+5` `-1`'));
 	assert.ok(res.includes('```diff\n-old1\n+new1\n+new2\n+new3\n```'));
-	assert.ok(res.includes('<details>\n<summary>▾ Show more (2 lines)</summary>'));
+	assert.ok(res.includes('<details class="covexcode-diff-details">'));
+	assert.ok(res.includes('class="covexcode-show-more">▾ Show more (2 lines)</span>'));
+	assert.ok(res.includes('class="covexcode-show-less">▴ Show less</span>'));
 	assert.ok(res.includes('+new4\n+new5'));
 });
 

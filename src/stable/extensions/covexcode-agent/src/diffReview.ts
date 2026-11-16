@@ -198,14 +198,18 @@ export function renderCollapsibleDiffMarkdown(
 		parts.push('```diff\n' + allLines.join('\n') + '\n```');
 	} else {
 		const previewLines = allLines.slice(0, previewLimit);
-		const remainingLines = allLines.slice(previewLimit);
-		const remainingCount = remainingLines.length;
+		const remainingCount = allLines.length - previewLimit;
 
-		parts.push('```diff\n' + previewLines.join('\n') + '\n```');
 		parts.push(
-			`<details>\n<summary>▾ Show more (${remainingCount} lines)</summary>\n\n\`\`\`diff\n` +
-			remainingLines.join('\n') +
-			'\n```\n</details>'
+			'```diff\n' +
+			previewLines.join('\n') +
+			'\n```\n\n' +
+			'<details class="covexcode-diff-details">\n' +
+			`<summary class="covexcode-diff-summary"><span class="covexcode-show-more">▾ Show more (${remainingCount} lines)</span><span class="covexcode-show-less">▴ Show less</span></summary>\n\n` +
+			'```diff\n' +
+			allLines.join('\n') +
+			'\n```\n' +
+			'</details>'
 		);
 	}
 
