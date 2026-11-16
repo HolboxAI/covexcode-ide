@@ -4,7 +4,13 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { evaluatePermission, type EvaluationContext, type ResourceToCheck } from './permissionEngine';
+import {
+	evaluatePermission,
+	isReadOnlyCommand,
+	isReadOnlyResource,
+	type EvaluationContext,
+	type ResourceToCheck,
+} from './permissionEngine';
 import type { PermissionRule } from './permissionStore';
 
 const ctx: EvaluationContext = { turnId: 'turn-1', sessionId: 'session-1' };
@@ -130,4 +136,60 @@ test('windows: relative backslash prefix matches', () => {
 test('windows: file targets are case-insensitive', () => {
 	const r = rule({ kind: 'file_write', pattern: 'src\\App.tsx' });
 	assert.equal(evaluatePermission(res('file_write', 'SRC\\App.tsx'), [r], ctx), 'allow');
+});
+
+// --- Zero-friction read-only inspection (Antigravity-aligned) ---
+
+test('read-only: helper recognizes read kinds and safe inspection commands', () => {
+	assert.equal(isReadOnlyResource(res('file_read', 'src/App.tsx')), true);
+	assert.equal(isReadOnlyResource(res('read_file', 'README.md')), true);
+	assert.equal(isReadOnlyResource(res('list_directory', 'src/')), true);
+	assert.equal(isReadOnlyResource(res('search', 'TODO')), true);
+	assert.equal(isReadOnlyResource(res('file_write', 'src/App.tsx')), false);
+	assert.equal(isReadOnlyResource(res('file_delete', 'src/App.tsx')), false);
+
+	assert.equal(isReadOnlyCommand('git status'), true);
+	assert.equal(isReadOnlyCommand('git status -s'), true);
+	assert.equal(isReadOnlyCommand('git diff HEAD~1'), true);
+	assert.equal(isReadOnlyCommand('git log -n 5'), true);
+	assert.equal(isReadOnlyCommand('pwd'), true);
+	assert.equal(isReadOnlyCommand('which node'), true);
+	assert.equal(isReadOnlyCommand('node -v'), true);
+
+	// Disqualify chained commands, pipes, and redirects
+	assert.equal(isReadOnlyCommand('git status && rm -rf /'), false);
+	assert.equal(isReadOnlyCommand('git diff > patch.diff'), false);
+	assert.equal(isReadOnlyCommand('pwd; whoami'), false);
+	assert.equal(isReadOnlyCommand('echo hi | cat'), false);
+	assert.equal(isReadOnlyCommand('npm install'), false);
+	assert.equal(isReadOnlyCommand('rm -rf /'), false);
+});
+
+test('read-only: auto-allows read-only file access without prompting', () => {
+	assert.equal(evaluatePermission(res('file_read', 'src/App.tsx'), [], ctx), 'allow');
+	assert.equal(evaluatePermission(res('read_file', 'package.json'), [], ctx), 'allow');
+	assert.equal(evaluatePermission(res('list_directory', 'src/'), [], ctx), 'allow');
+});
+
+test('read-only: auto-allows safe inspection commands without prompting', () => {
+	assert.equal(evaluatePermission(res('run_command', 'git status'), [], ctx), 'allow');
+	assert.equal(evaluatePermission(res('run_command', 'git diff HEAD~1'), [], ctx), 'allow');
+	assert.equal(evaluatePermission(res('run_command', 'pwd'), [], ctx), 'allow');
+	assert.equal(evaluatePermission(res('run_command', 'which node'), [], ctx), 'allow');
+});
+
+test('read-only: chained or modifying commands still require confirmation (ask)', () => {
+	assert.equal(evaluatePermission(res('run_command', 'git status && rm -rf /'), [], ctx), 'ask');
+	assert.equal(evaluatePermission(res('run_command', 'git diff > patch.diff'), [], ctx), 'ask');
+	assert.equal(evaluatePermission(res('run_command', 'npm install'), [], ctx), 'ask');
+	assert.equal(evaluatePermission(res('file_write', 'src/App.tsx'), [], ctx), 'ask');
+	assert.equal(evaluatePermission(res('file_delete', 'src/App.tsx'), [], ctx), 'ask');
+});
+
+test('read-only: explicit deny rule overrides read-only auto-allow', () => {
+	const fileDenyRule = rule({ kind: 'file_read', pattern: 'secret.env', decision: 'deny' });
+	assert.equal(evaluatePermission(res('file_read', 'secret.env'), [fileDenyRule], ctx), 'deny');
+
+	const cmdDenyRule = rule({ pattern: 'git status', decision: 'deny' });
+	assert.equal(evaluatePermission(res('run_command', 'git status'), [cmdDenyRule], ctx), 'deny');
 });

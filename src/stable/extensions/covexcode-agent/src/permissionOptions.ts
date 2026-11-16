@@ -17,7 +17,7 @@
  * convention in `chatPermission.ts` and `workspaceTrust.ts`.
  */
 
-import type { PermissionDecision, PermissionQuery, PermissionRule } from './permissionStore';
+import type { PermissionDecision, PermissionMatch, PermissionQuery, PermissionRule } from './permissionStore';
 
 /** Every choice a user can make at a permission prompt. */
 export type PromptChoice = 'allow' | 'allow-turn' | 'allow-session' | 'allow-always' | 'reject' | 'reject-always';
@@ -50,9 +50,8 @@ export function permissionOptionFor(choice: PromptChoice): PromptOption | undefi
  * Build the durable rule a choice should record, or `undefined` for the "once"
  * choices, which by definition must not outlive the prompt.
  *
- * Matching is always `exact`. A permission file is a security boundary, and a
- * prefix rule inferred from a single approval would silently widen to every
- * command that merely starts with the same text.
+ * Matching defaults to `exact` unless a specific match strategy (e.g. `prefix`
+ * for unchained commands) is explicitly supplied.
  */
 export function ruleForChoice(
 	choice: PromptChoice,
@@ -60,10 +59,11 @@ export function ruleForChoice(
 	createdAt: string,
 	turnId?: string,
 	sessionId?: string,
+	match?: PermissionMatch,
 ): PermissionRule | undefined {
 	const base = {
 		kind: query.kind,
-		match: 'exact' as const,
+		match: match ?? ('exact' as const),
 		pattern: query.action,
 		createdAt,
 		source: 'user' as const,

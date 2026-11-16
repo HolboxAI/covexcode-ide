@@ -27,8 +27,7 @@ export interface EvaluationContext {
 	sessionId: string;
 }
 
-/** Kinds whose target is a path, so matching is case-insensitive. */
-const FILE_TARGET_KINDS = new Set([
+export const FILE_TARGET_KINDS = new Set([
 	'file_write',
 	'file_edit',
 	'file_read',
@@ -38,12 +37,87 @@ const FILE_TARGET_KINDS = new Set([
 	'read',
 ]);
 
+/** Tool call kinds that only perform safe, read-only inspection. */
+export const READ_ONLY_KINDS = new Set([
+	'file_read',
+	'read',
+	'read_file',
+	'list_directory',
+	'list_dir',
+	'dir_list',
+	'search',
+	'glob',
+	'grep',
+]);
+
+/** Safe inspection commands that produce no side-effects and can be auto-approved. */
+export const SAFE_INSPECTION_COMMANDS = [
+	'git status',
+	'git diff',
+	'git log',
+	'git branch',
+	'git show',
+	'git tag',
+	'git rev-parse',
+	'git describe',
+	'git remote',
+	'pwd',
+	'which',
+	'whoami',
+	'node -v',
+	'node --version',
+	'npm -v',
+	'npm --version',
+	'python -V',
+	'python --version',
+	'python3 -V',
+	'python3 --version',
+];
+
+/** Shell control, chaining, redirection, or substitution tokens that disqualify command auto-approval. */
+const DANGEROUS_SHELL_TOKENS = /[;&|><$`\n\r]/;
+
 /** Command prefixes that would chain a second command, so a prefix rule must
  * not match across them. */
 const SHELL_CHAIN_START = /^(?:&&|\|\||;|\||&)/;
 
-function isFileTarget(kind: string): boolean {
+export function isFileTarget(kind: string): boolean {
 	return FILE_TARGET_KINDS.has(kind);
+}
+
+/** Check whether a command string is a safe, read-only inspection command with no shell chaining. */
+export function isReadOnlyCommand(command: string): boolean {
+	const trimmed = command.trim();
+	if (trimmed.length === 0) {
+		return false;
+	}
+	if (DANGEROUS_SHELL_TOKENS.test(trimmed)) {
+		return false;
+	}
+	for (const safeCmd of SAFE_INSPECTION_COMMANDS) {
+		if (trimmed === safeCmd) {
+			return true;
+		}
+		if (trimmed.startsWith(safeCmd)) {
+			const nextChar = trimmed[safeCmd.length];
+			if (nextChar === ' ' || nextChar === '\t') {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/** Check whether an operation represents a safe read-only resource. */
+export function isReadOnlyResource(resource: ResourceToCheck): boolean {
+	const kind = resource.kind.toLowerCase();
+	if (READ_ONLY_KINDS.has(kind)) {
+		return true;
+	}
+	if (kind === 'file_write' || kind === 'file_edit' || kind === 'file_delete' || kind === 'write' || kind === 'edit' || kind === 'delete') {
+		return false;
+	}
+	return isReadOnlyCommand(resource.target);
 }
 
 function normalize(value: string, file: boolean): string {
@@ -144,6 +218,9 @@ export function evaluatePermission(
 		if (rule.decision === 'allow') {
 			decision = 'allow';
 		}
+	}
+	if (decision === 'ask' && isReadOnlyResource(resource)) {
+		return 'allow';
 	}
 	return decision;
 }

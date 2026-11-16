@@ -10,6 +10,7 @@ import {
 	PermissionStore,
 	parsePermissionStore,
 	serializePermissionStore,
+	type PermissionMatch,
 } from './permissionStore';
 import * as vscode from 'vscode';
 import {
@@ -62,7 +63,7 @@ import {
 	type PromptChoice,
 } from './permissionOptions';
 import { isDestructiveAlwaysAllow, renderPermissionCard } from './permissionPrompt';
-import { evaluatePermission, type ResourceToCheck } from './permissionEngine';
+import { evaluatePermission, isFileTarget, type ResourceToCheck } from './permissionEngine';
 import { showPermissionManager } from './permissionManagerUi';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
@@ -2821,7 +2822,12 @@ function rememberPermissionChoice(id: string, choice: PromptChoice): void {
 		return;
 	}
 	const action = context.request.toolCall.title ?? 'run this action';
-	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId, context.sessionId);
+	const rawKind = context.request.toolCall.kind ?? '';
+	const isFile = isFileTarget(rawKind) || rawKind.startsWith('file_');
+	const isCommand = rawKind === 'execute' || rawKind === 'run_command' || !isFile;
+	const isUnchained = !/(?:&&|\|\||;|\||&|>|<|\n)/.test(action.trim());
+	const match: PermissionMatch = (isCommand && isUnchained) ? 'prefix' : 'exact';
+	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId, context.sessionId, match);
 	if (!rule) {
 		return;
 	}
