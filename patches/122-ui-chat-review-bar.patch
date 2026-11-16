@@ -1046,14 +1046,14 @@ index 101a8f8..843d043 100644
 +}
 +
 +/* Diff line styling: Subtle dark green for additions, subtle dark red for removals matching Cursor */
-+.interactive-item-container .value .rendered-markdown .interactive-result-code-block .monaco-editor .view-line:has(.token.diff.inserted),
-+.interactive-item-container .value .rendered-markdown .interactive-result-code-block .monaco-editor .view-line:has(.token.diff.added) {
++.covexcode-diff-added-line,
++.interactive-item-container .value .rendered-markdown .interactive-result-code-block .monaco-editor .covexcode-diff-added-line {
 +	background-color: rgba(30, 48, 38, 0.85) !important;
 +	border-left: 2px solid #22c55e !important;
 +}
 +
-+.interactive-item-container .value .rendered-markdown .interactive-result-code-block .monaco-editor .view-line:has(.token.diff.deleted),
-+.interactive-item-container .value .rendered-markdown .interactive-result-code-block .monaco-editor .view-line:has(.token.diff.removed) {
++.covexcode-diff-removed-line,
++.interactive-item-container .value .rendered-markdown .interactive-result-code-block .monaco-editor .covexcode-diff-removed-line {
 +	background-color: rgba(60, 20, 24, 0.85) !important;
 +	border-left: 2px solid #ef4444 !important;
 +}
