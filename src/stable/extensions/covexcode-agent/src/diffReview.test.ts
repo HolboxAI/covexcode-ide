@@ -123,3 +123,18 @@ test('renderCollapsibleDiffMarkdown() renders long diff with details toggle afte
 	assert.ok(res.includes('<details>\n<summary>▾ Show more (2 lines)</summary>'));
 	assert.ok(res.includes('+new4\n+new5'));
 });
+
+test('renderCollapsibleDiffMarkdown() handles diffs with only additions (new file)', () => {
+	const hunk = mkHunk(0, 0, [['added', 'line 1'], ['added', 'line 2']]);
+	const res = renderCollapsibleDiffMarkdown([hunk], 'newfile.js', 4);
+	assert.ok(res.includes('$(file) **newfile.js** &nbsp; `+2` `-0`'));
+	assert.ok(res.includes('```diff\n+line 1\n+line 2\n```'));
+	assert.ok(!res.includes('<details>'));
+});
+
+test('renderCollapsibleDiffMarkdown() handles diffs with only removals (file deletion)', () => {
+	const hunk = mkHunk(0, 0, [['removed', 'line 1'], ['removed', 'line 2']]);
+	const res = renderCollapsibleDiffMarkdown([hunk], 'deleted.js', 4);
+	assert.ok(res.includes('$(file) **deleted.js** &nbsp; `+0` `-2`'));
+	assert.ok(res.includes('```diff\n-line 1\n-line 2\n```'));
+});

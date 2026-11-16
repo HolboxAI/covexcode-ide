@@ -1247,6 +1247,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		// have no label at all. Scoped to one turn, not the whole session:
 		// a fresh Map per requestHandler call, same lifetime as `stream`.
 		const toolCallTitles = new Map<string, string>();
+		const toolCallDiffs = new Map<string, Extract<ToolCallContent, { type: 'diff' }>>();
 		const shownBrowserPreviews = new Set<string>();
 		const turnAllowedFiles = new Set<string>();
 		const turnUsage = createTurnUsage();
@@ -1259,7 +1260,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId && !token.isCancellationRequested) {
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
+				renderUpdate(notification.update, stream, toolCallTitles, toolCallDiffs, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
 				updateUsageIndicator();
 			}
 		};
@@ -2240,11 +2241,18 @@ function pushToolInvocation(
 	kind: string | undefined,
 	status: ToolCallStatus | undefined,
 	stream: vscode.ChatResponseStream,
+	diff?: Extract<ToolCallContent, { type: 'diff' }>,
 ): void {
 	const message = new vscode.MarkdownString(undefined, true);
-	appendTitleSafely(message, title);
+	message.supportHtml = true;
 
-	const part = new vscode.ChatToolInvocationPart(kind ?? 'covexcode', toolCallId);
+	if (diff && diff.hunks && diff.hunks.length > 0) {
+		message.appendMarkdown(renderCollapsibleDiffMarkdown(diff.hunks, diff.path, 4));
+	} else {
+		appendTitleSafely(message, title);
+	}
+
+	const part = new vscode.ChatToolInvocationPart(kind ?? (diff ? 'edit' : 'covexcode'), toolCallId);
 	part.enablePartialUpdate = true;
 	part.isComplete = status === 'completed' || status === 'failed';
 	part.invocationMessage = message;
@@ -2254,8 +2262,13 @@ function pushToolInvocation(
 	stream.push(part);
 }
 
-function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
-	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream);
+function renderToolCallInvocation(
+	update: SessionUpdate,
+	title: string,
+	stream: vscode.ChatResponseStream,
+	diff?: Extract<ToolCallContent, { type: 'diff' }>,
+): void {
+	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream, diff);
 }
 
 /**
@@ -2321,6 +2334,7 @@ function renderUpdate(
 	update: SessionUpdate,
 	stream: vscode.ChatResponseStream,
 	toolCallTitles: Map<string, string>,
+	toolCallDiffs: Map<string, Extract<ToolCallContent, { type: 'diff' }>>,
 	openedDevServerUrls: Set<string>,
 	shownBrowserPreviews: Set<string>,
 	turnUsage: TurnUsage,
@@ -2359,9 +2373,15 @@ function renderUpdate(
 			if (update.toolCallId && update.title) {
 				toolCallTitles.set(update.toolCallId, update.title);
 			}
-			const title = update.title ?? (update.toolCallId ? toolCallTitles.get(update.toolCallId) : undefined);
+			if (update.toolCallId && update.content?.type === 'diff') {
+				toolCallDiffs.set(update.toolCallId, update.content);
+			}
+			const diff = update.content?.type === 'diff'
+				? update.content
+				: (update.toolCallId ? toolCallDiffs.get(update.toolCallId) : undefined);
+			const title = update.title ?? (update.toolCallId ? toolCallTitles.get(update.toolCallId) : undefined) ?? (diff ? diff.path : undefined);
 			if (title && update.toolCallId) {
-				renderToolCallInvocation(update, title, stream);
+				renderToolCallInvocation(update, title, stream, diff);
 			} else if (title) {
 				// Fallback for a tool call that arrived without a toolCallId
 				// (nothing to correlate a completion against): the old
