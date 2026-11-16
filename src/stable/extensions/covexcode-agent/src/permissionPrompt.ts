@@ -63,21 +63,21 @@ export function permissionPromptLinks(options: {
 	const { id, kind, action } = options;
 	const links: PermissionPromptLink[] = [
 		{
-			label: 'Allow Once',
+			label: 'Yes, allow this time',
 			choice: 'allow',
 			uri: permissionCommandUri(id, 'allow'),
 			icon: '$(check)',
 			description: 'Run this tool call only',
 		},
 		{
-			label: 'Allow for This Turn',
+			label: 'Yes, allow for this turn',
 			choice: 'allow-turn',
 			uri: alwaysCommandUri(id, 'allow-turn'),
 			icon: '$(sync)',
 			description: 'Allow for the rest of this conversation turn',
 		},
 		{
-			label: 'Allow for This Session',
+			label: 'Yes, allow for this session',
 			choice: 'allow-session',
 			uri: alwaysCommandUri(id, 'allow-session'),
 			icon: '$(history)',
@@ -86,7 +86,7 @@ export function permissionPromptLinks(options: {
 	];
 	if (!isDestructiveAlwaysAllow(kind, action)) {
 		links.push({
-			label: 'Always Allow',
+			label: 'Yes, always allow this',
 			choice: 'allow-always',
 			uri: alwaysCommandUri(id, 'allow-always'),
 			icon: '$(shield)',
@@ -94,13 +94,36 @@ export function permissionPromptLinks(options: {
 		});
 	}
 	links.push({
-		label: 'Reject',
+		label: 'No',
 		choice: 'reject',
 		uri: permissionCommandUri(id, 'reject'),
 		icon: '$(x)',
-		description: 'Deny and provide feedback',
+		description: 'Deny and tell the agent what to do instead',
 	});
 	return links;
+}
+
+export function formatActionTitle(kind: string, action: string): string {
+	const trimmed = action.trim();
+	switch (kind) {
+		case 'execute':
+		case 'run_command':
+			return `Allow execute ${trimmed}?`;
+		case 'file_write':
+		case 'write':
+			return `Allow write ${trimmed}?`;
+		case 'file_edit':
+		case 'edit':
+			return `Allow edit ${trimmed}?`;
+		case 'file_delete':
+		case 'delete':
+			return `Allow delete ${trimmed}?`;
+		case 'file_read':
+		case 'read':
+			return `Allow read ${trimmed}?`;
+		default:
+			return `Allow ${trimmed}?`;
+	}
 }
 
 export function formatActionSubtitle(kind: string): string {
@@ -161,12 +184,11 @@ export function renderPermissionCard(options: {
 	action: string;
 }): string {
 	const { id, kind, action, allowLabel, rejectLabel } = options;
-	const subtitle = formatActionSubtitle(kind);
+	const title = formatActionTitle(kind, action);
 	const lang = detectCodeLanguage(kind, action);
 	const links = permissionPromptLinks({ id, allowLabel, rejectLabel, kind, action });
 
-	let md = `### $(shield) covexcode needs permission\n\n`;
-	md += `${subtitle}\n\n`;
+	let md = `### $(shield) ${title}\n\n`;
 	md += `\`\`\`${lang}\n${action}\n\`\`\`\n\n`;
 	md += `---\n\n`;
 
@@ -175,6 +197,9 @@ export function renderPermissionCard(options: {
 		const icon = link.icon ? `${link.icon} ` : '';
 		const desc = link.description ? ` &nbsp;—&nbsp; *${link.description}*` : '';
 		md += `**${num}.** [${icon}**${link.label}**](${link.uri})${desc}\n\n`;
+		if (link.choice === 'reject') {
+			md += `> [$(close) Skip](${link.uri}) &nbsp; [$(send) Submit Feedback](${link.uri})\n\n`;
+		}
 	});
 
 	return md;

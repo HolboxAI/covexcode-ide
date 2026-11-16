@@ -4,9 +4,11 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { evaluatePermission } from './permissionEngine';
 import {
 	detectCodeLanguage,
 	formatActionSubtitle,
+	formatActionTitle,
 	isDestructiveAlwaysAllow,
 	permissionPromptLinks,
 	renderPermissionCard,
@@ -26,7 +28,7 @@ test('renders five links for a non-destructive file write', () => {
 	);
 	assert.deepEqual(
 		links.map(l => l.label),
-		['Allow Once', 'Allow for This Turn', 'Allow for This Session', 'Always Allow', 'Reject'],
+		['Yes, allow this time', 'Yes, allow for this turn', 'Yes, allow for this session', 'Yes, always allow this', 'No'],
 	);
 });
 
@@ -41,7 +43,7 @@ test('reject link still resolves to choice "reject"', () => {
 	const reject = links.at(-1);
 	assert.ok(reject);
 	assert.equal(reject.choice, 'reject');
-	assert.equal(reject.label, 'Reject');
+	assert.equal(reject.label, 'No');
 });
 
 test('Always Allow is hidden for file_delete', () => {
@@ -70,6 +72,15 @@ test('non-destructive commands and file paths are not destructive', () => {
 	// A path containing "format" must not lose its Always Allow link.
 	assert.equal(isDestructiveAlwaysAllow('file_write', 'C:\\Users\\u\\src\\format.ts'), false);
 	assert.equal(isDestructiveAlwaysAllow('file_write', 'C:\\Users\\u\\src\\App.tsx'), false);
+});
+
+test('formatActionTitle formats Antigravity card title per kind', () => {
+	assert.equal(formatActionTitle('execute', 'npm test'), 'Allow execute npm test?');
+	assert.equal(formatActionTitle('file_write', 'src/App.tsx'), 'Allow write src/App.tsx?');
+	assert.equal(formatActionTitle('file_edit', 'src/App.tsx'), 'Allow edit src/App.tsx?');
+	assert.equal(formatActionTitle('file_delete', 'src/App.tsx'), 'Allow delete src/App.tsx?');
+	assert.equal(formatActionTitle('file_read', 'src/App.tsx'), 'Allow read src/App.tsx?');
+	assert.equal(formatActionTitle('other', 'access network'), 'Allow access network?');
 });
 
 test('formatActionSubtitle formats subtitles per kind', () => {
@@ -103,9 +114,8 @@ test('renderPermissionCard formats command execution card with Antigravity styli
 		action: 'npm install lucide-react',
 	});
 
-	// Header & Subtitle
-	assert.ok(card.includes('### $(shield) covexcode needs permission'));
-	assert.ok(card.includes('covexcode wants to execute:'));
+	// Header & Title
+	assert.ok(card.includes('### $(shield) Allow execute npm install lucide-react?'));
 
 	// Code block with bash syntax
 	assert.ok(card.includes('```bash\nnpm install lucide-react\n```'));
@@ -114,11 +124,13 @@ test('renderPermissionCard formats command execution card with Antigravity styli
 	assert.ok(card.includes('---'));
 
 	// Numbered options
-	assert.ok(card.includes('**1.** [$(check) **Allow Once**]'));
-	assert.ok(card.includes('**2.** [$(sync) **Allow for This Turn**]'));
-	assert.ok(card.includes('**3.** [$(history) **Allow for This Session**]'));
-	assert.ok(card.includes('**4.** [$(shield) **Always Allow**]'));
-	assert.ok(card.includes('**5.** [$(x) **Reject**]'));
+	assert.ok(card.includes('**1.** [$(check) **Yes, allow this time**]'));
+	assert.ok(card.includes('**2.** [$(sync) **Yes, allow for this turn**]'));
+	assert.ok(card.includes('**3.** [$(history) **Yes, allow for this session**]'));
+	assert.ok(card.includes('**4.** [$(shield) **Yes, always allow this**]'));
+	assert.ok(card.includes('**5.** [$(x) **No**]'));
+	assert.ok(card.includes('Skip'));
+	assert.ok(card.includes('Submit Feedback'));
 });
 
 test('renderPermissionCard preserves Windows paths with backslashes verbatim', () => {
@@ -131,7 +143,7 @@ test('renderPermissionCard preserves Windows paths with backslashes verbatim', (
 		action: winPath,
 	});
 
-	assert.ok(card.includes('covexcode wants to write:'));
+	assert.ok(card.includes('### $(shield) Allow write C:\\Users\\user\\project\\src\\components\\Login.tsx?'));
 	// Verify backslashes are preserved verbatim without escaping
 	assert.ok(card.includes(`\`\`\`typescript\n${winPath}\n\`\`\``));
 });
@@ -145,12 +157,40 @@ test('renderPermissionCard hides Always Allow for destructive actions and number
 		action: 'src/old.ts',
 	});
 
-	assert.ok(card.includes('covexcode wants to delete:'));
-	assert.ok(!card.includes('Always Allow'));
+	assert.ok(card.includes('### $(shield) Allow delete src/old.ts?'));
+	assert.ok(!card.includes('Yes, always allow this'));
 	// Check remaining 4 options are numbered 1 through 4
-	assert.ok(card.includes('**1.** [$(check) **Allow Once**]'));
-	assert.ok(card.includes('**2.** [$(sync) **Allow for This Turn**]'));
-	assert.ok(card.includes('**3.** [$(history) **Allow for This Session**]'));
-	assert.ok(card.includes('**4.** [$(x) **Reject**]'));
+	assert.ok(card.includes('**1.** [$(check) **Yes, allow this time**]'));
+	assert.ok(card.includes('**2.** [$(sync) **Yes, allow for this turn**]'));
+	assert.ok(card.includes('**3.** [$(history) **Yes, allow for this session**]'));
+	assert.ok(card.includes('**4.** [$(x) **No**]'));
+});
+
+test('card does not appear when evaluatePermission returns "allow" or "deny"', () => {
+	const dummyContext = { turnId: 'turn-1', sessionId: 'session-1' };
+
+	// 1. Auto-approved read-only resource: evaluatePermission returns 'allow', so card does not show
+	const readDecision = evaluatePermission({ kind: 'file_read', target: 'src/App.tsx' }, [], dummyContext);
+	assert.equal(readDecision, 'allow');
+
+	// 2. Auto-approved inspection command: evaluatePermission returns 'allow', so card does not show
+	const gitStatusDecision = evaluatePermission({ kind: 'execute', target: 'git status' }, [], dummyContext);
+	assert.equal(gitStatusDecision, 'allow');
+
+	// 3. Denied rule: evaluatePermission returns 'deny', so card does not show
+	const denyRule = {
+		kind: 'execute',
+		pattern: 'git push',
+		match: 'exact' as const,
+		decision: 'deny' as const,
+		createdAt: '2026-11-16T00:00:00.000Z',
+		source: 'user' as const,
+	};
+	const deniedDecision = evaluatePermission({ kind: 'execute', target: 'git push' }, [denyRule], dummyContext);
+	assert.equal(deniedDecision, 'deny');
+
+	// 4. Unapproved write/execute returns 'ask' - only this triggers the card
+	const askDecision = evaluatePermission({ kind: 'execute', target: 'npm install' }, [], dummyContext);
+	assert.equal(askDecision, 'ask');
 });
 
