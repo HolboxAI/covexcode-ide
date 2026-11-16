@@ -893,63 +893,60 @@ index 101a8f8..843d043 100644
 + * ------------------------------------------------------------------------------------------ */
 +
 +.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"],
-+.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"] {
++.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"],
++.interactive-session a[data-href*="permission.respond"],
++.interactive-session a[href*="permission.respond"] {
 +	display: inline-flex !important;
-+	align-items: center;
-+	justify-content: center;
-+	gap: 6px;
-+	padding: 4px 14px !important;
-+	font-size: 12px;
-+	font-weight: 500;
++	align-items: center !important;
++	justify-content: center !important;
++	gap: 6px !important;
++	padding: 4px 12px !important;
++	font-size: 12px !important;
++	font-weight: 500 !important;
++	line-height: 18px !important;
++	letter-spacing: 0.1px !important;
 +	border-radius: 5px !important;
 +	text-decoration: none !important;
-+	cursor: pointer;
-+	line-height: 18px;
-+	margin-top: 8px;
-+	margin-bottom: 6px;
++	cursor: pointer !important;
++	user-select: none !important;
++	box-sizing: border-box !important;
++	vertical-align: middle !important;
++	white-space: nowrap !important;
 +	background-color: transparent !important;
-+	border: 1px solid rgba(255, 255, 255, 0.12) !important;
-+	color: var(--vscode-foreground, #cccccc) !important;
++	border: 1px solid transparent !important;
 +	box-shadow: none !important;
-+	transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease !important;
-+}
-+
-+/* Allow Button: transparent by default, smooth subtle glow reveal on hover */
-+.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"][data-href*="allow"],
-+.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"][href*="allow"],
-+.interactive-item-container .value .rendered-markdown a[href*="choice%22%3A%22allow%22"] {
-+	background-color: transparent !important;
-+	border: 1px solid rgba(255, 255, 255, 0.12) !important;
 +	color: var(--vscode-foreground, #cccccc) !important;
++	transform: none !important;
++	margin-top: 8px !important;
++	margin-bottom: 6px !important;
++	transition: background-color 0.12s ease,
++	            border-color 0.12s ease,
++	            color 0.12s ease !important;
++}
++
++/* Hover state: smooth subtle neutral box reveal, NO colors (plain Cursor style) */
++.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"]:hover,
++.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"]:hover,
++.interactive-session a[data-href*="permission.respond"]:hover,
++.interactive-session a[href*="permission.respond"]:hover {
++	text-decoration: none !important;
++	background-color: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08)) !important;
++	border-color: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.14)) !important;
++	color: var(--vscode-foreground, #ffffff) !important;
 +	box-shadow: none !important;
++	transform: none !important;
 +}
 +
-+.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"][data-href*="allow"]:hover,
-+.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"][href*="allow"]:hover,
-+.interactive-item-container .value .rendered-markdown a[href*="choice%22%3A%22allow%22"]:hover {
-+	background-color: rgba(14, 99, 156, 0.22) !important;
-+	color: #38bdf8 !important;
-+	border-color: rgba(56, 189, 248, 0.45) !important;
-+	box-shadow: 0 0 8px rgba(56, 189, 248, 0.18) !important;
-+}
-+
-+/* Reject Button: transparent by default, subtle red highlight on hover */
-+.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"][data-href*="reject"],
-+.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"][href*="reject"],
-+.interactive-item-container .value .rendered-markdown a[href*="choice%22%3A%22reject%22"] {
-+	background-color: transparent !important;
-+	border: 1px solid rgba(255, 255, 255, 0.12) !important;
-+	color: var(--vscode-foreground, #cccccc) !important;
++/* Active state */
++.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"]:active,
++.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"]:active,
++.interactive-session a[data-href*="permission.respond"]:active,
++.interactive-session a[href*="permission.respond"]:active {
++	background-color: var(--vscode-toolbar-activeBackground, rgba(255, 255, 255, 0.16)) !important;
++	border-color: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.2)) !important;
 +	box-shadow: none !important;
-+}
-+
-+.interactive-item-container .value .rendered-markdown a[data-href*="covexcode.permission.respond"][data-href*="reject"]:hover,
-+.interactive-item-container .value .rendered-markdown a[href*="covexcode.permission.respond"][href*="reject"]:hover,
-+.interactive-item-container .value .rendered-markdown a[href*="choice%22%3A%22reject%22"]:hover {
-+	background-color: rgba(239, 68, 68, 0.16) !important;
-+	color: #f87171 !important;
-+	border-color: rgba(239, 68, 68, 0.4) !important;
-+	box-shadow: 0 0 8px rgba(239, 68, 68, 0.15) !important;
++	transform: none !important;
++	transition: background-color 0.04s ease !important;
 +}
 +
 +/* Details and Summary in Chat Markdown */
