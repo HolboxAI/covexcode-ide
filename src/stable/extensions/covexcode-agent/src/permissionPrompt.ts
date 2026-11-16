@@ -18,6 +18,8 @@ export interface PermissionPromptLink {
 	label: string;
 	choice: PromptChoice;
 	uri: string;
+	icon?: string;
+	description?: string;
 }
 
 /** Command fragments that must never be granted "always" without a look. */
@@ -60,13 +62,120 @@ export function permissionPromptLinks(options: {
 }): PermissionPromptLink[] {
 	const { id, kind, action } = options;
 	const links: PermissionPromptLink[] = [
-		{ label: 'Allow Once', choice: 'allow', uri: permissionCommandUri(id, 'allow') },
-		{ label: 'Allow for This Turn', choice: 'allow-turn', uri: alwaysCommandUri(id, 'allow-turn') },
-		{ label: 'Allow for This Session', choice: 'allow-session', uri: alwaysCommandUri(id, 'allow-session') },
+		{
+			label: 'Allow Once',
+			choice: 'allow',
+			uri: permissionCommandUri(id, 'allow'),
+			icon: '$(check)',
+			description: 'Run this tool call only',
+		},
+		{
+			label: 'Allow for This Turn',
+			choice: 'allow-turn',
+			uri: alwaysCommandUri(id, 'allow-turn'),
+			icon: '$(sync)',
+			description: 'Allow for the rest of this conversation turn',
+		},
+		{
+			label: 'Allow for This Session',
+			choice: 'allow-session',
+			uri: alwaysCommandUri(id, 'allow-session'),
+			icon: '$(history)',
+			description: 'Allow until the session restarts',
+		},
 	];
 	if (!isDestructiveAlwaysAllow(kind, action)) {
-		links.push({ label: 'Always Allow', choice: 'allow-always', uri: alwaysCommandUri(id, 'allow-always') });
+		links.push({
+			label: 'Always Allow',
+			choice: 'allow-always',
+			uri: alwaysCommandUri(id, 'allow-always'),
+			icon: '$(shield)',
+			description: 'Remember permanently in workspace rules',
+		});
 	}
-	links.push({ label: 'Reject', choice: 'reject', uri: permissionCommandUri(id, 'reject') });
+	links.push({
+		label: 'Reject',
+		choice: 'reject',
+		uri: permissionCommandUri(id, 'reject'),
+		icon: '$(x)',
+		description: 'Deny and provide feedback',
+	});
 	return links;
+}
+
+export function formatActionSubtitle(kind: string): string {
+	switch (kind) {
+		case 'execute':
+			return 'covexcode wants to execute:';
+		case 'file_write':
+		case 'write':
+			return 'covexcode wants to write:';
+		case 'file_edit':
+		case 'edit':
+			return 'covexcode wants to edit:';
+		case 'file_delete':
+		case 'delete':
+			return 'covexcode wants to delete:';
+		case 'file_read':
+		case 'read':
+			return 'covexcode wants to read:';
+		default:
+			return 'covexcode wants to run:';
+	}
+}
+
+export function detectCodeLanguage(kind: string, action: string): string {
+	if (kind === 'execute') {
+		return 'bash';
+	}
+	const lower = action.toLowerCase();
+	if (lower.endsWith('.ts') || lower.endsWith('.tsx')) {
+		return 'typescript';
+	}
+	if (lower.endsWith('.js') || lower.endsWith('.jsx')) {
+		return 'javascript';
+	}
+	if (lower.endsWith('.json')) {
+		return 'json';
+	}
+	if (lower.endsWith('.py')) {
+		return 'python';
+	}
+	if (lower.endsWith('.sh') || lower.endsWith('.bash')) {
+		return 'bash';
+	}
+	if (lower.endsWith('.css') || lower.endsWith('.scss')) {
+		return 'css';
+	}
+	if (lower.endsWith('.html')) {
+		return 'html';
+	}
+	return '';
+}
+
+export function renderPermissionCard(options: {
+	id: string;
+	allowLabel: string;
+	rejectLabel: string;
+	kind: string;
+	action: string;
+}): string {
+	const { id, kind, action, allowLabel, rejectLabel } = options;
+	const subtitle = formatActionSubtitle(kind);
+	const lang = detectCodeLanguage(kind, action);
+	const links = permissionPromptLinks({ id, allowLabel, rejectLabel, kind, action });
+
+	let md = `### $(shield) covexcode needs permission\n\n`;
+	md += `${subtitle}\n\n`;
+	md += `\`\`\`${lang}\n${action}\n\`\`\`\n\n`;
+	md += `---\n\n`;
+
+	links.forEach((link, index) => {
+		const num = index + 1;
+		const icon = link.icon ? `${link.icon} ` : '';
+		const desc = link.description ? ` &nbsp;—&nbsp; *${link.description}*` : '';
+		md += `**${num}.** [${icon}**${link.label}**](${link.uri})${desc}\n\n`;
+	});
+
+	return md;
 }

@@ -61,7 +61,7 @@ import {
 	ruleForChoice,
 	type PromptChoice,
 } from './permissionOptions';
-import { isDestructiveAlwaysAllow, permissionPromptLinks } from './permissionPrompt';
+import { isDestructiveAlwaysAllow, renderPermissionCard } from './permissionPrompt';
 import { evaluatePermission, type ResourceToCheck } from './permissionEngine';
 import { showPermissionManager } from './permissionManagerUi';
 import { shouldStartFreshSession } from './freshChat';
@@ -2954,18 +2954,9 @@ function permissionDecisionMarkdown(
 ): vscode.MarkdownString {
 	const line = new vscode.MarkdownString(undefined, true);
 	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND, REVIEW_COMMAND, PERMISSION_ALWAYS_COMMAND] };
-	line.appendMarkdown('$(warning) **covexcode needs permission**\n\ncovexcode wants to ');
-	line.appendText(action);
-	line.appendMarkdown('.\n\n');
-	const links = permissionPromptLinks({ id, allowLabel, rejectLabel, kind, action });
-	links.forEach((link, index) => {
-		if (index > 0) {
-			line.appendMarkdown('&nbsp;&nbsp;');
-		}
-		line.appendMarkdown(`[${escapeMarkdownLinkLabel(link.label)}](${link.uri})`);
-	});
-	line.appendMarkdown('\n\n');
+	line.appendMarkdown(renderPermissionCard({ id, allowLabel, rejectLabel, kind, action }));
 	if (hunks) {
+		line.appendMarkdown('\n');
 		line.appendMarkdown(renderHunksMarkdown(hunks));
 		line.appendMarkdown('\n');
 	}
