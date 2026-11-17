@@ -130,7 +130,17 @@ import {
 	resolveModelDescriptor,
 	secretKeyForProvider,
 } from './models';
-import { buildFeedbackPayload, DEFAULT_FEEDBACK_ENDPOINT, FeedbackService, feedbackOs, postFeedbackJson, shouldSendFeedback, type FeedbackStorage } from './feedbackService';
+import {
+	buildFeedbackPayload,
+	DEFAULT_FEEDBACK_ENDPOINT,
+	FEEDBACK_STATUS_BAR_DURATION_MS,
+	FEEDBACK_STATUS_BAR_MESSAGE,
+	FeedbackService,
+	feedbackOs,
+	postFeedbackJson,
+	shouldSendFeedback,
+	type FeedbackStorage,
+} from './feedbackService';
 import { showFeedbackWindow, showRejectFeedback } from './feedbackUi';
 
 const PARTICIPANT_ID = 'covexcode.agent';
@@ -454,11 +464,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		},
 	);
 	const feedbackEnabled = (): boolean => {
+		const covexcodeConfig = vscode.workspace.getConfiguration('covexcode');
+		const feedbackOn = covexcodeConfig.get<boolean>('feedback.enabled', true);
+		if (!feedbackOn) { return false; }
 		const telemetry = vscode.workspace.getConfiguration('telemetry');
-		return shouldSendFeedback(
-			telemetry.get<string>('telemetryLevel', 'off'),
-			telemetry.get<boolean>('feedback.enabled', true),
-		);
+		const level = telemetry.get<string>('telemetryLevel', 'all');
+		return shouldSendFeedback(level, feedbackOn);
 	};
 	const showRejectFeedbackFor = (request: RequestPermissionRequest, toolCallId: string, files: string[]): void => {
 		if (!feedbackEnabled()) {
@@ -490,6 +501,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					provider,
 					ideVersion: vscode.version,
 				})).catch(() => {});
+				vscode.window.setStatusBarMessage(FEEDBACK_STATUS_BAR_MESSAGE, FEEDBACK_STATUS_BAR_DURATION_MS);
 			},
 		);
 	};
@@ -518,7 +530,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				})).catch(() => {});
 				// Brief, non-modal confirmation. A queued/failed send never shows
 				// an error -- the queue retries silently.
-				vscode.window.setStatusBarMessage('Thanks for the feedback', 3000);
+				vscode.window.setStatusBarMessage(FEEDBACK_STATUS_BAR_MESSAGE, FEEDBACK_STATUS_BAR_DURATION_MS);
 			},
 		});
 	};

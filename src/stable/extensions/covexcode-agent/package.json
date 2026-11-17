@@ -239,6 +239,12 @@
           "order": 8,
           "markdownDescription": "How often the session asks before running tools. `auto` (default) asks only about destructive actions; `manual` asks about every write and command. Toggle with the `/mode` chat command or **covexcode: Toggle Permission Mode**."
         },
+        "covexcode.feedback.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable feedback features in Covexcode (reject feedback and /feedback command).",
+          "scope": "application"
+        },
         "covexcode.feedback.endpoint": {
           "type": "string",
           "default": "https://covexcode.com/api/feedback",
