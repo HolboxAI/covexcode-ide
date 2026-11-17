@@ -10,7 +10,6 @@ import {
 	PermissionStore,
 	parsePermissionStore,
 	serializePermissionStore,
-	type PermissionMatch,
 } from './permissionStore';
 import * as vscode from 'vscode';
 import {
@@ -62,9 +61,7 @@ import {
 	ruleForChoice,
 	type PromptChoice,
 } from './permissionOptions';
-import { isDestructiveAlwaysAllow, renderPermissionCard } from './permissionPrompt';
-import { evaluatePermission, isFileTarget, type ResourceToCheck } from './permissionEngine';
-import { showPermissionManager } from './permissionManagerUi';
+import { isDestructiveAlwaysAllow, permissionPromptLinks } from './permissionPrompt';
 import { shouldStartFreshSession } from './freshChat';
 import { applyHunkSelection, renderHunksMarkdown, summarizeHunk } from './diffReview';
 import { describeBrowserPreview, stripOversizedDataUris } from './chatMarkdown';
@@ -1188,7 +1185,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			respond: (outcome: RequestPermissionOutcome) => void,
 		) => {
 			if (permissionRequest.sessionId === activeSessionId) {
-				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, turnScopeId, activeSessionId).then(respond);
+				void askPermission(permissionRequest, diffContentProvider, stream, permissionGate, workspace.cwd, showRejectFeedbackFor, turnScopeId).then(respond);
 			} else {
 				respond({ outcome: 'cancelled' });
 			}
@@ -1611,24 +1608,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('covexcode.managePermissions', () => {
-			const cwd = currentWorkspace().cwd;
-			showPermissionManager({
-				getRules: () => loadPermissionStore(cwd).list(),
-				onRevoke: (ruleId: string) => {
-					try {
-						const store = loadPermissionStore(cwd);
-						const revoked = store.removeRule(ruleId);
-						if (revoked) {
-							writePermissionStore(cwd, store);
-						}
-						return revoked;
-					} catch {
-						return undefined;
-					}
-				},
-			});
-		}),
 		vscode.commands.registerCommand('covexcode.importFromVSCode', () => runImportFromVSCode(context)),
 		vscode.commands.registerCommand('covexcode.chat.copyAll', async () => {
 			try {
@@ -2771,7 +2750,6 @@ interface PendingPermissionContext {
 	affectedFiles: string[];
 	cwd: string;
 	turnId: string;
-	sessionId: string;
 }
 
 const pendingPermissionContext = new Map<string, PendingPermissionContext>();
@@ -2822,12 +2800,7 @@ function rememberPermissionChoice(id: string, choice: PromptChoice): void {
 		return;
 	}
 	const action = context.request.toolCall.title ?? 'run this action';
-	const rawKind = context.request.toolCall.kind ?? '';
-	const isFile = isFileTarget(rawKind) || rawKind.startsWith('file_');
-	const isCommand = rawKind === 'execute' || rawKind === 'run_command' || !isFile;
-	const isUnchained = !/(?:&&|\|\||;|\||&|>|<|\n)/.test(action.trim());
-	const match: PermissionMatch = (isCommand && isUnchained) ? 'prefix' : 'exact';
-	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId, context.sessionId, match);
+	const rule = ruleForChoice(choice, { kind: '', action }, new Date().toISOString(), context.turnId);
 	if (!rule) {
 		return;
 	}
@@ -2842,20 +2815,6 @@ function rememberPermissionChoice(id: string, choice: PromptChoice): void {
 	}
 }
 
-/**
- * Maps an ACP `session/request_permission` payload onto the engine's
- * `ResourceToCheck`. The actual wire shape (see `acpClient.ts`) carries the
- * target in `toolCall.title` and the operation kind in `toolCall.kind`, so
- * that is the single source of truth here -- kind is not re-inferred from
- * path-vs-command heuristics. Absent kind falls back to `other`.
- */
-function extractResource(request: RequestPermissionRequest): ResourceToCheck {
-	const toolCall = request.toolCall;
-	const target = toolCall.title ?? '';
-	const kind = toolCall.kind ?? '';
-	return { kind: kind.length > 0 ? kind : 'other', target };
-}
-
 async function askPermission(
 	request: RequestPermissionRequest,
 	diffContentProvider: DiffContentProvider,
@@ -2864,7 +2823,6 @@ async function askPermission(
 	cwd: string,
 	onReject: (request: RequestPermissionRequest, toolCallId: string, files: string[]) => void,
 	turnId: string,
-	sessionId: string,
 ): Promise<RequestPermissionOutcome> {
 	const action = request.toolCall.title ?? 'run this action';
 	const allow = request.options.find(option => option.kind === 'allow_once') ?? request.options[0];
@@ -2879,26 +2837,15 @@ async function askPermission(
 		await showDiff(diff, diffContentProvider, cwd);
 	}
 
-	// Phase 3: evaluate the saved rules before deciding whether to prompt.
-	// `extractResource` maps the actual ACP request shape onto the engine's
-	// `ResourceToCheck`; `sessionId`/`turnId` scope the turn/session grants.
-	const resource = extractResource(request);
-	const decision = evaluatePermission(resource, loadPermissionStore(cwd).list(), { turnId, sessionId });
-
-	if (decision === 'deny' && reject) {
-		// Automatic reject: same outcome as the user clicking Reject, so the
-		// reject-feedback window still fires through `onReject` below.
-		onReject(request, request.toolCall.toolCallId ?? 'denied', affectedFiles);
-		vscode.window.setStatusBarMessage(`Permission denied by rule: ${resource.target}`, 3000);
-		return { outcome: 'selected', optionId: reject.optionId };
-	}
-
-	if (decision === 'allow' && allow) {
-		vscode.window.setStatusBarMessage(`Allowed by saved rule: ${resource.target}`, 3000);
+	// Incremental permissions: if the user already granted (or refused) this
+	// exact action, answer from the stored rule instead of prompting again.
+	const remembered = loadPermissionStore(cwd).decide({ kind: '', action });
+	if (remembered === 'allow' && allow) {
 		return { outcome: 'selected', optionId: allow.optionId };
 	}
-
-	// decision === 'ask': fall through to the five-link prompt unchanged.
+	if (remembered === 'deny' && reject) {
+		return { outcome: 'selected', optionId: reject.optionId };
+	}
 
 	const { id, wait } = permissionGate.create();
 	if (diff?.type === 'diff' && hunks) {
@@ -2930,7 +2877,7 @@ async function askPermission(
 	} else {
 		stream.markdown(permissionDecisionMarkdown(action, allowLabel, rejectLabel, id, hunks, pending.kind ?? ''));
 	}
-	pendingPermissionContext.set(id, { request, toolCallId, affectedFiles, cwd, turnId, sessionId });
+	pendingPermissionContext.set(id, { request, toolCallId, affectedFiles, cwd, turnId });
 	const answer = await wait;
 	pendingReviews.delete(id);
 	// The user answered (Allow/Reject/Review). Remove the prompt from chat:
@@ -2971,9 +2918,18 @@ function permissionDecisionMarkdown(
 ): vscode.MarkdownString {
 	const line = new vscode.MarkdownString(undefined, true);
 	line.isTrusted = { enabledCommands: [PERMISSION_COMMAND, REVIEW_COMMAND, PERMISSION_ALWAYS_COMMAND] };
-	line.appendMarkdown(renderPermissionCard({ id, allowLabel, rejectLabel, kind, action }));
+	line.appendMarkdown('$(warning) **covexcode needs permission**\n\ncovexcode wants to ');
+	line.appendText(action);
+	line.appendMarkdown('.\n\n');
+	const links = permissionPromptLinks({ id, allowLabel, rejectLabel, kind, action });
+	links.forEach((link, index) => {
+		if (index > 0) {
+			line.appendMarkdown('&nbsp;&nbsp;');
+		}
+		line.appendMarkdown(`[${escapeMarkdownLinkLabel(link.label)}](${link.uri})`);
+	});
+	line.appendMarkdown('\n\n');
 	if (hunks) {
-		line.appendMarkdown('\n');
 		line.appendMarkdown(renderHunksMarkdown(hunks));
 		line.appendMarkdown('\n');
 	}

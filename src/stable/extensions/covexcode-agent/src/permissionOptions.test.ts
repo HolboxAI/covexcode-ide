@@ -61,16 +61,12 @@ test('"always allow" records an allow rule, "always deny" a deny rule', () => {
 	assert.equal(denied.decision, 'deny');
 });
 
-test('recorded rules match exactly by default when match is omitted', () => {
+test('recorded rules always match exactly, never by prefix', () => {
+	// A prefix rule inferred from one approval would widen to every command
+	// that merely starts with the same text.
 	for (const choice of ['allow-always', 'reject-always'] as const) {
 		assert.equal(ruleForChoice(choice, query, 'now')?.match, 'exact');
 	}
-});
-
-test('ruleForChoice accepts an explicit match parameter such as prefix', () => {
-	const rule = ruleForChoice('allow-always', query, 'now', undefined, undefined, 'prefix');
-	assert.ok(rule);
-	assert.equal(rule.match, 'prefix');
 });
 
 test('always-command URI carries the id and scoped choice', () => {

@@ -143,11 +143,6 @@
         "category": "covexcode"
       },
       {
-        "command": "covexcode.managePermissions",
-        "title": "Covexcode: Manage Permissions",
-        "category": "covexcode"
-      },
-      {
         "command": "covexcode.chat.copyAll",
         "title": "Copy Conversation",
         "category": "covexcode",
@@ -155,12 +150,6 @@
       }
     ],
     "menus": {
-      "commandPalette": [
-        {
-          "command": "covexcode.managePermissions",
-          "when": "true"
-        }
-      ],
       "view/title": [
         {
           "command": "covexcode.chat.copyAll",
