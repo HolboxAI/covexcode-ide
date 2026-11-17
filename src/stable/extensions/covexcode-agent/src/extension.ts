@@ -36,8 +36,9 @@ import {
 	ToolCallStatus,
 	multiAgentCapabilities,
 	type MultiAgentCapabilities,
+	type TeammateView,
 } from './acpClient';
-import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammatesMarkdown } from './agentPanels';
+import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammateActions, teammatesMarkdown } from './agentPanels';
 import { AgentActivityTracker, type AgentActivityEvent } from './agentActivity';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
@@ -150,6 +151,7 @@ import { showFeedbackWindow, showRejectFeedback } from './feedbackUi';
 const PARTICIPANT_ID = 'covexcode.agent';
 const COVEXCODE_COMMAND = 'covexcode';
 const SHOW_AGENTS_COMMAND = 'covexcode.showAgents';
+const MANAGE_TEAMMATES_COMMAND = 'covexcode.manageTeammates';
 const SECRET_API_KEY = 'covexcode.apiKey';
 const DIFF_SCHEME = 'covexcode-diff';
 const SIGN_IN_WITH_COVEXCODE = 'Sign in with covexcode.com (browser)…';
@@ -462,6 +464,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		agentsOutput,
 		agentsStatus,
 		vscode.commands.registerCommand(SHOW_AGENTS_COMMAND, () => agentsOutput.show(true)),
+		vscode.commands.registerCommand(MANAGE_TEAMMATES_COMMAND, () => {
+			void manageTeammates();
+		}),
 	);
 	const refreshAgentBadge = (): void => {
 		const running = agentActivity.runningCount();
@@ -814,6 +819,82 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessionUsage.reset();
 		updateUsageIndicator();
 		pendingHistoryReplay = true;
+	}
+
+	/** The palette surface for background jobs: pick one, then act on it. */
+	async function manageTeammates(): Promise<void> {
+		const workspace = currentWorkspace();
+		const model = vscode.workspace.getConfiguration('covexcode').get<string>('model', '');
+		try {
+			await ensureReady(workspace, model);
+		} catch (error) {
+			void vscode.window.showErrorMessage(`covexcode: ${describeError(error)}`);
+			return;
+		}
+		const activeClient = client;
+		if (!activeClient || !agentMultiAgent.teammates) {
+			void vscode.window.showInformationMessage(
+				'This covexcode agent build predates the teammate registry. Update the agent and try again.',
+			);
+			return;
+		}
+		let jobs: TeammateView[];
+		try {
+			jobs = await activeClient.listTeammates(workspace.cwd);
+		} catch (error) {
+			void vscode.window.showErrorMessage(`Could not read teammates: ${describeError(error)}`);
+			return;
+		}
+		if (jobs.length === 0) {
+			void vscode.window.showInformationMessage('No teammate jobs recorded for this workspace yet.');
+			return;
+		}
+		const picked = await vscode.window.showQuickPick(
+			jobs.map(job => ({
+				label: `${job.interrupted ? '$(warning)' : job.running ? '$(loading~spin)' : '$(check)'} ${job.name}`,
+				description: `${job.interrupted ? 'interrupted' : job.running ? 'running' : 'finished'} · ${job.elapsed_secs}s`,
+				detail: job.task,
+				job,
+			})),
+			{ title: 'covexcode teammates', matchOnDescription: true, matchOnDetail: true },
+		);
+		if (!picked) {
+			return;
+		}
+		const actions = teammateActions(picked.job);
+		if (actions.length === 0) {
+			void vscode.window.showInformationMessage('No report or action is available for this job.');
+			return;
+		}
+		const chosen = await vscode.window.showQuickPick(
+			actions.map(action => ({ label: action.label, action: action.action })),
+			{ title: picked.job.name },
+		);
+		if (!chosen) {
+			return;
+		}
+		try {
+			switch (chosen.action) {
+				case 'report': {
+					const report = await activeClient.teammateReport(workspace.cwd, picked.job.id);
+					const document = await vscode.workspace.openTextDocument({ content: report, language: 'markdown' });
+					await vscode.window.showTextDocument(document, { preview: true });
+					break;
+				}
+				case 'stop':
+					void vscode.window.showInformationMessage(
+						await activeClient.stopTeammate(workspace.cwd, picked.job.id),
+					);
+					break;
+				case 'retry': {
+					const started = await activeClient.retryTeammate(workspace.cwd, picked.job.id);
+					void vscode.window.showInformationMessage(`Started ${started.name} (${started.id}).`);
+					break;
+				}
+			}
+		} catch (error) {
+			void vscode.window.showErrorMessage(`covexcode: ${describeError(error)}`);
+		}
 	}
 
 	// The directory is baked into the child's environment at spawn, so a

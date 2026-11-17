@@ -4,7 +4,27 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammatesMarkdown } from './agentPanels';
+import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammateActions, teammatesMarkdown } from './agentPanels';
+
+test('teammate actions match the job state', () => {
+	const base = { id: 't', name: 'n', task: 'x', elapsed_secs: 1, pid: 1, remote: false };
+	assert.deepEqual(
+		teammateActions({ ...base, running: true, has_report: false, interrupted: false }).map(a => a.action),
+		['stop'],
+	);
+	assert.deepEqual(
+		teammateActions({ ...base, running: true, has_report: true, interrupted: false }).map(a => a.action),
+		['report', 'stop'],
+	);
+	assert.deepEqual(
+		teammateActions({ ...base, running: false, has_report: true, interrupted: true }).map(a => a.action),
+		['report', 'retry'],
+	);
+	assert.deepEqual(
+		teammateActions({ ...base, running: false, has_report: false, interrupted: false }).map(a => a.action),
+		['retry'],
+	);
+});
 
 test('teammates readout distinguishes running, interrupted and ready reports', () => {
 	const markdown = teammatesMarkdown([

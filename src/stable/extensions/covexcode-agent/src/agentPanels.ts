@@ -4,6 +4,27 @@
 
 import type { AgentDefinitionView, MailboxMessage, TaskView, TeammateView } from './acpClient';
 
+export type TeammateAction = 'report' | 'stop' | 'retry';
+
+/**
+ * What the manage quick-pick may offer for one job. A running job can be
+ * stopped and, once a report exists, read; an interrupted or finished job can
+ * be retried instead. A job with nothing to show says so by returning an
+ * empty list rather than presenting a dead menu.
+ */
+export function teammateActions(job: TeammateView): { action: TeammateAction; label: string }[] {
+	const actions: { action: TeammateAction; label: string }[] = [];
+	if (job.has_report) {
+		actions.push({ action: 'report', label: 'Show report' });
+	}
+	if (job.running) {
+		actions.push({ action: 'stop', label: 'Stop' });
+	} else {
+		actions.push({ action: 'retry', label: 'Retry' });
+	}
+	return actions;
+}
+
 /** Markdown for `/teammates`, shared by the chat command and tests. */
 export function teammatesMarkdown(jobs: readonly TeammateView[]): string {
 	if (jobs.length === 0) {
