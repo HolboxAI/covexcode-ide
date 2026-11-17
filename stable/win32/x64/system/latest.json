@@ -1,9 +1,9 @@
 {
-  "url": "https://github.com/HolboxAI/covexcode-ide/releases/download/1.126.3.467/CovexcodeSetup-x64-1.126.3.467.exe",
-  "name": "1.126.3.467",
-  "version": "8b3ebe3cf56734396259a4f8560850ed3a279feb",
-  "productVersion": "1.126.3.467",
-  "hash": "d2db826d003ca1d75c079eb38812e780f4111181",
-  "timestamp": "1794911806362",
-  "sha256hash": "1fb4fc675149f5bdd6af9e06ae3475d0f6b125531afd9311e1e78dc31f6c7764"
+  "url": "https://github.com/HolboxAI/covexcode-ide/releases/download/1.126.3.472/CovexcodeSetup-x64-1.126.3.472.exe",
+  "name": "1.126.3.472",
+  "version": "fbd1e56bd74a327a21d7e8057de68a3527e30148",
+  "productVersion": "1.126.3.472",
+  "hash": "c06c673931a1132a1a3019047d33585688488573",
+  "timestamp": "1794930779226",
+  "sha256hash": "e27172daa2975c14720a397093307075f5ac2d69eac5d831ce8066a937d09757"
 }
