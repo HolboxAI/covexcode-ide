@@ -1,7 +1,8 @@
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRenderer.ts b/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRenderer.ts
+index 7233fa2d..b996fa32 100644
 --- a/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRenderer.ts
 +++ b/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRenderer.ts
-@@ -148,6 +148,48 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
+@@ -147,6 +147,48 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
  				element.title = '';
  				store.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), element, title));
  			}
@@ -53,12 +54,11 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/chatContentMarkdownRen
 diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 --- a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
 +++ b/src/vs/workbench/contrib/chat/browser/widget/media/chat.css
-@@ -4374,4 +4374,186 @@
+@@ -4374,4 +4374,162 @@
  /* Voice mode: green disconnect button */
  .chat-input-container .chat-input-toolbars .codicon-debug-disconnect {
  	color: var(--vscode-charts-green, #3fb950) !important;
  }
-+
 +/*
 + * covexcode-ide: Antigravity-style floating permission approval card.
 + * Floats as an overlay above the chat input box, completely separate from the message stream.
@@ -90,21 +90,23 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/v
 +	}
 +}
 +
-+/* Antigravity floating card */
++/* Permission card container */
 +.covexcode-permission-card-floating,
-+.interactive-session .rendered-markdown:has(a[data-href*="permission.respond"]),
-+.interactive-session .rendered-markdown:has(a[href*="permission.respond"]),
-+.rendered-markdown:has(a[data-href*="permission.respond"]),
-+.rendered-markdown:has(a[href*="permission.respond"]) {
-+	background-color: var(--vscode-editorWidget-background, rgba(30, 30, 30, 0.95)) !important;
-+	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12)) !important;
++.interactive-session .rendered-markdown:has(
++	a[href*="covexcode.permission.respond"],
++	a[data-href*="covexcode.permission.respond"],
++	a[href*="covexcode.permissionAlways.respond"],
++	a[data-href*="covexcode.permissionAlways.respond"],
++	a[href*="covexcode.permission.respondAlways"],
++	a[data-href*="covexcode.permission.respondAlways"],
++	a[href*="permission.respond"],
++	a[data-href*="permission.respond"]
++) {
++	background: var(--vscode-editor-background) !important;
++	border: 1px solid var(--vscode-panel-border) !important;
 +	border-radius: 8px !important;
-+	padding: 14px 16px !important;
-+	margin: 6px 0 !important;
-+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
-+	color: var(--vscode-foreground) !important;
-+	font-family: var(--vscode-font-family) !important;
-+	user-select: none !important;
++	padding: 12px 16px !important;
++	margin: 8px 0 !important;
 +	box-sizing: border-box !important;
 +}
 +
@@ -121,37 +123,61 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/v
 +	gap: 6px !important;
 +}
 +
-+/* Code block in permission card */
++/* Code block inside the card */
 +.covexcode-permission-card-floating pre,
 +.covexcode-permission-card-floating code,
-+.rendered-markdown:has(a[data-href*="permission.respond"]) pre,
-+.rendered-markdown:has(a[href*="permission.respond"]) pre {
-+	font-family: var(--vscode-editor-font-family, monospace) !important;
-+	font-size: var(--vscode-editor-font-size, 12px) !important;
-+	background-color: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.25)) !important;
-+	border-radius: 6px !important;
++.interactive-session .rendered-markdown:has(
++	a[href*="covexcode.permission.respond"],
++	a[data-href*="covexcode.permission.respond"],
++	a[href*="permission.respond"],
++	a[data-href*="permission.respond"]
++) pre,
++.interactive-session .rendered-markdown:has(
++	a[href*="covexcode.permission.respond"],
++	a[data-href*="covexcode.permission.respond"],
++	a[href*="permission.respond"],
++	a[data-href*="permission.respond"]
++) code {
++	background: var(--vscode-textCodeBlock-background) !important;
++	border-radius: 4px !important;
 +	padding: 8px 12px !important;
 +	margin: 8px 0 !important;
++	font-family: var(--vscode-editor-font-family, monospace) !important;
++	font-size: var(--vscode-editor-font-size, 12px) !important;
 +	overflow-x: auto !important;
 +	white-space: pre !important;
 +}
 +
-+/* Option row container */
-+.covexcode-permission-card-floating p:has(a[data-href*="permission.respond"]),
-+.covexcode-permission-card-floating p:has(a[href*="permission.respond"]),
-+.interactive-session p:has(a[data-href*="permission.respond"]),
-+.interactive-session p:has(a[href*="permission.respond"]),
-+p:has(a[data-href*="permission.respond"]),
-+p:has(a[href*="permission.respond"]) {
-+	display: flex !important;
-+	flex-direction: column !important;
-+	gap: 4px !important;
-+	margin-top: 8px !important;
-+	margin-bottom: 2px !important;
-+	user-select: none !important;
++/* Numbered option rows */
++.covexcode-permission-card-floating p,
++.interactive-session .rendered-markdown:has(
++	a[href*="covexcode.permission.respond"],
++	a[data-href*="covexcode.permission.respond"],
++	a[href*="covexcode.permission.respondAlways"],
++	a[data-href*="covexcode.permission.respondAlways"],
++	a[href*="permission.respond"],
++	a[data-href*="permission.respond"]
++) p {
++	padding: 6px 8px !important;
++	border-radius: 4px !important;
++	margin: 2px 0 !important;
++	transition: background-color 0.12s ease !important;
 +}
 +
-+/* Clickable option rows */
++.covexcode-permission-card-floating p:hover,
++.interactive-session .rendered-markdown:has(
++	a[href*="covexcode.permission.respond"],
++	a[data-href*="covexcode.permission.respond"],
++	a[href*="covexcode.permission.respondAlways"],
++	a[data-href*="covexcode.permission.respondAlways"],
++	a[href*="permission.respond"],
++	a[data-href*="permission.respond"]
++) p:hover {
++	background: var(--vscode-list-hoverBackground) !important;
++	cursor: pointer !important;
++}
++
++/* Option link text */
 +.interactive-session a[data-href*="permission.respond"],
 +.interactive-session a[data-href*="permission.respondAlways"],
 +.interactive-session a[href*="permission.respond"],
@@ -159,53 +185,11 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/v
 +a[data-href*="permission.respond"],
 +a[data-href*="permission.respondAlways"],
 +a[href*="permission.respond"],
-+a[href*="permission.respondAlways"] {
-+	display: inline-flex !important;
-+	align-items: center !important;
-+	gap: 8px !important;
-+	padding: 6px 12px !important;
-+	font-size: 12px !important;
-+	font-weight: 500 !important;
-+	line-height: 20px !important;
-+	letter-spacing: 0.1px !important;
-+	border-radius: 6px !important;
++a[href*="permission.respondAlways"],
++a[href*="covexcode.permission"],
++a[data-href*="covexcode.permission"] {
 +	text-decoration: none !important;
-+	cursor: pointer !important;
-+	user-select: none !important;
-+	box-sizing: border-box !important;
-+	vertical-align: middle !important;
-+	background-color: transparent !important;
-+	border: 1px solid transparent !important;
-+	color: var(--vscode-foreground, #cccccc) !important;
-+	transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease !important;
-+}
-+
-+/* Option row hover state */
-+.interactive-session a[data-href*="permission.respond"]:hover,
-+.interactive-session a[data-href*="permission.respondAlways"]:hover,
-+.interactive-session a[href*="permission.respond"]:hover,
-+.interactive-session a[href*="permission.respondAlways"]:hover,
-+a[data-href*="permission.respond"]:hover,
-+a[data-href*="permission.respondAlways"]:hover,
-+a[href*="permission.respond"]:hover,
-+a[href*="permission.respondAlways"]:hover {
-+	text-decoration: none !important;
-+	background-color: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08)) !important;
-+	border-color: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.14)) !important;
-+	color: var(--vscode-foreground, #ffffff) !important;
-+}
-+
-+/* Option row active state */
-+.interactive-session a[data-href*="permission.respond"]:active,
-+.interactive-session a[data-href*="permission.respondAlways"]:active,
-+.interactive-session a[href*="permission.respond"]:active,
-+.interactive-session a[href*="permission.respondAlways"]:active,
-+a[data-href*="permission.respond"]:active,
-+a[data-href*="permission.respondAlways"]:active,
-+a[href*="permission.respond"]:active,
-+a[href*="permission.respondAlways"]:active {
-+	background-color: var(--vscode-toolbar-activeBackground, rgba(255, 255, 255, 0.16)) !important;
-+	border-color: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.2)) !important;
++	color: var(--vscode-foreground) !important;
 +}
 +
 +.interactive-session a[data-href*="permission"] .codicon,
@@ -216,13 +200,6 @@ diff --git a/src/vs/workbench/contrib/chat/browser/widget/media/chat.css b/src/v
 +	line-height: 1 !important;
 +	pointer-events: none !important;
 +	opacity: 0.85 !important;
-+}
-+
-+.interactive-session a[data-href*="permission"]:hover .codicon,
-+.interactive-session a[href*="permission"]:hover .codicon,
-+a[data-href*="permission"]:hover .codicon,
-+a[href*="permission"]:hover .codicon {
-+	opacity: 1 !important;
 +}
 +
 +/* Review hunks button */
