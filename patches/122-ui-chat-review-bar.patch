@@ -958,7 +958,7 @@ index 101a8f8..843d043 100644
 +.interactive-item-container .value .rendered-markdown .code-scroll-stream,
 +.interactive-item-container .value .rendered-markdown details > div[data-code],
 +.interactive-item-container .value .rendered-markdown details .interactive-result-code-block {
-+	background-color: var(--vscode-editorWidget-background, #211F2C) !important;
++	background-color: var(--vscode-editorWidget-background, #181818) !important;
 +	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08)) !important;
 +	border-radius: 9px !important;
 +	overflow: hidden !important;
@@ -995,7 +995,7 @@ index 101a8f8..843d043 100644
 +	font-size: 11px;
 +	font-weight: 500;
 +	color: var(--vscode-descriptionForeground, #9ca3af);
-+	background: var(--vscode-button-secondaryBackground, #2B2737);
++	background: var(--vscode-button-secondaryBackground, #2b2b2b);
 +	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
 +	border-radius: 6px;
 +	padding: 3px 10px;
@@ -1011,8 +1011,8 @@ index 101a8f8..843d043 100644
 +}
 +
 +.interactive-item-container .value .rendered-markdown summary:hover {
-+	background: var(--vscode-button-secondaryHoverBackground, #373244);
-+	border-color: var(--vscode-focusBorder, #A78BFA);
++	background: var(--vscode-button-secondaryHoverBackground, #383838);
++	border-color: var(--vscode-focusBorder, #0078D4);
 +	color: #ffffff;
 +}
 +
@@ -1042,7 +1042,7 @@ index 101a8f8..843d043 100644
 +.interactive-item-container .value .rendered-markdown .interactive-result-code-block .interactive-result-editor .monaco-editor,
 +.interactive-item-container .value .rendered-markdown .interactive-result-code-block .interactive-result-editor .monaco-editor .margin,
 +.interactive-item-container .value .rendered-markdown .interactive-result-code-block .interactive-result-editor .monaco-editor .monaco-editor-background {
-+	background-color: var(--vscode-editorWidget-background, #211F2C) !important;
++	background-color: var(--vscode-editorWidget-background, #181818) !important;
 +}
 +
 +/* Diff line styling: Subtle dark green for additions, subtle dark red for removals matching Cursor */
