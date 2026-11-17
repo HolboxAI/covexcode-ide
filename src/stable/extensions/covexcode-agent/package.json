@@ -74,6 +74,18 @@
             "description": "Show running and recent background agents."
           },
           {
+            "name": "teammates",
+            "description": "Show recorded background teammate jobs."
+          },
+          {
+            "name": "tasks",
+            "description": "Show the shared task DAG."
+          },
+          {
+            "name": "inbox",
+            "description": "Show unread mailbox messages (default owner: lead)."
+          },
+          {
             "name": "help",
             "description": "List every slash command."
           },
