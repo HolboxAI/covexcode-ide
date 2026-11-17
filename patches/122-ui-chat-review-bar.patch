@@ -953,16 +953,16 @@ index 101a8f8..843d043 100644
 + * Cursor-style Clean Diff Card, Header & Code Block Aesthetics
 + * ------------------------------------------------------------------------------------------ */
 +
-+/* Outer diff block styling */
++/* Outer diff block styling - matching Antigravity & Covexcode palette */
 +.interactive-item-container .value .rendered-markdown div[data-code] .interactive-result-code-block,
 +.interactive-item-container .value .rendered-markdown .code-scroll-stream,
 +.interactive-item-container .value .rendered-markdown details > div[data-code],
 +.interactive-item-container .value .rendered-markdown details .interactive-result-code-block {
-+	background-color: #171717 !important;
-+	border: 1px solid rgba(255, 255, 255, 0.08) !important;
++	background-color: var(--vscode-editorWidget-background, #211F2C) !important;
++	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08)) !important;
 +	border-radius: 9px !important;
 +	overflow: hidden !important;
-+	box-shadow: none !important;
++	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
 +	margin-top: 4px;
 +	margin-bottom: 4px;
 +}
@@ -994,9 +994,9 @@ index 101a8f8..843d043 100644
 +	user-select: none;
 +	font-size: 11px;
 +	font-weight: 500;
-+	color: #9ca3af;
-+	background: #171717;
-+	border: 1px solid rgba(255, 255, 255, 0.1);
++	color: var(--vscode-descriptionForeground, #9ca3af);
++	background: var(--vscode-button-secondaryBackground, #2B2737);
++	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
 +	border-radius: 6px;
 +	padding: 3px 10px;
 +	margin-top: 6px;
@@ -1011,8 +1011,8 @@ index 101a8f8..843d043 100644
 +}
 +
 +.interactive-item-container .value .rendered-markdown summary:hover {
-+	background: #202020;
-+	border-color: rgba(255, 255, 255, 0.2);
++	background: var(--vscode-button-secondaryHoverBackground, #373244);
++	border-color: var(--vscode-focusBorder, #A78BFA);
 +	color: #ffffff;
 +}
 +
@@ -1038,11 +1038,11 @@ index 101a8f8..843d043 100644
 +	display: none !important;
 +}
 +
-+/* Monaco Editor inside Diff Card */
++/* Monaco Editor inside Diff Card - matching Antigravity palette */
 +.interactive-item-container .value .rendered-markdown .interactive-result-code-block .interactive-result-editor .monaco-editor,
 +.interactive-item-container .value .rendered-markdown .interactive-result-code-block .interactive-result-editor .monaco-editor .margin,
 +.interactive-item-container .value .rendered-markdown .interactive-result-code-block .interactive-result-editor .monaco-editor .monaco-editor-background {
-+	background-color: #171717 !important;
++	background-color: var(--vscode-editorWidget-background, #211F2C) !important;
 +}
 +
 +/* Diff line styling: Subtle dark green for additions, subtle dark red for removals matching Cursor */
