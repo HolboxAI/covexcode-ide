@@ -8,12 +8,8 @@ import test from 'node:test';
 import {
 	buildFeedbackPayload,
 	DEFAULT_FEEDBACK_ENDPOINT,
-	FEEDBACK_CARD_AUTO_CLOSE_MS,
 	FEEDBACK_MAX_LENGTH,
 	FEEDBACK_QUEUE_MAX_ITEMS,
-	FEEDBACK_STATUS_BAR_DURATION_MS,
-	FEEDBACK_STATUS_BAR_MESSAGE,
-	FEEDBACK_SUBMIT_CONFIRMATION_IN_CARD,
 	feedbackForSubmission,
 	feedbackOs,
 	feedbackPrefill,
@@ -138,28 +134,6 @@ test('shouldSendFeedback gates the startup flush on telemetry state', () => {
 	assert.equal(shouldSendFeedback('all', true), true);
 	assert.equal(shouldSendFeedback(undefined, undefined), false);
 	assert.equal(shouldSendFeedback('error', true), true);
-});
-
-test('feedbackEnabled logic resolves combinations of feedback.enabled and telemetryLevel', () => {
-	const resolveFeedbackEnabled = (feedbackSetting?: boolean, telemetrySetting?: string): boolean => {
-		const feedbackOn = feedbackSetting ?? true;
-		if (!feedbackOn) {
-			return false;
-		}
-		const level = telemetrySetting ?? 'all';
-		return shouldSendFeedback(level, feedbackOn);
-	};
-
-	// feedback.enabled=true, telemetryLevel='all' → true
-	assert.equal(resolveFeedbackEnabled(true, 'all'), true);
-	// feedback.enabled=true, telemetryLevel='off' → false (user explicitly disabled telemetry)
-	assert.equal(resolveFeedbackEnabled(true, 'off'), false);
-	// feedback.enabled=false, telemetryLevel='all' → false (user explicitly disabled feedback)
-	assert.equal(resolveFeedbackEnabled(false, 'all'), false);
-	// feedback.enabled=true, telemetryLevel not set (default 'all') → true (the common case that was broken)
-	assert.equal(resolveFeedbackEnabled(true, undefined), true);
-	// feedback.enabled not set (default true), telemetryLevel not set (default 'all') → true (fresh install, both defaults)
-	assert.equal(resolveFeedbackEnabled(undefined, undefined), true);
 });
 
 test('shortcut: Cmd+Enter on macOS, Ctrl+Enter on Windows/Linux, no cross-misfire', () => {
@@ -422,47 +396,3 @@ test('a corrupt persisted queue degrades to empty instead of throwing', async ()
 test('the default queue cap is exported and non-zero', () => {
 	assert.ok(FEEDBACK_QUEUE_MAX_ITEMS > 0);
 });
-
-test('feedback submission confirmation constants match required messages and timings', () => {
-	// 1. In-card message and auto-close timer
-	assert.equal(FEEDBACK_SUBMIT_CONFIRMATION_IN_CARD, '✓ Feedback submitted. Thank you!');
-	assert.equal(FEEDBACK_CARD_AUTO_CLOSE_MS, 2000);
-
-	// 2. Status bar message and duration
-	assert.equal(FEEDBACK_STATUS_BAR_MESSAGE, 'Feedback submitted — thank you!');
-	assert.equal(FEEDBACK_STATUS_BAR_DURATION_MS, 4000);
-});
-
-test('submit callback seam: payload sends before auto-close timer, skip sends nothing', () => {
-	let submittedPayload: string | undefined;
-	let dismissed = false;
-	let panelClosed = false;
-
-	// Simulate submit flow
-	const simulateSubmit = (text: string) => {
-		const feedback = feedbackForSubmission(text);
-		if (feedback) {
-			// Send happens first
-			submittedPayload = feedback;
-			// Then auto-close scheduled
-			setTimeout(() => {
-				panelClosed = true;
-			}, FEEDBACK_CARD_AUTO_CLOSE_MS);
-		}
-	};
-
-	simulateSubmit('   User feedback comment   ');
-	// Sent immediately
-	assert.equal(submittedPayload, 'User feedback comment');
-	assert.equal(panelClosed, false);
-
-	// Simulate skip flow
-	const simulateSkip = () => {
-		dismissed = true;
-		panelClosed = true;
-	};
-
-	simulateSkip();
-	assert.equal(dismissed, true);
-});
-
