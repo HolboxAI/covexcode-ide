@@ -29,6 +29,14 @@ export interface AgentCapabilities {
 	session?: Record<string, unknown>;
 	mcp?: boolean;
 	promptCapabilities?: { image?: boolean };
+	/** Custom (not ACP v1) covexcode surface -- absent on older agents. */
+	covexcode?: {
+		subagents?: boolean;
+		teammates?: boolean;
+		tasks?: boolean;
+		mailbox?: boolean;
+		mergeAgent?: boolean;
+	};
 }
 
 export interface InitializeResult {
@@ -95,6 +103,31 @@ export function agentSupportsMcp(result: InitializeResult | undefined): boolean 
  */
 export function agentSupportsImages(result: InitializeResult | undefined): boolean {
 	return result?.agentCapabilities?.promptCapabilities?.image === true;
+}
+
+export interface MultiAgentCapabilities {
+	subagents: boolean;
+	teammates: boolean;
+	tasks: boolean;
+	mailbox: boolean;
+	mergeAgent: boolean;
+}
+
+/**
+ * What the agent advertised under `agentCapabilities.covexcode`. Every flag
+ * fails closed: an older agent (1.12.0 and earlier) has no such object, and
+ * calling one of the registry methods there would just return "method not
+ * found". The panels gate on these before querying.
+ */
+export function multiAgentCapabilities(result: InitializeResult | undefined): MultiAgentCapabilities {
+	const capabilities = result?.agentCapabilities?.covexcode;
+	return {
+		subagents: capabilities?.subagents === true,
+		teammates: capabilities?.teammates === true,
+		tasks: capabilities?.tasks === true,
+		mailbox: capabilities?.mailbox === true,
+		mergeAgent: capabilities?.mergeAgent === true,
+	};
 }
 
 // Wire types mirror covexcode's own `src/protocol.rs` exactly -- see that
@@ -309,6 +342,50 @@ export interface ChangeEntry {
 export interface ListChangesResponse {
 	changes: ChangeEntry[];
 	shellWarning?: string;
+}
+
+/** One background teammate from `teammates/list`, matching teammates::View. */
+export interface TeammateView {
+	id: string;
+	name: string;
+	task: string;
+	running: boolean;
+	has_report: boolean;
+	elapsed_secs: number;
+	pid: number;
+	remote: boolean;
+	interrupted: boolean;
+}
+
+/** One task from `tasks/list`, matching tasks::Task. */
+export interface TaskView {
+	id: string;
+	title: string;
+	description: string;
+	depends_on: string[];
+	paths: string[];
+	status: 'pending' | 'in_progress' | 'done';
+	owner?: string | null;
+	note?: string | null;
+}
+
+/** One mailbox message from `mailbox/inbox`, matching mailbox::Message. */
+export interface MailboxMessage {
+	id: number;
+	from: string;
+	to: string;
+	body: string;
+	at: string;
+	read_by: string[];
+}
+
+/** One agent picker entry from `session/agents`. */
+export interface AgentDefinitionView {
+	name: string;
+	description: string;
+	prompt: string;
+	writes: boolean;
+	verify?: string | null;
 }
 
 interface PendingRequest {
@@ -602,6 +679,46 @@ export class AcpClient extends EventEmitter {
 	 */
 	async listChanges(sessionId: string): Promise<ListChangesResponse> {
 		return (await this.request('session/list_changes', { sessionId })) as ListChangesResponse;
+	}
+
+	// -- Custom (not ACP v1) multi-agent registry reads. Every method below
+	// fails with "method not found" on an agent that did not advertise the
+	// corresponding flag in `initialize`; callers gate on
+	// `multiAgentCapabilities()` first. All are local reads of the same
+	// locked stores the tools use, so none spends a model turn.
+
+	async listTeammates(cwd: string): Promise<TeammateView[]> {
+		const result = (await this.request('teammates/list', { cwd })) as { jobs?: TeammateView[] };
+		return result.jobs ?? [];
+	}
+
+	async teammateReport(cwd: string, id: string): Promise<string> {
+		const result = (await this.request('teammates/report', { cwd, id })) as { report: string };
+		return result.report;
+	}
+
+	async stopTeammate(cwd: string, id: string): Promise<string> {
+		const result = (await this.request('teammates/stop', { cwd, id })) as { summary: string };
+		return result.summary;
+	}
+
+	async retryTeammate(cwd: string, id: string): Promise<{ id: string; name: string }> {
+		return (await this.request('teammates/retry', { cwd, id })) as { id: string; name: string };
+	}
+
+	async listTasks(cwd: string): Promise<TaskView[]> {
+		const result = (await this.request('tasks/list', { cwd })) as { tasks?: TaskView[] };
+		return result.tasks ?? [];
+	}
+
+	async inbox(cwd: string, owner: string): Promise<MailboxMessage[]> {
+		const result = (await this.request('mailbox/inbox', { cwd, owner })) as { messages?: MailboxMessage[] };
+		return result.messages ?? [];
+	}
+
+	async listAgents(cwd: string): Promise<AgentDefinitionView[]> {
+		const result = (await this.request('session/agents', { cwd })) as { agents?: AgentDefinitionView[] };
+		return result.agents ?? [];
 	}
 
 	dispose(): void {
