@@ -34,7 +34,10 @@ import {
 	SessionUpdate,
 	ToolCallContent,
 	ToolCallStatus,
+	multiAgentCapabilities,
+	type MultiAgentCapabilities,
 } from './acpClient';
+import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammatesMarkdown } from './agentPanels';
 import { AgentActivityTracker, type AgentActivityEvent } from './agentActivity';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
@@ -428,6 +431,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	// `initialize()`; image references are omitted rather than sent to a
 	// text-only model that would reject or garble them.
 	let agentImagesSupported = false;
+	// The custom multi-agent surface (teammates/tasks/mailbox/agent picker).
+	// Older sidecars advertise none of it; every panel gates on these flags
+	// rather than calling a method that would answer "method not found".
+	let agentMultiAgent: MultiAgentCapabilities = multiAgentCapabilities(undefined);
 	// Running token total for the current ACP session -- the cumulative half
 	// of the end-of-turn usage footer, reset alongside the session in
 	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
@@ -803,6 +810,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessionCwd = undefined;
 		sessionModel = undefined;
 		agentImagesSupported = false;
+		agentMultiAgent = multiAgentCapabilities(undefined);
 		sessionUsage.reset();
 		updateUsageIndicator();
 		pendingHistoryReplay = true;
@@ -969,6 +977,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				acp.on('exit', () => discardSession());
 				const initResult = await acp.initialize();
 				agentImagesSupported = agentSupportsImages(initResult);
+				agentMultiAgent = multiAgentCapabilities(initResult);
 				const mcpLoaded = loadMcpConfig({
 					readFile: (file) => {
 						try {
@@ -1131,10 +1140,6 @@ export function activate(context: vscode.ExtensionContext): void {
 			stream.markdown(await doctorReadoutMarkdown());
 			return;
 		}
-		if (request.command === 'agents') {
-			stream.markdown(agentActivity.markdown());
-			return;
-		}
 		if (request.command === 'mode') {
 			const next = await togglePermissionMode();
 			stream.markdown(permissionModeMarkdown(next));
@@ -1223,6 +1228,61 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		const activeClient = client;
 		const activeSessionId = sessionId;
+
+		// Registry-backed panels. Handled after `ensureReady` so a first
+		// `/teammates` or `/tasks` can establish the session; each gates on
+		// the capability the agent advertised, so an older sidecar degrades
+		// to the observed-only view instead of showing "method not found".
+		if (request.command === 'agents') {
+			const running = agentActivity.list().filter(agent => agent.state === 'running');
+			if (!agentMultiAgent.subagents) {
+				stream.markdown(agentActivity.markdown());
+				return;
+			}
+			try {
+				stream.markdown(agentsMarkdown(await activeClient.listAgents(workspace.cwd), running));
+			} catch (error) {
+				stream.markdown(`Could not read the agent definitions: ${describeError(error)}`);
+			}
+			return;
+		}
+		if (request.command === 'teammates') {
+			if (!agentMultiAgent.teammates) {
+				stream.markdown(`${agentActivity.markdown()}\n\n_This agent build predates the persisted teammate registry; showing only teammates observed in this window._`);
+				return;
+			}
+			try {
+				stream.markdown(teammatesMarkdown(await activeClient.listTeammates(workspace.cwd)));
+			} catch (error) {
+				stream.markdown(`Could not read teammates: ${describeError(error)}`);
+			}
+			return;
+		}
+		if (request.command === 'tasks') {
+			if (!agentMultiAgent.tasks) {
+				stream.markdown('This agent build predates the task registry. Update covexcode to use `/tasks`.');
+				return;
+			}
+			try {
+				stream.markdown(tasksMarkdown(await activeClient.listTasks(workspace.cwd)));
+			} catch (error) {
+				stream.markdown(`Could not read tasks: ${describeError(error)}`);
+			}
+			return;
+		}
+		if (request.command === 'inbox') {
+			if (!agentMultiAgent.mailbox) {
+				stream.markdown('This agent build predates the mailbox registry. Update covexcode to use `/inbox`.');
+				return;
+			}
+			const owner = request.prompt.trim().split(/\s+/)[0] || 'lead';
+			try {
+				stream.markdown(inboxMarkdown(owner, await activeClient.inbox(workspace.cwd, owner)));
+			} catch (error) {
+				stream.markdown(`Could not read the inbox: ${describeError(error)}`);
+			}
+			return;
+		}
 		// `tool_call_update`'s own `title` is usually absent (headless.rs
 		// only sets it on the initial `tool_call`) -- without remembering
 		// it here, the completion/failure line renderUpdate shows would
