@@ -164,6 +164,11 @@
         "category": "covexcode"
       },
       {
+        "command": "covexcode.manageTeammates",
+        "title": "covexcode: Manage Background Teammates",
+        "category": "covexcode"
+      },
+      {
         "command": "covexcode.chat.copyAll",
         "title": "Copy Conversation",
         "category": "covexcode",
