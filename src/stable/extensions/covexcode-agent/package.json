@@ -70,6 +70,10 @@
             "description": "Check this install's health."
           },
           {
+            "name": "agents",
+            "description": "Show running and recent background agents."
+          },
+          {
             "name": "help",
             "description": "List every slash command."
           },
@@ -140,6 +144,11 @@
       {
         "command": "covexcode.togglePermissionMode",
         "title": "covexcode: Toggle Permission Mode (Auto / Manual)",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.showAgents",
+        "title": "covexcode: Show Background Agents",
         "category": "covexcode"
       },
       {

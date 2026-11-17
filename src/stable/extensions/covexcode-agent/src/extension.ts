@@ -35,6 +35,7 @@ import {
 	ToolCallContent,
 	ToolCallStatus,
 } from './acpClient';
+import { AgentActivityTracker, type AgentActivityEvent } from './agentActivity';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
 import { agentLaunchCandidates, bundledAgentPath, type AgentCandidate } from './agent/launch';
@@ -145,6 +146,7 @@ import { showFeedbackWindow, showRejectFeedback } from './feedbackUi';
 
 const PARTICIPANT_ID = 'covexcode.agent';
 const COVEXCODE_COMMAND = 'covexcode';
+const SHOW_AGENTS_COMMAND = 'covexcode.showAgents';
 const SECRET_API_KEY = 'covexcode.apiKey';
 const DIFF_SCHEME = 'covexcode-diff';
 const SIGN_IN_WITH_COVEXCODE = 'Sign in with covexcode.com (browser)…';
@@ -441,6 +443,59 @@ export function activate(context: vscode.ExtensionContext): void {
 	// of over-eager behavior the auto-open feature needs to avoid. See
 	// renderUpdate's own doc comment on this whole mechanism.
 	const openedDevServerUrls = new Set<string>();
+	// Background teammates outlive the prompt that started them, so their
+	// updates keep arriving on the session-lifetime channel after the per-turn
+	// listener has been removed. This tracker is the persistent half: it feeds
+	// a status-bar badge, an output channel, and a completion notification.
+	const agentActivity = new AgentActivityTracker();
+	const agentsOutput = vscode.window.createOutputChannel('covexcode agents');
+	const agentsStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 40);
+	agentsStatus.command = SHOW_AGENTS_COMMAND;
+	context.subscriptions.push(
+		agentsOutput,
+		agentsStatus,
+		vscode.commands.registerCommand(SHOW_AGENTS_COMMAND, () => agentsOutput.show(true)),
+	);
+	const refreshAgentBadge = (): void => {
+		const running = agentActivity.runningCount();
+		if (running === 0) {
+			agentsStatus.hide();
+			return;
+		}
+		agentsStatus.text = `$(loading~spin) ${running} agent${running === 1 ? '' : 's'}`;
+		agentsStatus.tooltip = `covexcode: ${running} background agent${running === 1 ? '' : 's'} running`;
+		agentsStatus.show();
+	};
+	const noteAgentEvent = (event: AgentActivityEvent): void => {
+		const agent = event.agent;
+		switch (event.kind) {
+			case 'started':
+				agentsOutput.appendLine(`[started] ${agent.title} (${agent.id})`);
+				break;
+			case 'progress':
+				agentsOutput.appendLine(`[progress] ${agent.title}: ${agent.lastStep ?? ''}`);
+				break;
+			case 'finished': {
+				const line = `[${agent.state}] ${agent.title}${agent.outcome ? ` — ${agent.outcome}` : ''} (${agent.id})`;
+				agentsOutput.appendLine(line);
+				const label = agent.state === 'failed' ? 'Background agent failed' : 'Background agent finished';
+				void vscode.window.showInformationMessage(`${label}: ${agent.title}`);
+				break;
+			}
+		}
+		refreshAgentBadge();
+	};
+	const onAgentUpdate = (notification: SessionNotification): void => {
+		// One process can own one session at a time in this extension; events
+		// for a session that was just replaced must not repopulate the badge.
+		if (notification.sessionId !== sessionId) {
+			return;
+		}
+		const event = agentActivity.apply(notification.update);
+		if (event) {
+			noteAgentEvent(event);
+		}
+	};
 	// Feedback goes to covexcode.com by default; clearing
 	// `covexcode.feedback.endpoint` falls back to a local queue.
 	// `activeTurnId` is only known once the ACP turn completes, so the feedback
@@ -742,6 +797,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		client?.dispose();
 		client = undefined;
 		sessionId = undefined;
+		agentActivity.clear();
+		refreshAgentBadge();
 		ready = undefined;
 		sessionCwd = undefined;
 		sessionModel = undefined;
@@ -935,6 +992,9 @@ export function activate(context: vscode.ExtensionContext): void {
 					cwd,
 					mcpServersForSession(mcpLoaded, agentSupportsMcp(initResult)),
 				);
+				// Persistent, unlike the per-turn listener in requestHandler:
+				// background teammates keep reporting after `prompt()` returns.
+				acp.on('update', onAgentUpdate);
 				sessionCwd = cwd;
 				sessionModel = targetModel;
 			})().catch(error => {
@@ -1069,6 +1129,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		if (request.command === 'doctor') {
 			stream.markdown(await doctorReadoutMarkdown());
+			return;
+		}
+		if (request.command === 'agents') {
+			stream.markdown(agentActivity.markdown());
 			return;
 		}
 		if (request.command === 'mode') {
@@ -2055,9 +2119,16 @@ function pushToolInvocation(
 	kind: string | undefined,
 	status: ToolCallStatus | undefined,
 	stream: vscode.ChatResponseStream,
+	detail?: string,
 ): void {
 	const message = new vscode.MarkdownString(undefined, true);
 	appendTitleSafely(message, title);
+	if (detail) {
+		// The update line is data (a subagent's label and round), not authored
+		// markdown; appendText keeps a command's `$` or a path's `_` literal.
+		message.appendMarkdown('\n\n');
+		message.appendText(detail);
+	}
 
 	const part = new vscode.ChatToolInvocationPart(kind ?? 'covexcode', toolCallId);
 	part.enablePartialUpdate = true;
@@ -2070,7 +2141,14 @@ function pushToolInvocation(
 }
 
 function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
-	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream);
+	// A foreground subagent's `tool_call_update` carries its latest step as
+	// plain text (see headless.rs's run_agent_batch). Showing it under the
+	// parent `agent` row is what makes a multi-round child look alive instead
+	// of a spinner with no progress.
+	const detail = update.status === 'in_progress' && update.content?.type === 'content'
+		? update.content.text
+		: undefined;
+	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream, detail);
 }
 
 /**
