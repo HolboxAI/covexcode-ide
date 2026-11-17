@@ -458,10 +458,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	// a status-bar badge, an output channel, and a completion notification.
 	const agentActivity = new AgentActivityTracker();
 	const agentsOutput = vscode.window.createOutputChannel('covexcode agents');
+	const performanceOutput = vscode.window.createOutputChannel('covexcode performance');
 	const agentsStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 40);
 	agentsStatus.command = SHOW_AGENTS_COMMAND;
 	context.subscriptions.push(
 		agentsOutput,
+		performanceOutput,
 		agentsStatus,
 		vscode.commands.registerCommand(SHOW_AGENTS_COMMAND, () => agentsOutput.show(true)),
 		vscode.commands.registerCommand(MANAGE_TEAMMATES_COMMAND, () => {
@@ -1379,8 +1381,30 @@ export function activate(context: vscode.ExtensionContext): void {
 			? { cwd: workspace.cwd, primaryDocument: inlineEditorData.document, touched: new Set<string>() }
 			: undefined;
 
+		// Per-turn timing, collected only when `covexcode.trace.performance`
+		// is on. The output channel is local; nothing is sent anywhere.
+		let turnStartedAt = 0;
+		let firstTextAt: number | undefined;
+		const toolStarts = new Map<string, number>();
+		let toolCount = 0;
+		let toolTotalMs = 0;
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
+				const update = notification.update;
+				if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text' && firstTextAt === undefined) {
+					firstTextAt = performance.now();
+				}
+				if (update.sessionUpdate === 'tool_call' && update.toolCallId) {
+					toolStarts.set(update.toolCallId, performance.now());
+				}
+				if (update.sessionUpdate === 'tool_call_update' && update.toolCallId && (update.status === 'completed' || update.status === 'failed')) {
+					const began = toolStarts.get(update.toolCallId);
+					if (began !== undefined) {
+						toolStarts.delete(update.toolCallId);
+						toolTotalMs += performance.now() - began;
+						toolCount += 1;
+					}
+				}
 				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
 				updateUsageIndicator();
 			}
@@ -1486,10 +1510,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			// panel turn sends `normal` explicitly so a prior `plan`/`edit` turn
 			// can't leave the shared session in a stale mode (`mode` is per-turn,
 			// but covexcode keeps the last value when the field is omitted).
+			turnStartedAt = performance.now();
 			const promptPromise = activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
 			pendingHistoryReplay = false;
 			const turnResult = await promptPromise;
 			activeTurnId = String(turnResult.turn);
+			if (vscode.workspace.getConfiguration('covexcode').get<boolean>('trace.performance', false)) {
+				const turnMs = performance.now() - turnStartedAt;
+				const ttft = firstTextAt === undefined ? 'n/a' : `${(firstTextAt - turnStartedAt).toFixed(1)}ms`;
+				const tools = toolCount === 0 ? '0' : `${toolCount} (avg ${(toolTotalMs / toolCount).toFixed(1)}ms)`;
+				performanceOutput.appendLine(
+					`turn ${turnResult.turn}: ttft ${ttft} · turn ${turnMs.toFixed(1)}ms · tools ${tools} · stop ${turnResult.stopReason}`,
+				);
+			}
 			// A turn stopped by the tool-step limit or the output cap used to
 			// look like the agent simply stopped after its last step. Say which
 			// limit was hit and how to continue.
