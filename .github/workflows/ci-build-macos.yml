@@ -365,8 +365,10 @@ jobs:
         run: |
           set -e
           TAG="${RELEASE_VERSION}"
-          if [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
+          if [[ -n "${CERTIFICATE_OSX_P12_DATA}" && -f assets/.notarized ]]; then
             NOTES="Developer ID–signed and notarized macOS build. Download the .zip or .dmg and open normally — Gatekeeper should accept it after Apple notarization stapling."
+          elif [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
+            NOTES="Developer ID–signed macOS build. Apple rejected notarization for this run, so Gatekeeper may warn on first launch (right-click → Open). Signing is intact; only the notarization ticket is missing."
           else
             NOTES="Unsigned (ad-hoc) macOS build. Gatekeeper may warn on first launch (right-click → Open). Add CERTIFICATE_OSX_* repo secrets for Developer ID signing + notarization."
           fi
