@@ -1388,11 +1388,21 @@ export function activate(context: vscode.ExtensionContext): void {
 		const toolStarts = new Map<string, number>();
 		let toolCount = 0;
 		let toolTotalMs = 0;
+		let promptTokens = 0;
+		let cachedTokens = 0;
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId) {
 				const update = notification.update;
 				if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text' && firstTextAt === undefined) {
 					firstTextAt = performance.now();
+				}
+				if (update.sessionUpdate === 'usage_update') {
+					if (typeof update.prompt_tokens === 'number') {
+						promptTokens += update.prompt_tokens;
+					}
+					if (typeof update.cached_tokens === 'number') {
+						cachedTokens += update.cached_tokens;
+					}
 				}
 				if (update.sessionUpdate === 'tool_call' && update.toolCallId) {
 					toolStarts.set(update.toolCallId, performance.now());
@@ -1519,8 +1529,11 @@ export function activate(context: vscode.ExtensionContext): void {
 				const turnMs = performance.now() - turnStartedAt;
 				const ttft = firstTextAt === undefined ? 'n/a' : `${(firstTextAt - turnStartedAt).toFixed(1)}ms`;
 				const tools = toolCount === 0 ? '0' : `${toolCount} (avg ${(toolTotalMs / toolCount).toFixed(1)}ms)`;
+				const cache = promptTokens > 0 && cachedTokens > 0
+					? ` · cache ${((cachedTokens / promptTokens) * 100).toFixed(1)}%`
+					: '';
 				performanceOutput.appendLine(
-					`turn ${turnResult.turn}: ttft ${ttft} · turn ${turnMs.toFixed(1)}ms · tools ${tools} · stop ${turnResult.stopReason}`,
+					`turn ${turnResult.turn}: ttft ${ttft} · turn ${turnMs.toFixed(1)}ms · tools ${tools}${cache} · stop ${turnResult.stopReason}`,
 				);
 			}
 			// A turn stopped by the tool-step limit or the output cap used to

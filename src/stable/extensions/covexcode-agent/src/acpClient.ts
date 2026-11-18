@@ -252,6 +252,9 @@ export interface SessionUpdate {
 	used?: number;
 	size?: number;
 	prompt_tokens?: number;
+	/** Cached share of `prompt_tokens` when the endpoint reported one; already
+	 * included in the prompt figure, so this is a rate, not an addition. */
+	cached_tokens?: number;
 	[key: string]: unknown;
 }
 
