@@ -213,6 +213,11 @@
           "scope": "application",
           "markdownDescription": "Directory for the agent's config, login, sessions, and artifacts. Leave empty to use an IDE-managed directory under VS Code global storage (recommended; it is kept separate from the terminal CLI and copied once from `~/.covexcode` if that exists). Set to `~/.covexcode` to share state with the CLI. `COVEXCODE_CONFIG_DIR` is honored when this is empty."
         },
+        "covexcode.trace.performance": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Log per-turn performance to the **covexcode performance** output channel: TTFT, turn wall time, tool latency, and stop reason. Local only; nothing is sent anywhere."
+        },
         "covexcode.provider": {
           "type": "string",
           "default": "",
