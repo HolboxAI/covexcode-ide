@@ -169,3 +169,63 @@ test('AcpClient.isAlive is true while the child runs and false after it exits', 
 	await exited;
 	assert.equal(client.isAlive, false);
 });
+
+test('a malformed line does not prevent the next valid response', async () => {
+	const script = `
+const readline = require('node:readline');
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', line => {
+	const message = JSON.parse(line);
+	process.stdout.write('this is not json\\n');
+	process.stdout.write(JSON.stringify({
+		jsonrpc: '2.0',
+		id: message.id,
+		result: { protocolVersion: 1, agentInfo: { name: 'covexcode', version: '1.12.1' } },
+	}) + '\\n');
+});
+`;
+	const client = new AcpClient(process.execPath, process.cwd(), {}, ['-e', script]);
+	try {
+		const result = await client.initialize();
+		assert.equal(result.protocolVersion, 1);
+		assert.equal(result.agentInfo?.version, '1.12.1');
+	} finally {
+		client.dispose();
+	}
+});
+
+test('a sidecar that exits mid-request rejects instead of hanging', async () => {
+	const client = new AcpClient(process.execPath, process.cwd(), {}, ['-e', 'setTimeout(() => process.exit(0), 50);']);
+	await assert.rejects(() => client.initialize(), /exited/);
+});
+
+test('an unknown sessionUpdate is passed through and does not stop later updates', async () => {
+	const script = `
+const readline = require('node:readline');
+readline.createInterface({ input: process.stdin });
+const notify = update => process.stdout.write(JSON.stringify({
+	jsonrpc: '2.0',
+	method: 'session/update',
+	params: { sessionId: 's1', update },
+}) + '\\n');
+notify({ sessionUpdate: 'future_variant', payload: { x: 1 } });
+notify({ sessionUpdate: 'usage_update', used: 5, size: 10 });
+setInterval(() => {}, 1000);
+`;
+	const client = new AcpClient(process.execPath, process.cwd(), {}, ['-e', script]);
+	const seen: string[] = [];
+	const both = new Promise<void>(resolve => {
+		client.on('update', (notification: { update: { sessionUpdate: string } }) => {
+			seen.push(notification.update.sessionUpdate);
+			if (seen.length === 2) {
+				resolve();
+			}
+		});
+	});
+	try {
+		await both;
+		assert.deepEqual(seen, ['future_variant', 'usage_update']);
+	} finally {
+		client.dispose();
+	}
+});
