@@ -48,7 +48,12 @@ import {
 	SessionUpdate,
 	ToolCallContent,
 	ToolCallStatus,
+	multiAgentCapabilities,
+	type MultiAgentCapabilities,
+	type TeammateView,
 } from './acpClient';
+import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammateActions, teammatesMarkdown } from './agentPanels';
+import { AgentActivityTracker, type AgentActivityEvent } from './agentActivity';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
 import { agentLaunchCandidates, bundledAgentPath, type AgentCandidate } from './agent/launch';
@@ -144,11 +149,22 @@ import {
 	resolveModelDescriptor,
 	secretKeyForProvider,
 } from './models';
-import { buildFeedbackPayload, DEFAULT_FEEDBACK_ENDPOINT, FeedbackService, feedbackOs, postFeedbackJson, shouldSendFeedback, type FeedbackStorage } from './feedbackService';
+import {
+	buildFeedbackPayload,
+	DEFAULT_FEEDBACK_ENDPOINT,
+	FEEDBACK_STATUS_BAR_DURATION_MS,
+	FEEDBACK_STATUS_BAR_MESSAGE,
+	FeedbackService,
+	feedbackOs,
+	postFeedbackJson,
+	type FeedbackStorage,
+} from './feedbackService';
 import { showFeedbackWindow, showRejectFeedback } from './feedbackUi';
 
 const PARTICIPANT_ID = 'covexcode.agent';
 const COVEXCODE_COMMAND = 'covexcode';
+const SHOW_AGENTS_COMMAND = 'covexcode.showAgents';
+const MANAGE_TEAMMATES_COMMAND = 'covexcode.manageTeammates';
 const SECRET_API_KEY = 'covexcode.apiKey';
 const DIFF_SCHEME = 'covexcode-diff';
 const SIGN_IN_WITH_COVEXCODE = 'Sign in with covexcode.com (browser)…';
@@ -552,6 +568,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	// `initialize()`; image references are omitted rather than sent to a
 	// text-only model that would reject or garble them.
 	let agentImagesSupported = false;
+	// The custom multi-agent surface (teammates/tasks/mailbox/agent picker).
+	// Older sidecars advertise none of it; every panel gates on these flags
+	// rather than calling a method that would answer "method not found".
+	let agentMultiAgent: MultiAgentCapabilities = multiAgentCapabilities(undefined);
 	// Running token total for the current ACP session -- the cumulative half
 	// of the end-of-turn usage footer, reset alongside the session in
 	// `discardSession()` (see sessionUsage.ts for why it outlives one turn).
@@ -567,6 +587,64 @@ export function activate(context: vscode.ExtensionContext): void {
 	// of over-eager behavior the auto-open feature needs to avoid. See
 	// renderUpdate's own doc comment on this whole mechanism.
 	const openedDevServerUrls = new Set<string>();
+	// Background teammates outlive the prompt that started them, so their
+	// updates keep arriving on the session-lifetime channel after the per-turn
+	// listener has been removed. This tracker is the persistent half: it feeds
+	// a status-bar badge, an output channel, and a completion notification.
+	const agentActivity = new AgentActivityTracker();
+	const agentsOutput = vscode.window.createOutputChannel('covexcode agents');
+	const performanceOutput = vscode.window.createOutputChannel('covexcode performance');
+	const agentsStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 40);
+	agentsStatus.command = SHOW_AGENTS_COMMAND;
+	context.subscriptions.push(
+		agentsOutput,
+		performanceOutput,
+		agentsStatus,
+		vscode.commands.registerCommand(SHOW_AGENTS_COMMAND, () => agentsOutput.show(true)),
+		vscode.commands.registerCommand(MANAGE_TEAMMATES_COMMAND, () => {
+			void manageTeammates();
+		}),
+	);
+	const refreshAgentBadge = (): void => {
+		const running = agentActivity.runningCount();
+		if (running === 0) {
+			agentsStatus.hide();
+			return;
+		}
+		agentsStatus.text = `$(loading~spin) ${running} agent${running === 1 ? '' : 's'}`;
+		agentsStatus.tooltip = `covexcode: ${running} background agent${running === 1 ? '' : 's'} running`;
+		agentsStatus.show();
+	};
+	const noteAgentEvent = (event: AgentActivityEvent): void => {
+		const agent = event.agent;
+		switch (event.kind) {
+			case 'started':
+				agentsOutput.appendLine(`[started] ${agent.title} (${agent.id})`);
+				break;
+			case 'progress':
+				agentsOutput.appendLine(`[progress] ${agent.title}: ${agent.lastStep ?? ''}`);
+				break;
+			case 'finished': {
+				const line = `[${agent.state}] ${agent.title}${agent.outcome ? ` — ${agent.outcome}` : ''} (${agent.id})`;
+				agentsOutput.appendLine(line);
+				const label = agent.state === 'failed' ? 'Background agent failed' : 'Background agent finished';
+				void vscode.window.showInformationMessage(`${label}: ${agent.title}`);
+				break;
+			}
+		}
+		refreshAgentBadge();
+	};
+	const onAgentUpdate = (notification: SessionNotification): void => {
+		// One process can own one session at a time in this extension; events
+		// for a session that was just replaced must not repopulate the badge.
+		if (notification.sessionId !== sessionId) {
+			return;
+		}
+		const event = agentActivity.apply(notification.update);
+		if (event) {
+			noteAgentEvent(event);
+		}
+	};
 	// Feedback goes to covexcode.com by default; clearing
 	// `covexcode.feedback.endpoint` falls back to a local queue.
 	// `activeTurnId` is only known once the ACP turn completes, so the feedback
@@ -590,11 +668,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		},
 	);
 	const feedbackEnabled = (): boolean => {
-		const telemetry = vscode.workspace.getConfiguration('telemetry');
-		return shouldSendFeedback(
-			telemetry.get<string>('telemetryLevel', 'off'),
-			telemetry.get<boolean>('feedback.enabled', true),
-		);
+		const covexcodeConfig = vscode.workspace.getConfiguration('covexcode');
+		return covexcodeConfig.get<boolean>('feedback.enabled', true);
 	};
 	const showRejectFeedbackFor = (request: RequestPermissionRequest, toolCallId: string, files: string[]): void => {
 		if (!feedbackEnabled()) {
@@ -626,6 +701,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					provider,
 					ideVersion: vscode.version,
 				})).catch(() => {});
+				vscode.window.setStatusBarMessage(FEEDBACK_STATUS_BAR_MESSAGE, FEEDBACK_STATUS_BAR_DURATION_MS);
 			},
 		);
 	};
@@ -654,7 +730,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				})).catch(() => {});
 				// Brief, non-modal confirmation. A queued/failed send never shows
 				// an error -- the queue retries silently.
-				vscode.window.setStatusBarMessage('Thanks for the feedback', 3000);
+				vscode.window.setStatusBarMessage(FEEDBACK_STATUS_BAR_MESSAGE, FEEDBACK_STATUS_BAR_DURATION_MS);
 			},
 		});
 	};
@@ -866,13 +942,92 @@ export function activate(context: vscode.ExtensionContext): void {
 		client?.dispose();
 		client = undefined;
 		sessionId = undefined;
+		agentActivity.clear();
+		refreshAgentBadge();
 		ready = undefined;
 		sessionCwd = undefined;
 		sessionModel = undefined;
 		agentImagesSupported = false;
+		agentMultiAgent = multiAgentCapabilities(undefined);
 		sessionUsage.reset();
 		updateUsageIndicator();
 		pendingHistoryReplay = true;
+	}
+
+	/** The palette surface for background jobs: pick one, then act on it. */
+	async function manageTeammates(): Promise<void> {
+		const workspace = currentWorkspace();
+		const model = vscode.workspace.getConfiguration('covexcode').get<string>('model', '');
+		try {
+			await ensureReady(workspace, model);
+		} catch (error) {
+			void vscode.window.showErrorMessage(`covexcode: ${describeError(error)}`);
+			return;
+		}
+		const activeClient = client;
+		if (!activeClient || !agentMultiAgent.teammates) {
+			void vscode.window.showInformationMessage(
+				'This covexcode agent build predates the teammate registry. Update the agent and try again.',
+			);
+			return;
+		}
+		let jobs: TeammateView[];
+		try {
+			jobs = await activeClient.listTeammates(workspace.cwd);
+		} catch (error) {
+			void vscode.window.showErrorMessage(`Could not read teammates: ${describeError(error)}`);
+			return;
+		}
+		if (jobs.length === 0) {
+			void vscode.window.showInformationMessage('No teammate jobs recorded for this workspace yet.');
+			return;
+		}
+		const picked = await vscode.window.showQuickPick(
+			jobs.map(job => ({
+				label: `${job.interrupted ? '$(warning)' : job.running ? '$(loading~spin)' : '$(check)'} ${job.name}`,
+				description: `${job.interrupted ? 'interrupted' : job.running ? 'running' : 'finished'} · ${job.elapsed_secs}s`,
+				detail: job.task,
+				job,
+			})),
+			{ title: 'covexcode teammates', matchOnDescription: true, matchOnDetail: true },
+		);
+		if (!picked) {
+			return;
+		}
+		const actions = teammateActions(picked.job);
+		if (actions.length === 0) {
+			void vscode.window.showInformationMessage('No report or action is available for this job.');
+			return;
+		}
+		const chosen = await vscode.window.showQuickPick(
+			actions.map(action => ({ label: action.label, action: action.action })),
+			{ title: picked.job.name },
+		);
+		if (!chosen) {
+			return;
+		}
+		try {
+			switch (chosen.action) {
+				case 'report': {
+					const report = await activeClient.teammateReport(workspace.cwd, picked.job.id);
+					const document = await vscode.workspace.openTextDocument({ content: report, language: 'markdown' });
+					await vscode.window.showTextDocument(document, { preview: true });
+					break;
+				}
+				case 'stop':
+					void vscode.window.showInformationMessage(
+						await activeClient.stopTeammate(workspace.cwd, picked.job.id),
+					);
+					break;
+				case 'retry': {
+					const started = await activeClient.retryTeammate(workspace.cwd, picked.job.id);
+					void vscode.window.showInformationMessage(`Started ${started.name} (${started.id}).`);
+					break;
+				}
+			}
+		} catch (error) {
+			void vscode.window.showErrorMessage(`covexcode: ${describeError(error)}`);
+		}
 	}
 
 	// The directory is baked into the child's environment at spawn, so a
@@ -1036,6 +1191,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				acp.on('exit', () => discardSession());
 				const initResult = await acp.initialize();
 				agentImagesSupported = agentSupportsImages(initResult);
+				agentMultiAgent = multiAgentCapabilities(initResult);
 				const mcpLoaded = loadMcpConfig({
 					readFile: (file) => {
 						try {
@@ -1059,6 +1215,9 @@ export function activate(context: vscode.ExtensionContext): void {
 					cwd,
 					mcpServersForSession(mcpLoaded, agentSupportsMcp(initResult)),
 				);
+				// Persistent, unlike the per-turn listener in requestHandler:
+				// background teammates keep reporting after `prompt()` returns.
+				acp.on('update', onAgentUpdate);
 				sessionCwd = cwd;
 				sessionModel = targetModel;
 			})().catch(error => {
@@ -1283,6 +1442,61 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		const activeClient = client;
 		const activeSessionId = sessionId;
+
+		// Registry-backed panels. Handled after `ensureReady` so a first
+		// `/teammates` or `/tasks` can establish the session; each gates on
+		// the capability the agent advertised, so an older sidecar degrades
+		// to the observed-only view instead of showing "method not found".
+		if (request.command === 'agents') {
+			const running = agentActivity.list().filter(agent => agent.state === 'running');
+			if (!agentMultiAgent.subagents) {
+				stream.markdown(agentActivity.markdown());
+				return;
+			}
+			try {
+				stream.markdown(agentsMarkdown(await activeClient.listAgents(workspace.cwd), running));
+			} catch (error) {
+				stream.markdown(`Could not read the agent definitions: ${describeError(error)}`);
+			}
+			return;
+		}
+		if (request.command === 'teammates') {
+			if (!agentMultiAgent.teammates) {
+				stream.markdown(`${agentActivity.markdown()}\n\n_This agent build predates the persisted teammate registry; showing only teammates observed in this window._`);
+				return;
+			}
+			try {
+				stream.markdown(teammatesMarkdown(await activeClient.listTeammates(workspace.cwd)));
+			} catch (error) {
+				stream.markdown(`Could not read teammates: ${describeError(error)}`);
+			}
+			return;
+		}
+		if (request.command === 'tasks') {
+			if (!agentMultiAgent.tasks) {
+				stream.markdown('This agent build predates the task registry. Update covexcode to use `/tasks`.');
+				return;
+			}
+			try {
+				stream.markdown(tasksMarkdown(await activeClient.listTasks(workspace.cwd)));
+			} catch (error) {
+				stream.markdown(`Could not read tasks: ${describeError(error)}`);
+			}
+			return;
+		}
+		if (request.command === 'inbox') {
+			if (!agentMultiAgent.mailbox) {
+				stream.markdown('This agent build predates the mailbox registry. Update covexcode to use `/inbox`.');
+				return;
+			}
+			const owner = request.prompt.trim().split(/\s+/)[0] || 'lead';
+			try {
+				stream.markdown(inboxMarkdown(owner, await activeClient.inbox(workspace.cwd, owner)));
+			} catch (error) {
+				stream.markdown(`Could not read the inbox: ${describeError(error)}`);
+			}
+			return;
+		}
 		// `tool_call_update`'s own `title` is usually absent (headless.rs
 		// only sets it on the initial `tool_call`) -- without remembering
 		// it here, the completion/failure line renderUpdate shows would
@@ -1298,8 +1512,40 @@ export function activate(context: vscode.ExtensionContext): void {
 			? { cwd: workspace.cwd, primaryDocument: inlineEditorData.document, touched: new Set<string>() }
 			: undefined;
 
+		// Per-turn timing, collected only when `covexcode.trace.performance`
+		// is on. The output channel is local; nothing is sent anywhere.
+		let turnStartedAt = 0;
+		let firstTextAt: number | undefined;
+		const toolStarts = new Map<string, number>();
+		let toolCount = 0;
+		let toolTotalMs = 0;
+		let promptTokens = 0;
+		let cachedTokens = 0;
 		const onUpdate = (notification: SessionNotification) => {
 			if (notification.sessionId === activeSessionId && !token.isCancellationRequested) {
+				const update = notification.update;
+				if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text' && firstTextAt === undefined) {
+					firstTextAt = performance.now();
+				}
+				if (update.sessionUpdate === 'usage_update') {
+					if (typeof update.prompt_tokens === 'number') {
+						promptTokens += update.prompt_tokens;
+					}
+					if (typeof update.cached_tokens === 'number') {
+						cachedTokens += update.cached_tokens;
+					}
+				}
+				if (update.sessionUpdate === 'tool_call' && update.toolCallId) {
+					toolStarts.set(update.toolCallId, performance.now());
+				}
+				if (update.sessionUpdate === 'tool_call_update' && update.toolCallId && (update.status === 'completed' || update.status === 'failed')) {
+					const began = toolStarts.get(update.toolCallId);
+					if (began !== undefined) {
+						toolStarts.delete(update.toolCallId);
+						toolTotalMs += performance.now() - began;
+						toolCount += 1;
+					}
+				}
 				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
 				updateUsageIndicator();
 			}
@@ -1419,10 +1665,22 @@ export function activate(context: vscode.ExtensionContext): void {
 			// panel turn sends `normal` explicitly so a prior `plan`/`edit` turn
 			// can't leave the shared session in a stale mode (`mode` is per-turn,
 			// but covexcode keeps the last value when the field is omitted).
+			turnStartedAt = performance.now();
 			const promptPromise = activeClient.prompt(activeSessionId, content, isInline ? 'edit' : mode === 'plan' ? 'plan' : 'normal');
 			pendingHistoryReplay = false;
 			const turnResult = await promptPromise;
 			activeTurnId = String(turnResult.turn);
+			if (vscode.workspace.getConfiguration('covexcode').get<boolean>('trace.performance', false)) {
+				const turnMs = performance.now() - turnStartedAt;
+				const ttft = firstTextAt === undefined ? 'n/a' : `${(firstTextAt - turnStartedAt).toFixed(1)}ms`;
+				const tools = toolCount === 0 ? '0' : `${toolCount} (avg ${(toolTotalMs / toolCount).toFixed(1)}ms)`;
+				const cache = promptTokens > 0 && cachedTokens > 0
+					? ` · cache ${((cachedTokens / promptTokens) * 100).toFixed(1)}%`
+					: '';
+				performanceOutput.appendLine(
+					`turn ${turnResult.turn}: ttft ${ttft} · turn ${turnMs.toFixed(1)}ms · tools ${tools}${cache} · stop ${turnResult.stopReason}`,
+				);
+			}
 			// A turn stopped by the tool-step limit or the output cap used to
 			// look like the agent simply stopped after its last step. Say which
 			// limit was hit and how to continue.
@@ -2282,9 +2540,16 @@ function pushToolInvocation(
 	kind: string | undefined,
 	status: ToolCallStatus | undefined,
 	stream: vscode.ChatResponseStream,
+	detail?: string,
 ): void {
 	const message = new vscode.MarkdownString(undefined, true);
 	appendTitleSafely(message, title);
+	if (detail) {
+		// The update line is data (a subagent's label and round), not authored
+		// markdown; appendText keeps a command's `$` or a path's `_` literal.
+		message.appendMarkdown('\n\n');
+		message.appendText(detail);
+	}
 
 	const part = new vscode.ChatToolInvocationPart(kind ?? 'covexcode', toolCallId);
 	part.enablePartialUpdate = true;
@@ -2297,7 +2562,14 @@ function pushToolInvocation(
 }
 
 function renderToolCallInvocation(update: SessionUpdate, title: string, stream: vscode.ChatResponseStream): void {
-	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream);
+	// A foreground subagent's `tool_call_update` carries its latest step as
+	// plain text (see headless.rs's run_agent_batch). Showing it under the
+	// parent `agent` row is what makes a multi-round child look alive instead
+	// of a spinner with no progress.
+	const detail = update.status === 'in_progress' && update.content?.type === 'content'
+		? update.content.text
+		: undefined;
+	pushToolInvocation(update.toolCallId!, title, update.kind, update.status, stream, detail);
 }
 
 /**

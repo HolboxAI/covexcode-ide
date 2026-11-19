@@ -70,6 +70,22 @@
             "description": "Check this install's health."
           },
           {
+            "name": "agents",
+            "description": "Show running and recent background agents."
+          },
+          {
+            "name": "teammates",
+            "description": "Show recorded background teammate jobs."
+          },
+          {
+            "name": "tasks",
+            "description": "Show the shared task DAG."
+          },
+          {
+            "name": "inbox",
+            "description": "Show unread mailbox messages (default owner: lead)."
+          },
+          {
             "name": "help",
             "description": "List every slash command."
           },
@@ -140,6 +156,16 @@
       {
         "command": "covexcode.togglePermissionMode",
         "title": "covexcode: Toggle Permission Mode (Auto / Manual)",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.showAgents",
+        "title": "covexcode: Show Background Agents",
+        "category": "covexcode"
+      },
+      {
+        "command": "covexcode.manageTeammates",
+        "title": "covexcode: Manage Background Teammates",
         "category": "covexcode"
       },
       {
@@ -242,6 +268,11 @@
           "scope": "application",
           "markdownDescription": "Directory for the agent's config, login, sessions, and artifacts. Leave empty to use an IDE-managed directory under VS Code global storage (recommended; it is kept separate from the terminal CLI and copied once from `~/.covexcode` if that exists). Set to `~/.covexcode` to share state with the CLI. `COVEXCODE_CONFIG_DIR` is honored when this is empty."
         },
+        "covexcode.trace.performance": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Log per-turn performance to the **covexcode performance** output channel: TTFT, turn wall time, tool latency, and stop reason. Local only; nothing is sent anywhere."
+        },
         "covexcode.provider": {
           "type": "string",
           "default": "",
@@ -293,6 +324,12 @@
           "default": "auto",
           "order": 8,
           "markdownDescription": "How often the session asks before running tools. `auto` (default) asks only about destructive actions; `manual` asks about every write and command. Toggle with the `/mode` chat command or **covexcode: Toggle Permission Mode**."
+        },
+        "covexcode.feedback.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable feedback features in Covexcode (reject feedback and /feedback command).",
+          "scope": "application"
         },
         "covexcode.feedback.endpoint": {
           "type": "string",

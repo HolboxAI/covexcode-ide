@@ -3,7 +3,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { FEEDBACK_MAX_LENGTH, feedbackForSubmission } from './feedbackService';
+import {
+	FEEDBACK_CARD_AUTO_CLOSE_MS,
+	FEEDBACK_MAX_LENGTH,
+	FEEDBACK_SUBMIT_CONFIRMATION_IN_CARD,
+	feedbackForSubmission,
+} from './feedbackService';
 
 /**
  * The information the feedback panel needs about the rejected change. The
@@ -162,10 +167,22 @@ function renderHtml(nonce: string, options: FeedbackWindowOptions): string {
 	button.secondary:active {
 		transform: scale(0.98);
 	}
+	.thank-you {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 24px 12px;
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--vscode-testing-iconPassed, var(--vscode-notificationsInfoIcon-foreground, #4ec9b0));
+		text-align: center;
+		animation: covexcode-feedback-in 0.18s ease-out;
+	}
 	@media (prefers-reduced-motion: reduce) {
 		.card { animation: none; }
 		textarea, button { transition: none; }
 		button:active { transform: none; }
+		.thank-you { animation: none; }
 	}
 </style>
 </head>
@@ -198,13 +215,27 @@ function renderHtml(nonce: string, options: FeedbackWindowOptions): string {
 			submit.disabled = textarea.value.trim().length === 0;
 		}
 
+		function showThankYou() {
+			textarea.style.display = 'none';
+			counter.parentElement.style.display = 'none';
+			submit.parentElement.style.display = 'none';
+			const thankYou = document.createElement('div');
+			thankYou.className = 'thank-you';
+			thankYou.id = 'thank-you';
+			thankYou.textContent = ${JSON.stringify(FEEDBACK_SUBMIT_CONFIRMATION_IN_CARD)};
+			document.querySelector('.card').appendChild(thankYou);
+		}
+
 		function send() {
 			const text = textarea.value.trim();
 			if (!text) {
 				vscode.postMessage({ type: 'skip' });
 				return;
 			}
+			submit.disabled = true;
+			skip.disabled = true;
 			vscode.postMessage({ type: 'submit', text: text });
+			showThankYou();
 		}
 
 		textarea.addEventListener('input', refresh);
@@ -266,14 +297,17 @@ export function showFeedbackWindow(options: FeedbackWindowOptions): void {
 			return;
 		}
 		settled = true;
-		panel.dispose();
 		if (submit && feedback !== undefined) {
 			try {
 				options.onSubmit(feedback);
 			} catch {
 				// Feedback must never surface an error into the chat flow.
 			}
+			setTimeout(() => {
+				panel.dispose();
+			}, FEEDBACK_CARD_AUTO_CLOSE_MS);
 		} else {
+			panel.dispose();
 			options.onDismiss?.();
 		}
 	};

@@ -49,13 +49,36 @@ if [[ -n "${CERTIFICATE_OSX_P12_DATA}" ]]; then
 
   zip -r -X -y "${ZIP_FILE}" ./*.app
 
-  xcrun notarytool store-credentials "${APP_NAME}" --apple-id "${CERTIFICATE_OSX_APPLE_ID}" --team-id "${CERTIFICATE_OSX_TEAM_ID}" --password "${CERTIFICATE_OSX_APP_PASSWORD}" --keychain "${KEYCHAIN}"
-  xcrun notarytool submit "${ZIP_FILE}" --keychain-profile "${APP_NAME}" --wait --keychain "${KEYCHAIN}"
+  # Notarization is best-effort. Signing already succeeded above, so a
+  # rejected notarization (e.g. Apple returning 403 "a required agreement is
+  # missing or has expired" for the team) must not block packaging: the app
+  # is still Developer ID-signed, only the Gatekeeper notarization ticket is
+  # missing. The wrapper conditions keep GitHub's `bash -e` from aborting,
+  # and a marker file tells the release job which notes to publish.
+  NOTARIZED=no
+  if xcrun notarytool store-credentials "${APP_NAME}" --apple-id "${CERTIFICATE_OSX_APPLE_ID}" --team-id "${CERTIFICATE_OSX_TEAM_ID}" --password "${CERTIFICATE_OSX_APP_PASSWORD}" --keychain "${KEYCHAIN}"; then
+    if xcrun notarytool submit "${ZIP_FILE}" --keychain-profile "${APP_NAME}" --wait --keychain "${KEYCHAIN}"; then
+      echo "+ attach staple"
+      if xcrun stapler staple ./*.app; then
+        NOTARIZED=yes
+      else
+        echo "WARNING: notarization succeeded but stapling failed; publishing without a stapled ticket" >&2
+      fi
+    else
+      echo "WARNING: Apple rejected notarization; publishing the Developer ID-signed build WITHOUT notarization" >&2
+    fi
+  else
+    echo "WARNING: could not store notarization credentials (Apple agreement/credentials); publishing the Developer ID-signed build WITHOUT notarization" >&2
+  fi
 
-  echo "+ attach staple"
-  xcrun stapler staple ./*.app
+  mkdir -p ../assets
+  if [[ "${NOTARIZED}" == "yes" ]]; then
+    echo "notarized" > ../assets/.notarized
+  else
+    echo "not-notarized" > ../assets/.not-notarized
+  fi
 
-  rm "${ZIP_FILE}"
+  rm -f "${ZIP_FILE}"
 
   cd ..
 fi

@@ -51,6 +51,10 @@ export const FEEDBACK_MAX_LENGTH = 10_000;
 export const FEEDBACK_QUEUE_KEY = 'covexcode.feedback.queue.v1';
 export const FEEDBACK_QUEUE_MAX_ITEMS = 20;
 export const FEEDBACK_POST_TIMEOUT_MS = 5_000;
+export const FEEDBACK_SUBMIT_CONFIRMATION_IN_CARD = '✓ Feedback submitted. Thank you!';
+export const FEEDBACK_STATUS_BAR_MESSAGE = 'Feedback submitted — thank you!';
+export const FEEDBACK_STATUS_BAR_DURATION_MS = 4000;
+export const FEEDBACK_CARD_AUTO_CLOSE_MS = 2000;
 
 /** Where feedback goes unless `covexcode.feedback.endpoint` overrides it. */
 export const DEFAULT_FEEDBACK_ENDPOINT = 'https://covexcode.com/api/feedback';
@@ -148,9 +152,9 @@ export function feedbackForSubmission(text: string, maxLength: number = FEEDBACK
 	return isEmptyFeedback(feedback) ? undefined : feedback;
 }
 
-/** Whether feedback is allowed to send/flush given the IDE's telemetry state. */
-export function shouldSendFeedback(telemetryLevel: string | undefined, feedbackEnabled: boolean | undefined): boolean {
-	return (telemetryLevel ?? 'off') !== 'off' && (feedbackEnabled ?? true) !== false;
+/** Whether feedback is allowed to send/flush given the IDE's setting. */
+export function shouldSendFeedback(_telemetryLevel: string | undefined, feedbackEnabled: boolean | undefined): boolean {
+	return feedbackEnabled !== false;
 }
 
 /** UUID v4 used to dedupe feedback on the server; stable across retries. */
