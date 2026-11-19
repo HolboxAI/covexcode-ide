@@ -152,9 +152,9 @@ export function feedbackForSubmission(text: string, maxLength: number = FEEDBACK
 	return isEmptyFeedback(feedback) ? undefined : feedback;
 }
 
-/** Whether feedback is allowed to send/flush given the IDE's telemetry state. */
-export function shouldSendFeedback(telemetryLevel: string | undefined, feedbackEnabled: boolean | undefined): boolean {
-	return (telemetryLevel ?? 'off') !== 'off' && (feedbackEnabled ?? true) !== false;
+/** Whether feedback is allowed to send/flush given the IDE's setting. */
+export function shouldSendFeedback(_telemetryLevel: string | undefined, feedbackEnabled: boolean | undefined): boolean {
+	return feedbackEnabled !== false;
 }
 
 /** UUID v4 used to dedupe feedback on the server; stable across retries. */

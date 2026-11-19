@@ -143,7 +143,6 @@ import {
 	FeedbackService,
 	feedbackOs,
 	postFeedbackJson,
-	shouldSendFeedback,
 	type FeedbackStorage,
 } from './feedbackService';
 import { showFeedbackWindow, showRejectFeedback } from './feedbackUi';
@@ -534,11 +533,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 	const feedbackEnabled = (): boolean => {
 		const covexcodeConfig = vscode.workspace.getConfiguration('covexcode');
-		const feedbackOn = covexcodeConfig.get<boolean>('feedback.enabled', true);
-		if (!feedbackOn) { return false; }
-		const telemetry = vscode.workspace.getConfiguration('telemetry');
-		const level = telemetry.get<string>('telemetryLevel', 'all');
-		return shouldSendFeedback(level, feedbackOn);
+		return covexcodeConfig.get<boolean>('feedback.enabled', true);
 	};
 	const showRejectFeedbackFor = (request: RequestPermissionRequest, toolCallId: string, files: string[]): void => {
 		if (!feedbackEnabled()) {

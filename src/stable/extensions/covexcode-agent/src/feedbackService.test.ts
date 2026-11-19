@@ -132,33 +132,32 @@ test('feedbackOs maps the three supported platforms and falls back to linux', ()
 	assert.equal(feedbackOs('freebsd'), 'linux');
 });
 
-test('shouldSendFeedback gates the startup flush on telemetry state', () => {
-	assert.equal(shouldSendFeedback('off', true), false);
+test('shouldSendFeedback respects feedback.enabled setting', () => {
+	assert.equal(shouldSendFeedback('off', true), true);
 	assert.equal(shouldSendFeedback('all', false), false);
 	assert.equal(shouldSendFeedback('all', true), true);
-	assert.equal(shouldSendFeedback(undefined, undefined), false);
+	assert.equal(shouldSendFeedback('off', false), false);
 	assert.equal(shouldSendFeedback('error', true), true);
 });
 
 test('feedbackEnabled logic resolves combinations of feedback.enabled and telemetryLevel', () => {
-	const resolveFeedbackEnabled = (feedbackSetting?: boolean, telemetrySetting?: string): boolean => {
+	const resolveFeedbackEnabled = (feedbackSetting?: boolean, _telemetrySetting?: string): boolean => {
 		const feedbackOn = feedbackSetting ?? true;
 		if (!feedbackOn) {
 			return false;
 		}
-		const level = telemetrySetting ?? 'all';
-		return shouldSendFeedback(level, feedbackOn);
+		return feedbackOn;
 	};
 
-	// feedback.enabled=true, telemetryLevel='all' → true
+	// feedback.enabled=true → true
 	assert.equal(resolveFeedbackEnabled(true, 'all'), true);
-	// feedback.enabled=true, telemetryLevel='off' → false (user explicitly disabled telemetry)
-	assert.equal(resolveFeedbackEnabled(true, 'off'), false);
-	// feedback.enabled=false, telemetryLevel='all' → false (user explicitly disabled feedback)
+	// feedback.enabled=true even when telemetry is off (Covexcode default) → true
+	assert.equal(resolveFeedbackEnabled(true, 'off'), true);
+	// feedback.enabled=false → false
 	assert.equal(resolveFeedbackEnabled(false, 'all'), false);
-	// feedback.enabled=true, telemetryLevel not set (default 'all') → true (the common case that was broken)
+	// feedback.enabled=true, telemetry not set → true
 	assert.equal(resolveFeedbackEnabled(true, undefined), true);
-	// feedback.enabled not set (default true), telemetryLevel not set (default 'all') → true (fresh install, both defaults)
+	// feedback.enabled not set (default true) → true
 	assert.equal(resolveFeedbackEnabled(undefined, undefined), true);
 });
 
