@@ -347,6 +347,12 @@ export interface ListChangesResponse {
 	shellWarning?: string;
 }
 
+export interface GetChangeDiffResult {
+	before: string;
+	after: string;
+	existedBefore: boolean;
+}
+
 /** One background teammate from `teammates/list`, matching teammates::View. */
 export interface TeammateView {
 	id: string;
@@ -391,6 +397,7 @@ export interface AgentDefinitionView {
 	verify?: string | null;
 }
 
+
 interface PendingRequest {
 	resolve: (result: unknown) => void;
 	reject: (error: Error) => void;
@@ -427,6 +434,7 @@ export class AcpClient extends EventEmitter {
 	private readonly pending = new Map<number, PendingRequest>();
 	private nextId = 1;
 	private closed = false;
+	private changeDiffSupported: boolean | undefined;
 
 	/**
 	 * Whether the child process is still usable. `closed` is set by the
@@ -682,6 +690,37 @@ export class AcpClient extends EventEmitter {
 	 */
 	async listChanges(sessionId: string): Promise<ListChangesResponse> {
 		return (await this.request('session/list_changes', { sessionId })) as ListChangesResponse;
+	}
+
+	/**
+	 * `session/get_change_diff` -- feature-detected RPC from Phase 1. Returns
+	 * `undefined` when the running sidecar does not implement the method so
+	 * callers can fall back to a git baseline or plain file view.
+	 */
+	async getChangeDiff(
+		sessionId: string,
+		filePath: string,
+		options?: { sinceTurn?: number },
+	): Promise<GetChangeDiffResult | undefined> {
+		if (this.changeDiffSupported === false) {
+			return undefined;
+		}
+		try {
+			const result = (await this.request('session/get_change_diff', {
+				sessionId,
+				path: filePath,
+				...(options?.sinceTurn !== undefined ? { sinceTurn: options.sinceTurn } : {}),
+			})) as GetChangeDiffResult | undefined;
+			this.changeDiffSupported = true;
+			return result;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (/method not found|unknown method|-32601|unrecognized|not supported/i.test(message)) {
+				this.changeDiffSupported = false;
+				return undefined;
+			}
+			throw error;
+		}
 	}
 
 	// -- Custom (not ACP v1) multi-agent registry reads. Every method below
