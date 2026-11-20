@@ -36,6 +36,7 @@ export interface AgentCapabilities {
 		tasks?: boolean;
 		mailbox?: boolean;
 		mergeAgent?: boolean;
+		lsp?: boolean;
 	};
 }
 
@@ -111,6 +112,8 @@ export interface MultiAgentCapabilities {
 	tasks: boolean;
 	mailbox: boolean;
 	mergeAgent: boolean;
+	/** The agent's `lsp` tool exists (1.14.0+); gates the diagnostics links. */
+	lsp: boolean;
 }
 
 /**
@@ -127,6 +130,7 @@ export function multiAgentCapabilities(result: InitializeResult | undefined): Mu
 		tasks: capabilities?.tasks === true,
 		mailbox: capabilities?.mailbox === true,
 		mergeAgent: capabilities?.mergeAgent === true,
+		lsp: capabilities?.lsp === true,
 	};
 }
 

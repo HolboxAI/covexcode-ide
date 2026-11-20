@@ -10,6 +10,8 @@ import {
 	agentSupportsImages,
 	assertAgentCompatible,
 	fetchProviders,
+	type InitializeResult,
+	multiAgentCapabilities,
 	probeAcpSupported,
 	probeBinaryExists,
 } from './acpClient';
@@ -37,6 +39,30 @@ test('probeBinaryExists() resolves false for a command that exits nonzero', asyn
 test('probeBinaryExists() resolves false, not rejects, for a genuinely missing binary', async () => {
 	const ok = await probeBinaryExists('this-binary-does-not-exist-anywhere-12345');
 	assert.equal(ok, false);
+});
+
+test('multiAgentCapabilities() fails closed and reads the lsp flag', () => {
+	assert.deepEqual(multiAgentCapabilities(undefined), {
+		subagents: false,
+		teammates: false,
+		tasks: false,
+		mailbox: false,
+		mergeAgent: false,
+		lsp: false,
+	});
+	const result = {
+		agentCapabilities: {
+			covexcode: { subagents: true, lsp: true },
+		},
+	} as unknown as InitializeResult;
+	assert.deepEqual(multiAgentCapabilities(result), {
+		subagents: true,
+		teammates: false,
+		tasks: false,
+		mailbox: false,
+		mergeAgent: false,
+		lsp: true,
+	});
 });
 
 test('probeAcpSupported() is false when the CLI rejects --acp as an unknown argument', async () => {
