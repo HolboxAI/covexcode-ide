@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { diagnosticsSummary, parseLspDiagnostics } from './lspDiagnostics';
+import { diagnosticsSummary, parseLspDiagnostics, parseLspLocations } from './lspDiagnostics';
 
 test('parseLspDiagnostics() reads the agent one-line-per-diagnostic format', () => {
 	const text = [
@@ -55,4 +55,24 @@ test('diagnosticsSummary() counts each severity and omits zeroes', () => {
 	].join('\n'));
 	assert.equal(diagnosticsSummary(diagnostics), '2 errors, 1 warning, 1 hint');
 	assert.equal(diagnosticsSummary([]), 'no diagnostics');
+});
+
+test('parseLspLocations() reads bare definition/reference rows', () => {
+	const text = [
+		'src/lib.rs:5:2',
+		'src/main.rs:12:9',
+		'C:/work/src/main.rs:7:3',
+		'',
+	].join('\n');
+	assert.deepEqual(parseLspLocations(text), [
+		{ path: 'src/lib.rs', line: 5, column: 2 },
+		{ path: 'src/main.rs', line: 12, column: 9 },
+		{ path: 'C:/work/src/main.rs', line: 7, column: 3 },
+	]);
+});
+
+test('parseLspLocations() ignores hover/prose text', () => {
+	assert.deepEqual(parseLspLocations('```rust\nfn target()\n```'), []);
+	assert.deepEqual(parseLspLocations('No definition found'), []);
+	assert.deepEqual(parseLspLocations(''), []);
 });

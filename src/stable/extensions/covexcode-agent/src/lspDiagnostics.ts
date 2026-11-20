@@ -31,7 +31,36 @@ export interface LspDiagnostic {
 }
 
 const DIAGNOSTIC_LINE = /^(.*):(\d+):(\d+) (error|warning|info|hint): (.*)$/;
+const LOCATION_LINE = /^(.*):(\d+):(\d+)$/;
 const SOURCE_SUFFIX = /^(.*) \[([^\]]+)\]$/;
+
+/** One `path:line:column` row from a definition or references result. */
+export interface LspLocation {
+	readonly path: string;
+	readonly line: number;
+	readonly column: number;
+}
+
+/**
+ * Reads the agent's definition/references output, which is one bare
+ * `path:line:column` per line (`execute_lsp_query` in `src/tools.rs`). The
+ * same greedy-path rule applies: a Windows drive colon is part of the path.
+ */
+export function parseLspLocations(text: string): LspLocation[] {
+	const locations: LspLocation[] = [];
+	for (const raw of text.split('\n')) {
+		const match = LOCATION_LINE.exec(raw.trimEnd());
+		if (!match) {
+			continue;
+		}
+		locations.push({
+			path: match[1],
+			line: Number(match[2]),
+			column: Number(match[3]),
+		});
+	}
+	return locations;
+}
 
 export function parseLspDiagnostics(text: string): LspDiagnostic[] {
 	const diagnostics: LspDiagnostic[] = [];
