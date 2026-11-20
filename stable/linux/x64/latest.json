@@ -1,9 +1,9 @@
 {
-  "url": "https://github.com/HolboxAI/covexcode-ide/releases/download/1.126.3.498/Covexcode-linux-x64-1.126.3.498.tar.gz",
-  "name": "1.126.3.498",
-  "version": "b857237d4299c30deabcaca6445c6317db1fe00f",
-  "productVersion": "1.126.3.498",
-  "hash": "47c479474942c0530f6d384a37df52f26cbaf061",
-  "timestamp": "1795167189107",
-  "sha256hash": "d682a139d1afe13b16aa3486170091ac36e21c03483df92caa4e9a0d8c2a56df"
+  "url": "https://github.com/HolboxAI/covexcode-ide/releases/download/1.126.3.500/Covexcode-linux-x64-1.126.3.500.tar.gz",
+  "name": "1.126.3.500",
+  "version": "8afca6396e8b016eb72489583c302b1ed7a6d60f",
+  "productVersion": "1.126.3.500",
+  "hash": "5fe70515eee7547073e5b2a87621006dad990bd0",
+  "timestamp": "1795169685160",
+  "sha256hash": "7b0ccdf84df2ade24bcbc3b0211beb7ed916623f829242966553f26efaac1587"
 }
