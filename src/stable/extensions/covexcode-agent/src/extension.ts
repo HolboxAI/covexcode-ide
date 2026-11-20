@@ -53,7 +53,7 @@ import {
 	type TeammateView,
 } from './acpClient';
 import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammateActions, teammatesMarkdown } from './agentPanels';
-import { diagnosticsSummary, parseLspDiagnostics, type LspDiagnostic } from './lspDiagnostics';
+import { diagnosticsSummary, parseLspDiagnostics, parseLspLocations, type LspDiagnostic, type LspLocation } from './lspDiagnostics';
 import { AgentActivityTracker, type AgentActivityEvent } from './agentActivity';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
@@ -2693,6 +2693,16 @@ function escapeLinkLabel(text: string): string {
 	return text.replace(/[\\[\]]/g, '\\$&');
 }
 
+/** One clickable `path:line:column` link, resolved against the workspace cwd. */
+function locationLink(location: LspLocation, cwd: string): string {
+	const absolute = path.isAbsolute(location.path)
+		? location.path
+		: path.join(cwd, location.path);
+	const args = encodeURIComponent(JSON.stringify([absolute, location.line, location.column]));
+	const label = escapeLinkLabel(`${location.path}:${location.line}:${location.column}`);
+	return `[${label}](command:${OPEN_DIAGNOSTIC_COMMAND}?${args})`;
+}
+
 /**
  * Turns a completed `lsp` diagnostics tool call into a compact list of
  * clickable `path:line:column` links. Gated on the `lsp` capability, and the
@@ -2728,13 +2738,8 @@ function renderLspDiagnostics(
 	markdown.isTrusted = { enabledCommands: [OPEN_DIAGNOSTIC_COMMAND] };
 	markdown.appendMarkdown(`$(warning) ${diagnosticsSummary(diagnostics)}\n\n`);
 	for (const diagnostic of diagnostics.slice(0, 10)) {
-		const absolute = path.isAbsolute(diagnostic.path)
-			? diagnostic.path
-			: path.join(context.cwd, diagnostic.path);
-		const args = encodeURIComponent(JSON.stringify([absolute, diagnostic.line, diagnostic.column]));
-		const label = escapeLinkLabel(`${diagnostic.path}:${diagnostic.line}:${diagnostic.column}`);
 		markdown.appendMarkdown(
-			`${diagnosticSeverityIcon(diagnostic.severity)} [${label}](command:${OPEN_DIAGNOSTIC_COMMAND}?${args}) `,
+			`${diagnosticSeverityIcon(diagnostic.severity)} ${locationLink(diagnostic, context.cwd)} `,
 		);
 		markdown.appendText(diagnostic.message);
 		markdown.appendMarkdown('\n\n');
@@ -2743,6 +2748,69 @@ function renderLspDiagnostics(
 		markdown.appendMarkdown(`…and ${diagnostics.length - 10} more.\n\n`);
 	}
 	stream.markdown(markdown);
+}
+
+/**
+ * Definition and references results are bare `path:line:column` rows; the
+ * same link treatment applies, without a severity or message. Hover text is
+ * deliberately left in the tool row: it is arbitrary markup from the server,
+ * and there is no safe compact rendering for it.
+ */
+function renderLspLocations(
+	update: SessionUpdate,
+	title: string,
+	stream: vscode.ChatResponseStream,
+	context: DiagnosticsRenderContext,
+): void {
+	if (update.sessionUpdate !== 'tool_call_update' || update.status !== 'completed') {
+		return;
+	}
+	if (update.content?.type !== 'text') {
+		return;
+	}
+	const key = update.toolCallId ?? title;
+	if (context.shown.has(key)) {
+		return;
+	}
+	const locations = parseLspLocations(update.content.text);
+	if (locations.length === 0) {
+		return;
+	}
+	context.shown.add(key);
+
+	const markdown = new vscode.MarkdownString(undefined, true);
+	markdown.isTrusted = { enabledCommands: [OPEN_DIAGNOSTIC_COMMAND] };
+	if (title.startsWith('definition ')) {
+		markdown.appendMarkdown('$(go-to-file) Definition\n\n');
+	} else {
+		markdown.appendMarkdown(
+			`$(references) ${locations.length} reference${locations.length === 1 ? '' : 's'}\n\n`,
+		);
+	}
+	for (const location of locations.slice(0, 10)) {
+		markdown.appendMarkdown(`${locationLink(location, context.cwd)}\n\n`);
+	}
+	if (locations.length > 10) {
+		markdown.appendMarkdown(`…and ${locations.length - 10} more.\n\n`);
+	}
+	stream.markdown(markdown);
+}
+
+/** Route a completed `lsp` call to the renderer for its action. */
+function renderLspToolResult(
+	update: SessionUpdate,
+	title: string | undefined,
+	stream: vscode.ChatResponseStream,
+	context: DiagnosticsRenderContext,
+): void {
+	if (!context.lspEnabled() || !title) {
+		return;
+	}
+	if (title.startsWith('diagnostics ')) {
+		renderLspDiagnostics(update, title, stream, context);
+	} else if (title.startsWith('definition ') || title.startsWith('references ')) {
+		renderLspLocations(update, title, stream, context);
+	}
 }
 
 function renderUpdate(
@@ -2803,7 +2871,7 @@ function renderUpdate(
 				stream.markdown(line);
 			}
 			if (diagnostics) {
-				renderLspDiagnostics(update, title, stream, diagnostics);
+				renderLspToolResult(update, title, stream, diagnostics);
 			}
 			// check_in_browser's screenshot is for the model (ACP image
 			// block). Putting it in chat as a data URI used to flood the
