@@ -7,7 +7,21 @@ CALLER_DIR=$( pwd )
 cd "$( dirname "${BASH_SOURCE[0]}" )"
 
 if [[ "${VSCODE_ARCH}" == "x64" ]]; then
-  GITHUB_RESPONSE=$( curl --silent --location "https://api.github.com/repos/AppImage/pkg2appimage/releases/latest" )
+  # Authenticate when a token is present: shared Actions IPs hit
+  # api.github.com's 403 rate limit, and without --fail jq silently turns the
+  # error body into a null URL. Tracing is off around the request so `set -x`
+  # cannot print the token.
+  set +x
+  AUTH_HEADER=()
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    AUTH_HEADER=( -H "Authorization: Bearer ${GITHUB_TOKEN}" )
+  fi
+  GITHUB_RESPONSE=$( curl --fail --silent --show-error --location \
+    --retry 5 --retry-delay 2 \
+    "${AUTH_HEADER[@]}" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/AppImage/pkg2appimage/releases/latest" )
+  set -x
   APPIMAGE_URL=$( echo "${GITHUB_RESPONSE}" | jq --raw-output '.assets | map(select( .name | test("x86_64.AppImage(?!.zsync)"))) | map(.browser_download_url)[0]' )
 
   if [[ -z "${APPIMAGE_URL}" ]]; then
