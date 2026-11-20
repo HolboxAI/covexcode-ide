@@ -53,6 +53,7 @@ import {
 	type TeammateView,
 } from './acpClient';
 import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammateActions, teammatesMarkdown } from './agentPanels';
+import { diagnosticsSummary, parseLspDiagnostics, type LspDiagnostic } from './lspDiagnostics';
 import { AgentActivityTracker, type AgentActivityEvent } from './agentActivity';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
@@ -1511,6 +1512,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		const inlineEdit: InlineEditContext | undefined = isInline && inlineEditorData
 			? { cwd: workspace.cwd, primaryDocument: inlineEditorData.document, touched: new Set<string>() }
 			: undefined;
+		// `lsp` results arrive as plain text on the completed tool call; this
+		// context lets renderUpdate turn them into linked diagnostics once per
+		// call. The getter reads the capability after `initialize` has landed.
+		const diagnostics: DiagnosticsRenderContext = {
+			lspEnabled: () => agentMultiAgent.lsp,
+			cwd: workspace.cwd,
+			shown: new Set<string>(),
+		};
 
 		// Per-turn timing, collected only when `covexcode.trace.performance`
 		// is on. The output channel is local; nothing is sent anywhere.
@@ -1546,7 +1555,7 @@ export function activate(context: vscode.ExtensionContext): void {
 						toolCount += 1;
 					}
 				}
-				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit);
+				renderUpdate(notification.update, stream, toolCallTitles, openedDevServerUrls, shownBrowserPreviews, turnUsage, sessionUsage, inlineEdit, diagnostics);
 				updateUsageIndicator();
 			}
 		};
@@ -1742,6 +1751,30 @@ export function activate(context: vscode.ExtensionContext): void {
 				`covexcode: permission mode is now ${next.toUpperCase()} — ${permissionModeDescription(next)}.`,
 			);
 		}),
+	);
+
+	// Target of the diagnostics card's `path:line:column` links. Arguments
+	// arrive from a command URI, so treat them as untrusted JSON, not as
+	// already-typed values.
+	context.subscriptions.push(
+		vscode.commands.registerCommand(
+			OPEN_DIAGNOSTIC_COMMAND,
+			async (fsPath: unknown, line: unknown, column: unknown) => {
+				if (typeof fsPath !== 'string') {
+					return;
+				}
+				const document = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath));
+				const editor = await vscode.window.showTextDocument(document);
+				const lineNumber = Math.max(0, (typeof line === 'number' ? line : 1) - 1);
+				const columnNumber = Math.max(0, (typeof column === 'number' ? column : 1) - 1);
+				const position = new vscode.Position(
+					Math.min(lineNumber, Math.max(0, document.lineCount - 1)),
+					columnNumber,
+				);
+				editor.selection = new vscode.Selection(position, position);
+				editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+			},
+		),
 	);
 
 	context.subscriptions.push(
@@ -2631,6 +2664,87 @@ interface InlineEditContext {
 	touched: Set<string>;
 }
 
+/** The `lsp` capability and per-turn state the diagnostics card needs. */
+interface DiagnosticsRenderContext {
+	/** Read through a getter: the capability is learned during `initialize`. */
+	readonly lspEnabled: () => boolean;
+	readonly cwd: string;
+	/** Tool calls already rendered, so a repeated completion cannot duplicate. */
+	readonly shown: Set<string>;
+}
+
+const OPEN_DIAGNOSTIC_COMMAND = 'covexcode.openDiagnostic';
+
+function diagnosticSeverityIcon(severity: LspDiagnostic['severity']): string {
+	switch (severity) {
+		case 'error':
+			return '$(error)';
+		case 'warning':
+			return '$(warning)';
+		case 'info':
+			return '$(info)';
+		default:
+			return '$(lightbulb)';
+	}
+}
+
+/** Link labels are paths and numbers; escape the two characters that could end one. */
+function escapeLinkLabel(text: string): string {
+	return text.replace(/[\\[\]]/g, '\\$&');
+}
+
+/**
+ * Turns a completed `lsp` diagnostics tool call into a compact list of
+ * clickable `path:line:column` links. Gated on the `lsp` capability, and the
+ * message is appended with `appendText` -- it comes from a language server,
+ * not from this extension, so it must never be parsed as Markdown.
+ */
+function renderLspDiagnostics(
+	update: SessionUpdate,
+	title: string | undefined,
+	stream: vscode.ChatResponseStream,
+	context: DiagnosticsRenderContext,
+): void {
+	if (!context.lspEnabled() || !title?.startsWith('diagnostics ')) {
+		return;
+	}
+	if (update.sessionUpdate !== 'tool_call_update' || update.status !== 'completed') {
+		return;
+	}
+	if (update.content?.type !== 'text') {
+		return;
+	}
+	const key = update.toolCallId ?? title;
+	if (context.shown.has(key)) {
+		return;
+	}
+	const diagnostics = parseLspDiagnostics(update.content.text);
+	if (diagnostics.length === 0) {
+		return;
+	}
+	context.shown.add(key);
+
+	const markdown = new vscode.MarkdownString(undefined, true);
+	markdown.isTrusted = { enabledCommands: [OPEN_DIAGNOSTIC_COMMAND] };
+	markdown.appendMarkdown(`$(warning) ${diagnosticsSummary(diagnostics)}\n\n`);
+	for (const diagnostic of diagnostics.slice(0, 10)) {
+		const absolute = path.isAbsolute(diagnostic.path)
+			? diagnostic.path
+			: path.join(context.cwd, diagnostic.path);
+		const args = encodeURIComponent(JSON.stringify([absolute, diagnostic.line, diagnostic.column]));
+		const label = escapeLinkLabel(`${diagnostic.path}:${diagnostic.line}:${diagnostic.column}`);
+		markdown.appendMarkdown(
+			`${diagnosticSeverityIcon(diagnostic.severity)} [${label}](command:${OPEN_DIAGNOSTIC_COMMAND}?${args}) `,
+		);
+		markdown.appendText(diagnostic.message);
+		markdown.appendMarkdown('\n\n');
+	}
+	if (diagnostics.length > 10) {
+		markdown.appendMarkdown(`…and ${diagnostics.length - 10} more.\n\n`);
+	}
+	stream.markdown(markdown);
+}
+
 function renderUpdate(
 	update: SessionUpdate,
 	stream: vscode.ChatResponseStream,
@@ -2640,6 +2754,7 @@ function renderUpdate(
 	turnUsage: TurnUsage,
 	sessionUsage: SessionUsage,
 	inlineEdit: InlineEditContext | undefined,
+	diagnostics: DiagnosticsRenderContext | undefined,
 ): void {
 	switch (update.sessionUpdate) {
 		case 'agent_message_chunk': {
@@ -2686,6 +2801,9 @@ function renderUpdate(
 				appendTitleSafely(line, title);
 				line.appendMarkdown('\n\n');
 				stream.markdown(line);
+			}
+			if (diagnostics) {
+				renderLspDiagnostics(update, title, stream, diagnostics);
 			}
 			// check_in_browser's screenshot is for the model (ACP image
 			// block). Putting it in chat as a data URI used to flood the
