@@ -255,6 +255,10 @@ jobs:
 
       - name: Prepare assets
         env:
+          # install-sysroot.ts authenticates its api.github.com call only when
+          # this is present; shared Actions IPs hit the 403 rate limit without
+          # it (seen on ppc64le). The AppImage script uses it the same way.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHOULD_BUILD_APPIMAGE: ${{ vars[format('DISABLE_{0}_APPIMAGE', ((github.ref == 'refs/heads/insider' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'insider')) && 'INSIDER' || 'STABLE'))] == 'yes' && 'no' || 'yes' }}
           SHOULD_BUILD_REH: 'no'
           SHOULD_BUILD_REH_WEB: 'no'
