@@ -113,3 +113,26 @@ export function diagnosticsSummary(diagnostics: readonly LspDiagnostic[]): strin
 	}
 	return parts.length > 0 ? parts.join(', ') : 'no diagnostics';
 }
+
+/**
+ * Hover replies are commonly one fenced block (`\`\`\`rust\nfn f()\n\`\`\``),
+ * because that is how a language server renders markdown. We display the
+ * text in our own fence, so unwrap that outer block first; anything else is
+ * returned trimmed and untouched.
+ */
+export function unwrapHoverMarkdown(text: string): string {
+	const trimmed = text.trim();
+	const match = /^```[^\n]*\n([\s\S]*?)\n?```$/.exec(trimmed);
+	return match ? match[1] : trimmed;
+}
+
+/**
+ * A fence guaranteed not to close early: one backtick longer than the longest
+ * run already in the text. The body is never parsed as Markdown, so
+ * server-supplied text cannot become a link or command.
+ */
+export function markdownCodeFence(text: string): string {
+	const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map(run => run.length));
+	const fence = '`'.repeat(Math.max(3, longest + 1));
+	return `${fence}text\n${text}\n${fence}`;
+}

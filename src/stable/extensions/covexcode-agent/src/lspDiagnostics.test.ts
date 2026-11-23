@@ -4,7 +4,13 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { diagnosticsSummary, parseLspDiagnostics, parseLspLocations } from './lspDiagnostics';
+import {
+	diagnosticsSummary,
+	markdownCodeFence,
+	parseLspDiagnostics,
+	parseLspLocations,
+	unwrapHoverMarkdown,
+} from './lspDiagnostics';
 
 test('parseLspDiagnostics() reads the agent one-line-per-diagnostic format', () => {
 	const text = [
@@ -75,4 +81,17 @@ test('parseLspLocations() ignores hover/prose text', () => {
 	assert.deepEqual(parseLspLocations('```rust\nfn target()\n```'), []);
 	assert.deepEqual(parseLspLocations('No definition found'), []);
 	assert.deepEqual(parseLspLocations(''), []);
+});
+
+test('unwrapHoverMarkdown() removes one outer code fence and leaves prose alone', () => {
+	assert.equal(unwrapHoverMarkdown('```rust\nfn target()\n```'), 'fn target()');
+	assert.equal(unwrapHoverMarkdown('  ```typescript\nconst x: number\n```  '), 'const x: number');
+	assert.equal(unwrapHoverMarkdown('plain hover text'), 'plain hover text');
+	assert.equal(unwrapHoverMarkdown(''), '');
+});
+
+test('markdownCodeFence() is one backtick longer than the longest run inside', () => {
+	assert.equal(markdownCodeFence('plain'), '```text\nplain\n```');
+	assert.equal(markdownCodeFence('a ``` b'), '````text\na ``` b\n````');
+	assert.equal(markdownCodeFence('a ```` b'), '`````text\na ```` b\n`````');
 });

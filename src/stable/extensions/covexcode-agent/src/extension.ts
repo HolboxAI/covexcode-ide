@@ -53,7 +53,15 @@ import {
 	type TeammateView,
 } from './acpClient';
 import { agentsMarkdown, inboxMarkdown, tasksMarkdown, teammateActions, teammatesMarkdown } from './agentPanels';
-import { diagnosticsSummary, parseLspDiagnostics, parseLspLocations, type LspDiagnostic, type LspLocation } from './lspDiagnostics';
+import {
+	diagnosticsSummary,
+	markdownCodeFence,
+	parseLspDiagnostics,
+	parseLspLocations,
+	unwrapHoverMarkdown,
+	type LspDiagnostic,
+	type LspLocation,
+} from './lspDiagnostics';
 import { AgentActivityTracker, type AgentActivityEvent } from './agentActivity';
 import { CdpClient } from './cdpClient';
 import { serializeAxTree, AxNode } from './axTree';
@@ -2810,7 +2818,47 @@ function renderLspToolResult(
 		renderLspDiagnostics(update, title, stream, context);
 	} else if (title.startsWith('definition ') || title.startsWith('references ')) {
 		renderLspLocations(update, title, stream, context);
+	} else if (title.startsWith('hover ')) {
+		renderLspHover(update, title, stream, context);
 	}
+}
+
+const HOVER_TEXT_LIMIT = 4_000;
+
+/**
+ * Hover text is arbitrary Markdown from the language server. It is shown in a
+ * dynamically sized code fence (never parsed as Markdown), capped, and with
+ * the common single outer fence unwrapped. That keeps a hover that happens to
+ * contain a link or command inert.
+ */
+function renderLspHover(
+	update: SessionUpdate,
+	title: string,
+	stream: vscode.ChatResponseStream,
+	context: DiagnosticsRenderContext,
+): void {
+	if (update.sessionUpdate !== 'tool_call_update' || update.status !== 'completed') {
+		return;
+	}
+	if (update.content?.type !== 'text') {
+		return;
+	}
+	const key = update.toolCallId ?? title;
+	if (context.shown.has(key)) {
+		return;
+	}
+	const hover = unwrapHoverMarkdown(update.content.text);
+	if (!hover) {
+		return;
+	}
+	context.shown.add(key);
+	const clipped = hover.length > HOVER_TEXT_LIMIT
+		? `${hover.slice(0, HOVER_TEXT_LIMIT)}\n… (${hover.length - HOVER_TEXT_LIMIT} characters clipped)`
+		: hover;
+	const markdown = new vscode.MarkdownString(undefined, true);
+	markdown.appendMarkdown('$(info) Hover\n\n');
+	markdown.appendMarkdown(markdownCodeFence(clipped));
+	stream.markdown(markdown);
 }
 
 function renderUpdate(
