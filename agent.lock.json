@@ -1,39 +1,39 @@
 {
   "schemaVersion": 1,
-  "agentVersion": "1.15.1",
+  "agentVersion": "1.16.0",
   "protocolVersion": 1,
-  "releaseTag": "v1.15.1",
+  "releaseTag": "v1.16.0",
   "repository": "HolboxAI/covexcode",
   "artifacts": {
     "darwin-arm64": {
       "asset": "covexcode-agent-macos-aarch64",
-      "sha256": "520bc30be204cd1f1a466e1e20ab8d410839ca5981d72a1a09e13f82375a2bd3",
-      "size": 6897328
+      "sha256": "a1e9299d92365114cb6f4ab28d0c7048129abaf40f94168b5736448332f6d2e8",
+      "size": 6913824
     },
     "linux-arm64": {
       "asset": "covexcode-agent-linux-aarch64",
-      "sha256": "88230e7ed92555a6b62e82c2654eb6fc4ae61f5210a7fcea72e2eeb77031d9c6",
+      "sha256": "587d723ab66016d9ba38f4d156e9773ae647cee4970895a209e12ac815872a64",
       "size": 11808064
     },
     "linux-arm64-musl": {
       "asset": "covexcode-agent-linux-aarch64-musl",
-      "sha256": "7b022d41818ae35d97c4cb60144453e340f10b74f45db14d534f942231f3280b",
-      "size": 7816040
+      "sha256": "7a1e5de53ebe5e4b94aeff8d24b815c95758449b7c48b57e87351be5b2c50142",
+      "size": 7832424
     },
     "linux-x64": {
       "asset": "covexcode-agent-linux-x86_64",
-      "sha256": "c62b03591ecf9ff1038a76bd0529ec7284a545c44acb2c2a2746bb886a439db4",
-      "size": 8142776
+      "sha256": "55ebd8da9583498b82061cf31ff71eb35e8b34aef44b900735514f46a1689d31",
+      "size": 8154744
     },
     "linux-x64-musl": {
       "asset": "covexcode-agent-linux-x86_64-musl",
-      "sha256": "fceaebeacc97087483bcd2186842d045ee3fefaa5a1dcfe798631998b18f8b49",
-      "size": 9283088
+      "sha256": "7254b47c1c371e940dce71a02a69ac37961054b6cfe3f927f2129307209e389d",
+      "size": 9299472
     },
     "win32-x64": {
       "asset": "covexcode-agent-windows-x86_64.exe",
-      "sha256": "e2a825848ac182eef63403b0a039734752ecfc4f3265eaa750732a2a080c5a0c",
-      "size": 10062848
+      "sha256": "5e132ff26d971d1e481b80d456681557d00117d9e729395539e15f9f192de973",
+      "size": 10076160
     }
   }
 }
