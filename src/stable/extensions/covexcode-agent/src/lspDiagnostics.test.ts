@@ -9,6 +9,7 @@ import {
 	markdownCodeFence,
 	parseLspDiagnostics,
 	parseLspLocations,
+	parseLspSymbols,
 	unwrapHoverMarkdown,
 } from './lspDiagnostics';
 
@@ -94,4 +95,25 @@ test('markdownCodeFence() is one backtick longer than the longest run inside', (
 	assert.equal(markdownCodeFence('plain'), '```text\nplain\n```');
 	assert.equal(markdownCodeFence('a ``` b'), '````text\na ``` b\n````');
 	assert.equal(markdownCodeFence('a ```` b'), '`````text\na ```` b\n`````');
+});
+
+test('parseLspSymbols() drops the header, blanks and duplicates', () => {
+	const text = [
+		'Symbols in src/lib.rs:',
+		'main',
+		'',
+		'parse_config',
+		'main',
+		'impl Widget',
+		'',
+	].join('\n');
+	assert.deepEqual(parseLspSymbols(text), ['main', 'parse_config', 'impl Widget']);
+});
+
+test('parseLspSymbols() ignores prose and caps at 50', () => {
+	assert.deepEqual(parseLspSymbols('No symbols reported for src/lib.rs.'), []);
+	assert.deepEqual(parseLspSymbols(''), []);
+
+	const many = ['Symbols in big.rs:', ...Array.from({ length: 60 }, (_, index) => `symbol_${index}`)].join('\n');
+	assert.equal(parseLspSymbols(many).length, 50);
 });

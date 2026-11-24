@@ -136,3 +136,37 @@ export function markdownCodeFence(text: string): string {
 	const fence = '`'.repeat(Math.max(3, longest + 1));
 	return `${fence}text\n${text}\n${fence}`;
 }
+
+/**
+ * Reads the agent's `symbols` output:
+ *
+ *     Symbols in src/lib.rs:
+ *     main
+ *     parse_config
+ *
+ * The header is dropped, blank lines ignored, duplicates collapsed, and the
+ * list capped at 50 — the same cap the agent applies.
+ */
+export function parseLspSymbols(text: string): string[] {
+	const lines = text.split('\n');
+	const header = lines.findIndex(line => line.trim().startsWith('Symbols in '));
+	if (header < 0) {
+		// "No symbols reported for ..." and error results are prose, not a
+		// one-name outline; leave them to the tool row.
+		return [];
+	}
+	const names: string[] = [];
+	for (const raw of lines.slice(header + 1)) {
+		const name = raw.trim();
+		if (!name) {
+			continue;
+		}
+		if (!names.includes(name)) {
+			names.push(name);
+		}
+		if (names.length >= 50) {
+			break;
+		}
+	}
+	return names;
+}
