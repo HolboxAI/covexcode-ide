@@ -58,6 +58,7 @@ import {
 	markdownCodeFence,
 	parseLspDiagnostics,
 	parseLspLocations,
+	parseLspSymbols,
 	unwrapHoverMarkdown,
 	type LspDiagnostic,
 	type LspLocation,
@@ -2820,7 +2821,50 @@ function renderLspToolResult(
 		renderLspLocations(update, title, stream, context);
 	} else if (title.startsWith('hover ')) {
 		renderLspHover(update, title, stream, context);
+	} else if (title.startsWith('symbols ')) {
+		renderLspSymbols(update, title, stream, context);
 	}
+}
+
+/**
+ * A completed `symbols` call becomes a compact outline. Names are shown in a
+ * dynamically sized code fence, like hover, so server-supplied text cannot
+ * become Markdown; the file's name comes from the agent's own label.
+ */
+function renderLspSymbols(
+	update: SessionUpdate,
+	title: string,
+	stream: vscode.ChatResponseStream,
+	context: DiagnosticsRenderContext,
+): void {
+	if (update.sessionUpdate !== 'tool_call_update' || update.status !== 'completed') {
+		return;
+	}
+	if (update.content?.type !== 'text') {
+		return;
+	}
+	const key = update.toolCallId ?? title;
+	if (context.shown.has(key)) {
+		return;
+	}
+	const symbols = parseLspSymbols(update.content.text);
+	if (symbols.length === 0) {
+		return;
+	}
+	context.shown.add(key);
+
+	const markdown = new vscode.MarkdownString(undefined, true);
+	markdown.appendMarkdown(
+		`$(symbol-class) ${symbols.length} symbol${symbols.length === 1 ? '' : 's'}`,
+	);
+	const subject = title.slice('symbols '.length).trim();
+	if (subject) {
+		markdown.appendMarkdown(' in ');
+		markdown.appendText(subject);
+	}
+	markdown.appendMarkdown('\n\n');
+	markdown.appendMarkdown(markdownCodeFence(symbols.join('\n')));
+	stream.markdown(markdown);
 }
 
 const HOVER_TEXT_LIMIT = 4_000;
