@@ -18,6 +18,7 @@ export const IDE_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{ name: '/mode', description: 'toggle auto / manual permission mode' },
 	{ name: '/rollback', description: 'undo every file the session wrote' },
 	{ name: '/doctor', description: "check this install's health" },
+	{ name: '/event', description: 'show or request more event allowance' },
 	{ name: '/agents', description: 'show running background agents and available agent types' },
 	{ name: '/teammates', description: 'show recorded background teammate jobs' },
 	{ name: '/tasks', description: 'show the shared task DAG' },

@@ -111,6 +111,7 @@ import { createSessionUsage, sessionUsageFootnote, SessionUsage } from './sessio
 import { stopReasonNote } from './stopReason';
 import { approvalEnvValue, cyclePermissionMode, permissionModeDescription, permissionModeFromSetting, permissionModeMarkdown, type PermissionMode } from './permissionMode';
 import { doctorMarkdown, helpMarkdown, type DoctorFacts } from './slashCommands';
+import { eventErrorMarkdown, eventStatusMarkdown, eventUrl, type EventStatus } from './eventAllowance';
 import {
 	describeRestrictedMode,
 	folderTrustKey,
@@ -1119,6 +1120,47 @@ export function activate(context: vscode.ExtensionContext): void {
 		return doctorMarkdown(facts);
 	}
 
+	async function eventCommand(prompt: string): Promise<string> {
+		const config = vscode.workspace.getConfiguration('covexcode');
+		const configured = String(config.get('endpoint', '') || '').trim();
+		// The agent also honors config.toml when the IDE setting is empty.
+		const endpoint = (configured || readAccountStatus().endpoint || process.env.COVEXCODE_ENDPOINT || '').trim();
+		const apiKey = (await context.secrets.get(SECRET_API_KEY)) ?? '';
+		if (!endpoint) {
+			return 'Set `covexcode.endpoint` to your event endpoint (for example `https://llm.covexcode.com/event/v1`) to use `/event`.';
+		}
+		if (!apiKey) {
+			return 'Set an event API key first (`/provider` or **Covexcode: Set API Key**) to use `/event`.';
+		}
+		const wantsMore = /request|more/i.test(prompt);
+		try {
+			const res = await fetch(eventUrl(endpoint, wantsMore ? 'request-more' : 'status'), {
+				method: wantsMore ? 'POST' : 'GET',
+				headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+			});
+			const text = await res.text();
+			let body: Record<string, unknown> = {};
+			try {
+				body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+			} catch {
+				body = { raw: text };
+			}
+			if (!res.ok) {
+				const error = body.error as { message?: string } | undefined;
+				return eventErrorMarkdown(
+					res.status,
+					String(error?.message || body.raw || res.statusText),
+				);
+			}
+			if (wantsMore) {
+				return String(body.message || 'Request sent. Support has your key prefix.');
+			}
+			return eventStatusMarkdown(body as EventStatus);
+		} catch (e) {
+			return `**Event request failed**\n\n${e instanceof Error ? e.message : String(e)}`;
+		}
+	}
+
 	async function requestFolderTrust(): Promise<void> {
 		const requestTrust = (vscode.workspace as { requestWorkspaceTrust?: (options?: { message?: string }) => Thenable<boolean | undefined> }).requestWorkspaceTrust;
 		if (typeof requestTrust === 'function') {
@@ -1362,6 +1404,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		if (request.command === 'doctor') {
 			stream.markdown(await doctorReadoutMarkdown());
+			return;
+		}
+		if (request.command === 'event') {
+			stream.markdown(await eventCommand(request.prompt));
 			return;
 		}
 		if (request.command === 'mode') {
