@@ -70,6 +70,10 @@
             "description": "Check this install's health."
           },
           {
+            "name": "event",
+            "description": "Show the event token allowance, or request more with /event request."
+          },
+          {
             "name": "agents",
             "description": "Show running and recent background agents."
           },
